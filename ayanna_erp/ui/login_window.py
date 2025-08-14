@@ -26,7 +26,7 @@ class LoginWindow(QWidget):
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
         self.setWindowTitle("Ayanna ERP - Connexion")
-        self.setFixedSize(400, 500)
+        self.setFixedSize(600, 700)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         
         # Layout principal
