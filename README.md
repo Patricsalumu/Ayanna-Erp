@@ -1,12 +1,17 @@
-# Ayanna ERP
+# 🏢 Ayanna ERP
+
+[![Python](https://img.shields.io/badge/Python-3.8+-blue.svg)](https://python.org)
+[![PyQt6](https://img.shields.io/badge/PyQt6-6.5+-green.svg)](https://pypi.org/project/PyQt6/)
+[![SQLAlchemy](https://img.shields.io/badge/SQLAlchemy-2.0+-orange.svg)](https://sqlalchemy.org)
+[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 **Système de Gestion Intégré (ERP) Desktop en Python avec PyQt6**
 
-Ayanna ERP est une solution complète de gestion d'entreprise qui intègre plusieurs modules métier dans une seule application desktop.
+Ayanna ERP est une solution complète de gestion d'entreprise qui intègre plusieurs modules métier dans une seule application desktop moderne.
 
-## 🚀 Fonctionnalités
+## 🌟 Fonctionnalités
 
-### Modules Disponibles
+### 📦 Modules Intégrés
 - **🎪 Salle de Fête** - Gestion des événements et réservations
 - **🛒 Boutique/Pharmacie** - Point de vente et gestion des produits
 - **🏨 Hôtel** - Gestion hôtelière complète avec réservations
@@ -15,327 +20,171 @@ Ayanna ERP est une solution complète de gestion d'entreprise qui intègre plusi
 - **📊 Stock/Inventaire** - Suivi des stocks et mouvements
 - **💰 Comptabilité SYSCOHADA** - Système comptable intégré
 
-### Caractéristiques Principales
+### ⚡ Caractéristiques Techniques
 - ✅ Interface utilisateur moderne avec PyQt6
-- ✅ Base de données SQLite intégrée
+- ✅ Base de données SQLite intégrée avec SQLAlchemy
 - ✅ Gestion multi-modules avec POS dédiés
-- ✅ Système de comptabilité SYSCOHADA
-- ✅ Gestion des utilisateurs et authentification
+- ✅ Système de comptabilité SYSCOHADA complet
+- ✅ Gestion des utilisateurs et authentification sécurisée
 - ✅ Moyens de paiement configurables
-- ✅ Rapports et statistiques
-- ✅ Intégration entre modules
+- ✅ Rapports et statistiques intégrés
+- ✅ Architecture modulaire et extensible
 
-## 📋 Prérequis
+## 🚀 Installation Rapide
 
+### Prérequis
 - **Python 3.8+** 
 - **Système d'exploitation**: Linux, Windows, macOS
 - **Mémoire**: 2GB RAM minimum
 - **Espace disque**: 500MB minimum
 
-## 🛠️ Installation
-
-### Installation Automatique (Recommandée)
-
-Le script d'installation gère automatiquement la création d'un environnement virtuel Python pour éviter les conflits avec votre système :
-
-1. **Cloner ou télécharger le projet**
-   ```bash
-   cd "/home/salumu/apps/ayanna ERP"
-   ```
-
-2. **Exécuter l'installation**
-   ```bash
-   # Rendre le script exécutable (si nécessaire)
-   chmod +x run.sh
-   
-   # Installation complète
-   ./run.sh install
-   ```
-   
-   Ou directement avec Python :
-   ```bash
-   python3 install.py
-   ```
-   
-   Ce script va automatiquement :
-   - Créer un environnement virtuel Python (si nécessaire)
-   - Installer toutes les dépendances Python
-   - Créer et initialiser la base de données
-   - Créer un utilisateur administrateur par défaut
-   - Créer un raccourci sur le bureau (optionnel)
-
-### Installation Manuelle
-
-Si vous préférez gérer l'environnement vous-même :
+### Installation en Une Commande
 
 ```bash
-# 1. Créer un environnement virtuel
-python3 -m venv venv
+# Cloner le repository
+git clone https://github.com/Patricsalumu/Ayanna-Erp.git
+cd Ayanna-Erp
 
-# 2. Activer l'environnement virtuel
-source venv/bin/activate
-
-# 3. Installer les dépendances
-pip install -r requirements.txt
-
-# 4. Initialiser la base de données
-python install.py
-```
-
-### Problèmes d'Installation Courants
-
-#### Erreur "externally-managed-environment"
-
-Sur Ubuntu/Debian récents, Python utilise des environnements gérés externalement. Le script d'installation résout automatiquement ce problème en créant un environnement virtuel.
-
-Si vous voyez cette erreur :
-```
-error: externally-managed-environment
-× This environment is externally managed
-```
-
-**Solution automatique :** Utilisez `./run.sh install` ou `python3 install.py` qui créeront automatiquement un environnement virtuel.
-
-**Solution manuelle :**
-```bash
-# Créer un environnement virtuel
-python3 -m venv venv
-
-# Activer l'environnement
-source venv/bin/activate
-
-# Installer les dépendances
-pip install PyQt6 SQLAlchemy bcrypt reportlab Pillow python-dotenv
-```
-
-#### Dépendances Système Manquantes
-
-Si l'installation de PyQt6 échoue, installez les dépendances système :
-
-```bash
-# Ubuntu/Debian
-sudo apt update
-sudo apt install python3-venv python3-dev build-essential
-
-# Pour PyQt6 (optionnel, utilisé automatiquement si disponible)
-sudo apt install python3-pyqt6 python3-pyqt6-dev
-```
-
-## 🎯 Démarrage
-
-### Lancement de l'Application
-
-**Méthode recommandée (avec environnement virtuel) :**
-```bash
-./run.sh start
-```
-
-**Ou directement avec l'environnement virtuel :**
-```bash
-source venv/bin/activate && python main.py
-```
-
-**Ou sans environnement virtuel (si installé système) :**
-```bash
-python3 main.py
-```
-
-### Scripts Utilitaires
-
-```bash
-# Installation/réinstallation
+# Installation automatique (crée un environnement virtuel)
 ./run.sh install
-
-# Générer des données de démonstration
-./run.sh demo
-
-# Démarrer l'application
-./run.sh start
-
-# Aide
-./run.sh help
 ```
 
-### Première Connexion
+### Démarrage
 
-**Identifiants par défaut :**
+```bash
+# Lancer l'application
+./run.sh start
+
+# Ou avec l'alias (après installation)
+ayanna
+```
+
+## 🔑 Accès par Défaut
+
 - **Email**: `admin@ayanna.com`
 - **Mot de passe**: `admin123`
 
 ⚠️ **Important**: Changez ces identifiants après la première connexion !
 
-## 📖 Utilisation
+## 📖 Documentation
 
-### Interface Principale
+### Scripts Utilitaires
 
-1. **Connexion** - Authentifiez-vous avec vos identifiants
-2. **Tableau de bord** - Vue d'ensemble avec accès aux modules
-3. **Modules** - Cliquez sur un module pour l'ouvrir
-4. **Navigation** - Utilisez les onglets pour naviguer dans chaque module
-
-### Modules Détaillés
-
-#### 🎪 Module Salle de Fête
-- **Calendrier** - Vue d'ensemble des événements
-- **Réservations** - Créer et gérer les réservations
-- **Services** - Configurer les services proposés
-- **Produits** - Gérer les produits événementiels
-- **Clients** - Base de données clients
-- **Paiements** - Gestion des encaissements
-
-#### 🛒 Module Boutique/Pharmacie
-- **POS** - Point de vente avec catalogue et panier
-- **Produits** - Gestion du catalogue produits
-- **Services** - Services proposés
-- **Ventes** - Historique des ventes
-- **Clients** - Gestion clientèle
-- **Rapports** - Analyses de ventes
-
-#### 🏨 Module Hôtel
-- **Tableau de bord** - Occupancy et statistiques
-- **Réservations** - Système de réservation
-- **Chambres** - Gestion des chambres
-- **Check-in/Check-out** - Processus d'arrivée/départ
-- **Services** - Services hôteliers
-
-#### 🍽️ Module Restaurant/Bar
-- **POS** - Point de vente avec plan des tables
-- **Salles** - Configuration des espaces
-- **Tables** - Gestion des tables
-- **Menu** - Carte et tarifs
-- **Commandes** - Suivi des commandes
-
-### Configuration
-
-#### Entreprise
-- Configurer les informations de votre entreprise
-- Logo, coordonnées, devise
-
-#### Utilisateurs
-- Créer des comptes utilisateurs
-- Définir les rôles et permissions
-
-#### Moyens de Paiement
-- Configurer les moyens de paiement par module
-- Associer aux comptes comptables
-
-## 🗃️ Structure du Projet
-
-```
-ayanna ERP/
-├── main.py                     # Point d'entrée principal
-├── install.py                  # Script d'installation
-├── requirements.txt            # Dépendances Python
-├── .env                       # Configuration
-└── ayanna_erp/
-    ├── __init__.py
-    ├── core/                  # Fonctionnalités centrales
-    ├── database/              # Gestion base de données
-    │   ├── database_manager.py
-    │   └── models/
-    ├── ui/                    # Interface utilisateur
-    │   ├── login_window.py
-    │   └── main_window.py
-    └── modules/               # Modules métier
-        ├── salle_fete/
-        ├── boutique/
-        ├── hotel/
-        ├── restaurant/
-        ├── achats/
-        ├── stock/
-        └── comptabilite/
-```
-
-## 🗄️ Base de Données
-
-### Tables Principales
-
-#### Tables Centrales
-- `core_enterprises` - Informations entreprise
-- `core_users` - Utilisateurs système
-- `core_partners` - Clients/Fournisseurs
-- `core_pos_points` - Points de vente
-- `modules` - Modules disponibles
-
-#### Comptabilité SYSCOHADA
-- `classes_comptables` - Classes comptables
-- `comptes_comptables` - Plan comptable
-- `journal_comptables` - Journaux comptables
-- `ecritures_comptables` - Écritures comptables
-
-#### Modules Métier
-- Tables spécifiques pour chaque module
-- Relations avec la comptabilité
-- Gestion des stocks et mouvements
-
-## 🔧 Développement
-
-### Architecture
-
-- **Framework UI**: PyQt6
-- **Base de données**: SQLAlchemy + SQLite
-- **Architecture**: Modulaire avec séparation des responsabilités
-- **Modèle**: MVC (Model-View-Controller)
-
-### Ajouter un Module
-
-1. Créer le dossier du module dans `ayanna_erp/modules/`
-2. Implémenter la fenêtre principale héritant de `QMainWindow`
-3. Créer les modèles de données SQLAlchemy
-4. Ajouter l'import dans `main_window.py`
-
-### Contribution
-
-1. Fork du projet
-2. Créer une branche feature
-3. Commits avec messages clairs
-4. Pull request avec description
-
-## 🆘 Support
-
-### Problèmes Courants
-
-**Erreur de dépendances**
 ```bash
-pip install --upgrade pip
+./run.sh install   # Installation/réinstallation
+./run.sh demo      # Générer des données de démonstration
+./run.sh start     # Démarrer l'application
+./run.sh help      # Afficher l'aide
+```
+
+### Architecture du Projet
+
+```
+Ayanna-Erp/
+├── ayanna_erp/           # Code source principal
+│   ├── core/             # Configuration et utilitaires
+│   ├── database/         # Modèles et gestionnaire DB
+│   ├── ui/              # Interface utilisateur
+│   └── modules/         # Modules métier
+├── install.py           # Script d'installation
+├── main.py             # Point d'entrée principal
+├── run.sh              # Script de lancement
+└── README.md           # Documentation
+```
+
+## 🛠️ Développement
+
+### Installation pour Développement
+
+```bash
+# Environnement virtuel manuel
+python3 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
+
+# Initialiser la base de données
+python install.py
 ```
 
-**Problème de base de données**
+### Tests
+
 ```bash
-# Supprimer la base existante
-rm ayanna_erp.db
-# Relancer l'installation
-python3 install.py
+# Vérifier l'installation
+python test.py
+
+# Générer des données de test
+python demo.py
 ```
 
-**Erreurs d'interface graphique**
-- Vérifiez l'installation de PyQt6
-- Assurez-vous d'avoir un serveur X11 (Linux)
+## 📋 Modules Détaillés
 
-### Contact
+### 🎪 Salle de Fête
+- Création de services et produits personnalisés
+- Gestion complète des réservations (draft → confirmed → paid)
+- Facturation et paiements multiples
+- Génération automatique d'écritures comptables
+- Rapports de chiffre d'affaires et marges
 
-- **Email**: support@ayanna-solutions.com
-- **Site web**: www.ayanna-solutions.com
-- **Documentation**: docs.ayanna-solutions.com
+### 🛒 Boutique/Pharmacie
+- Gestion catalogue produits/services
+- Point de vente (POS) avec panier intelligent
+- Pavé numérique pour saisie rapide
+- Gestion clients et crédits
+- Impression de factures et reçus
+
+### 🏨 Hôtel
+- Gestion des chambres (types, capacités, tarifs)
+- Système de réservations avec check-in/out
+- Services additionnels personnalisables
+- Calcul automatique des séjours
+- Rapports d'occupation et revenus
+
+### 🍽️ Restaurant/Bar
+- Configuration multi-salles et tables
+- Tables interactives (forme, position, capacité)
+- Gestion des commandes par table
+- Menu dynamique et personnalisable
+- Intégration comptable automatique
+
+### 📦 Achats & 📊 Stock
+- Commandes fournisseurs complètes
+- Réception automatique en stock
+- Mouvements de stock temps réel
+- Alertes de rupture et seuils
+- Valorisation comptable du stock
+
+### 💰 Comptabilité SYSCOHADA
+- Plan comptable SYSCOHADA intégré
+- Journaux comptables automatiques
+- Écritures débit/crédit automatiques
+- Rapports financiers et bilans
+- Intégration totale avec tous les modules
+
+## 🤝 Contribution
+
+Les contributions sont les bienvenues ! Voici comment contribuer :
+
+1. Fork le projet
+2. Créez votre branche (`git checkout -b feature/AmazingFeature`)
+3. Committez vos changements (`git commit -m 'Add AmazingFeature'`)
+4. Push vers la branche (`git push origin feature/AmazingFeature`)
+5. Ouvrez une Pull Request
 
 ## 📄 Licence
 
-Copyright © 2024 Ayanna Solutions. Tous droits réservés.
+Ce projet est sous licence MIT. Voir le fichier `LICENSE` pour plus de détails.
 
-Ce logiciel est propriétaire et protégé par les lois sur le droit d'auteur.
+## 👤 Auteur
 
-## 🔄 Changelog
+**Patric Salumu** - [@Patricsalumu](https://github.com/Patricsalumu)
 
-### Version 1.0.0 (2024-08-14)
-- ✅ Version initiale
-- ✅ Modules principaux implémentés
-- ✅ Interface PyQt6 complète
-- ✅ Base de données SQLAlchemy
-- ✅ Comptabilité SYSCOHADA
-- ✅ Système d'authentification
-- ✅ Documentation complète
+## 🙏 Remerciements
+
+- [PyQt6](https://www.riverbankcomputing.com/software/pyqt/) pour l'interface utilisateur
+- [SQLAlchemy](https://sqlalchemy.org/) pour l'ORM
+- [Python](https://python.org) pour le langage
+- [SYSCOHADA](https://syscohada.org) pour le référentiel comptable
 
 ---
 
-**Ayanna ERP** - *Votre partenaire ERP de confiance* 🚀
+⭐ **Si ce projet vous aide, n'hésitez pas à lui donner une étoile !**
