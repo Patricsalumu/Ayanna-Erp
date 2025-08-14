@@ -1,0 +1,633 @@
+Cahier des charges – Ayanna ERP
+1. Objectif du projet
+Développer un ERP desktop en Python avec PyQt6, pour gérer de façon intégrée :
+    • Salle de Fête
+    • Boutique / Pharmacie
+    • Hôtel
+    • Restaurant / Bar
+    • Achats
+    • Stock / Inventaire
+Chaque module fonctionne avec un Point de Vente (POS) et peut être relié à la comptabilité SYSCOHADA pour la gestion financière.
+
+2. Modules et logique métier
+2.1 Module Salle de Fête
+Logique métier :
+    • L’utilisateur crée des services et produits avec : nom, description, coût, prix (0 = gratuit), services inclus.
+    • Gestion des réservations : chaque réservation peut contenir plusieurs services et produits.
+    • Statut d’une réservation : draft, confirmed, paid, cancelled.
+    • Paiements multiples possibles, liés à des modes de paiement configurables.
+    • Génération automatique des écritures comptables si la comptabilité est activée.
+    • Reporting : historique des réservations, chiffre d’affaires, marges.
+Tables SQL :
+    • event_services
+    • event_products
+    • event_reservations
+    • event_reservation_services
+    • event_reservation_products
+    • event_payments
+
+2.2 Module Boutique / Pharmacie
+Logique métier :
+    • Gestion des produits et services avec coût et prix.
+    • Vente via un POS : panier, catalogue, pavé numérique, sélection client, impression proforma/facture.
+    • Statut des ventes : draft, confirmed, paid, cancelled.
+    • Paiements selon les moyens configurés (Espèces et Compte client par défaut).
+    • Génération d’écritures comptables liées à chaque vente.
+Tables SQL :
+    • shop_products
+    • shop_services
+    • shop_sales
+    • shop_sale_lines_products
+    • shop_sale_lines_services
+    • shop_payments
+
+2.3 Module Hôtel
+Logique métier :
+    • Gestion des chambres : numéro, type, capacité, prix par nuit, coût, statut.
+    • Réservation : check-in, check-out, services additionnels, client associé.
+    • Paiement via POS, génération automatique d’écritures comptables.
+    • Reporting : taux d’occupation, revenus, marges.
+Tables SQL :
+    • hotel_rooms
+    • hotel_reservations
+    • hotel_reservation_rooms
+    • hotel_reservation_services
+    • hotel_payments
+
+2.4 Module Restaurant / Bar (POS Bar)
+Logique métier :
+    • Configuration des salles et tables :
+        ◦ Un POS peut avoir plusieurs salles.
+        ◦ Une salle peut avoir plusieurs tables (forme, position x/y, capacité).
+    • Chaque commande est associée à une table ou peut être directe.
+    • Statut des commandes : draft, confirmed, paid, cancelled.
+    • Paiement et génération automatique d’écritures comptables.
+Tables SQL :
+    • bar_salles
+    • bar_tables
+    • bar_orders
+    • bar_order_products
+    • bar_order_services
+    • bar_payments
+
+2.5 Module Achats
+Logique métier :
+    • Création de commandes fournisseurs avec statut : draft, confirmed, received, cancelled.
+    • Chaque commande contient plusieurs produits/services, quantités et coûts unitaires.
+    • Lors de la réception, les produits sont ajoutés au stock automatiquement.
+    • Génération d’écritures comptables si la comptabilité est activée.
+Tables SQL :
+    • purchase_orders
+    • purchase_order_lines
+
+2.6 Module Stock / Inventaire
+Logique métier :
+    • Suivi des mouvements de stock pour tous les modules.
+    • Types de mouvements : entrée (in), sortie (out), ajustement (adjustment).
+    • Calcul automatique des niveaux disponibles et des stocks réservés.
+    • Alertes de stock faible ou rupture.
+    • Intégration avec la comptabilité pour la valorisation du stock.
+Tables SQL :
+    • stock_moves
+    • stock_levels
+
+2.7 Comptabilité intégrée (SYSCOHADA)
+Logique métier :
+    • Chaque module peut être lié à la comptabilité.
+    • Chaque transaction financière génère :
+        ◦ Une entrée dans le journal comptable
+        ◦ Deux écritures (débit et crédit) dans ecritures_comptables.
+Tables SQL :
+    • classes_comptables
+    • comptes_comptables
+    • journal_comptables
+    • ecritures_comptables
+
+2.8 Moyens de paiement
+    • Deux moyens par défaut et impossibles à supprimer :
+        ◦ Espèces → paiement direct
+        ◦ Compte client → paiement à crédit
+    • Autres moyens configurables par module (CB, Mobile Money, etc.)
+    • Chaque paiement est lié à une écriture comptable.
+Table SQL :
+    • module_payment_methods
+
+3. Relations POS – Modules – Comptabilité
+    • Chaque POS est lié à un module.
+    • Chaque vente / réservation / commande génère :
+        ◦ Paiement
+        ◦ Écritures comptables (débit / crédit)
+    • Les produits et services ont des comptes comptables associés.
+    • Les modules peuvent être utilisés indépendamment ou avec comptabilité activée.
+
+4. Tables communes pour tous les modules
+    • core_enterprises : informations de l’entreprise (nom, devise, slogan).
+    • core_users : utilisateurs (email utilisé pour la connexion).
+    • core_partners : clients / partenaires.
+    • core_pos_points : points de vente pour chaque module.
+
+5. Schéma relationnel global (ERD simplifié)
+core_enterprises → core_users
+                 → core_pos_points
+core_partners → utilisé par tous les modules
+core_pos_points → tous les modules (SalleFête, Boutique, Hôtel, Bar)
+Modules → Achats → Stock → Comptabilité
+Produits/Services → associés à stock et comptes comptables
+Ventes/Reservations/Orders → Paiements → Écritures comptables
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+-- ====================================================
+-- CORE TABLES
+-- ====================================================
+CREATE TABLE core_enterprises (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    address TEXT,
+    phone TEXT,
+    email TEXT,
+    slogan TEXT,
+    currency TEXT DEFAULT 'USD',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE core_users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    enterprise_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(enterprise_id) REFERENCES core_enterprises(id)
+);
+
+CREATE TABLE core_partners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    enterprise_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    email TEXT,
+    phone TEXT,
+    address TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(enterprise_id) REFERENCES core_enterprises(id)
+);
+
+CREATE TABLE core_pos_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    enterprise_id INTEGER NOT NULL,
+    module_name TEXT NOT NULL, -- SalleFete, Boutique, Pharmacie, Restaurant, Hotel
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(enterprise_id) REFERENCES core_enterprises(id)
+);
+
+-- ====================================================
+-- COMPTABILITÉ
+-- ====================================================
+CREATE TABLE classes_comptables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL
+);
+
+CREATE TABLE comptes_comptables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    code TEXT NOT NULL,
+    name TEXT NOT NULL,
+    class_id INTEGER,
+    FOREIGN KEY(class_id) REFERENCES classes_comptables(id)
+);
+
+CREATE TABLE journal_comptables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE ecritures_comptables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    journal_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
+    debit REAL DEFAULT 0.0,
+    credit REAL DEFAULT 0.0,
+    description TEXT,
+    entry_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(journal_id) REFERENCES journal_comptables(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+-- ====================================================
+-- MOYENS DE PAIEMENT
+-- ====================================================
+CREATE TABLE module_payment_methods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    module_name TEXT NOT NULL,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    account_id INTEGER,
+    is_default INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+-- ====================================================
+-- MODULE SALLE DE FÊTE
+-- ====================================================
+CREATE TABLE event_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    cost REAL DEFAULT 0.0,
+    price REAL DEFAULT 0.0,
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE event_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    cost REAL DEFAULT 0.0,
+    price_unit REAL DEFAULT 0.0,
+    stock_quantity REAL DEFAULT 0.0,
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE event_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    partner_id INTEGER,
+    reference TEXT,
+    event_date DATETIME NOT NULL,
+    status TEXT DEFAULT 'draft',
+    total_services REAL DEFAULT 0.0,
+    total_products REAL DEFAULT 0.0,
+    total_amount REAL DEFAULT 0.0,
+    total_cost REAL DEFAULT 0.0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(partner_id) REFERENCES core_partners(id),
+    FOREIGN KEY(created_by) REFERENCES core_users(id)
+);
+
+CREATE TABLE event_reservation_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    FOREIGN KEY(reservation_id) REFERENCES event_reservations(id) ON DELETE CASCADE,
+    FOREIGN KEY(service_id) REFERENCES event_services(id)
+);
+
+CREATE TABLE event_reservation_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    FOREIGN KEY(reservation_id) REFERENCES event_reservations(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES event_products(id)
+);
+
+CREATE TABLE event_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    payment_method_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    journal_id INTEGER,
+    FOREIGN KEY(payment_method_id) REFERENCES module_payment_methods(id),
+    FOREIGN KEY(journal_id) REFERENCES journal_comptables(id)
+);
+
+-- ====================================================
+-- MODULE BOUTIQUE / PHARMACIE
+-- ====================================================
+CREATE TABLE shop_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    cost REAL DEFAULT 0.0,
+    price_unit REAL DEFAULT 0.0,
+    stock_quantity REAL DEFAULT 0.0,
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE shop_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    cost REAL DEFAULT 0.0,
+    price REAL DEFAULT 0.0,
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE shop_sales (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    partner_id INTEGER,
+    reference TEXT,
+    status TEXT DEFAULT 'draft',
+    total_services REAL DEFAULT 0.0,
+    total_products REAL DEFAULT 0.0,
+    total_amount REAL DEFAULT 0.0,
+    total_cost REAL DEFAULT 0.0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(partner_id) REFERENCES core_partners(id),
+    FOREIGN KEY(created_by) REFERENCES core_users(id)
+);
+
+CREATE TABLE shop_sale_lines_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    FOREIGN KEY(sale_id) REFERENCES shop_sales(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES shop_products(id)
+);
+
+CREATE TABLE shop_sale_lines_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    FOREIGN KEY(sale_id) REFERENCES shop_sales(id) ON DELETE CASCADE,
+    FOREIGN KEY(service_id) REFERENCES shop_services(id)
+);
+
+CREATE TABLE shop_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sale_id INTEGER NOT NULL,
+    payment_method_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    journal_id INTEGER,
+    FOREIGN KEY(payment_method_id) REFERENCES module_payment_methods(id),
+    FOREIGN KEY(journal_id) REFERENCES journal_comptables(id)
+);
+
+-- ====================================================
+-- MODULE HÔTEL
+-- ====================================================
+CREATE TABLE hotel_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    room_number TEXT NOT NULL,
+    room_type TEXT,
+    capacity INTEGER DEFAULT 1,
+    price_per_night REAL DEFAULT 0.0,
+    cost_per_night REAL DEFAULT 0.0,
+    status TEXT DEFAULT 'available',
+    account_id INTEGER,
+    is_active INTEGER DEFAULT 1,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE hotel_reservations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    partner_id INTEGER,
+    reference TEXT,
+    check_in_date DATETIME NOT NULL,
+    check_out_date DATETIME NOT NULL,
+    status TEXT DEFAULT 'draft',
+    total_room_amount REAL DEFAULT 0.0,
+    total_services_amount REAL DEFAULT 0.0,
+    total_amount REAL DEFAULT 0.0,
+    total_cost REAL DEFAULT 0.0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(partner_id) REFERENCES core_partners(id),
+    FOREIGN KEY(created_by) REFERENCES core_users(id)
+);
+
+CREATE TABLE hotel_reservation_rooms (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    room_id INTEGER NOT NULL,
+    nights INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    FOREIGN KEY(reservation_id) REFERENCES hotel_reservations(id) ON DELETE CASCADE,
+    FOREIGN KEY(room_id) REFERENCES hotel_rooms(id)
+);
+
+CREATE TABLE hotel_reservation_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    account_id INTEGER,
+    FOREIGN KEY(reservation_id) REFERENCES hotel_reservations(id) ON DELETE CASCADE,
+    FOREIGN KEY(service_id) REFERENCES event_services(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE hotel_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reservation_id INTEGER NOT NULL,
+    payment_method_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    journal_id INTEGER,
+    FOREIGN KEY(payment_method_id) REFERENCES module_payment_methods(id),
+    FOREIGN KEY(journal_id) REFERENCES journal_comptables(id)
+);
+
+-- ====================================================
+-- MODULE RESTAURANT / BAR (POS Bar)
+-- ====================================================
+CREATE TABLE bar_salles (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id)
+);
+
+CREATE TABLE bar_tables (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    salle_id INTEGER NOT NULL,
+    table_number TEXT NOT NULL,
+    shape TEXT DEFAULT 'rectangular',
+    position_x REAL DEFAULT 0.0,
+    position_y REAL DEFAULT 0.0,
+    size INTEGER DEFAULT 4,
+    status TEXT DEFAULT 'free',
+    account_id INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(salle_id) REFERENCES bar_salles(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE bar_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    table_id INTEGER,
+    partner_id INTEGER,
+    reference TEXT,
+    status TEXT DEFAULT 'draft',
+    total_products REAL DEFAULT 0.0,
+    total_services REAL DEFAULT 0.0,
+    total_amount REAL DEFAULT 0.0,
+    total_cost REAL DEFAULT 0.0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    closed_at DATETIME,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(table_id) REFERENCES bar_tables(id),
+    FOREIGN KEY(partner_id) REFERENCES core_partners(id),
+    FOREIGN KEY(created_by) REFERENCES core_users(id)
+);
+
+CREATE TABLE bar_order_products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    account_id INTEGER,
+    FOREIGN KEY(order_id) REFERENCES bar_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES shop_products(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE bar_order_services (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    service_id INTEGER NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    line_total REAL DEFAULT 0.0,
+    line_cost REAL DEFAULT 0.0,
+    account_id INTEGER,
+    FOREIGN KEY(order_id) REFERENCES bar_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(service_id) REFERENCES shop_services(id),
+    FOREIGN KEY(account_id) REFERENCES comptes_comptables(id)
+);
+
+CREATE TABLE bar_payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    payment_method_id INTEGER NOT NULL,
+    amount REAL NOT NULL,
+    payment_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+    journal_id INTEGER,
+    FOREIGN KEY(payment_method_id) REFERENCES module_payment_methods(id),
+    FOREIGN KEY(journal_id) REFERENCES journal_comptables(id)
+);
+
+-- ====================================================
+-- MODULE ACHATS
+-- ====================================================
+CREATE TABLE purchase_orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pos_id INTEGER NOT NULL,
+    partner_id INTEGER, -- fournisseur
+    reference TEXT,
+    status TEXT DEFAULT 'draft',
+    total_amount REAL DEFAULT 0.0,
+    created_by INTEGER,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    received_at DATETIME,
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id),
+    FOREIGN KEY(partner_id) REFERENCES core_partners(id),
+    FOREIGN KEY(created_by) REFERENCES core_users(id)
+);
+
+CREATE TABLE purchase_order_lines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    order_id INTEGER NOT NULL,
+    product_id INTEGER NOT NULL,
+    quantity REAL DEFAULT 1.0,
+    unit_cost REAL DEFAULT 0.0,
+    line_total REAL DEFAULT 0.0,
+    FOREIGN KEY(order_id) REFERENCES purchase_orders(id) ON DELETE CASCADE,
+    FOREIGN KEY(product_id) REFERENCES shop_products(id)
+);
+
+-- ====================================================
+-- MODULE STOCK / INVENTAIRE
+-- ====================================================
+CREATE TABLE stock_moves (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    module_name TEXT NOT NULL, -- Boutique, Event, Bar, Hotel
+    pos_id INTEGER NOT NULL,
+    move_type TEXT NOT NULL, -- 'in', 'out', 'adjustment'
+    quantity REAL DEFAULT 0.0,
+    cost REAL DEFAULT 0.0,
+    reference TEXT, -- numéro de commande, vente ou réservation
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES shop_products(id),
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id)
+);
+
+CREATE TABLE stock_levels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL,
+    pos_id INTEGER NOT NULL,
+    quantity REAL DEFAULT 0.0,
+    reserved REAL DEFAULT 0.0,
+    available AS (quantity - reserved),
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY(product_id) REFERENCES shop_products(id),
+    FOREIGN KEY(pos_id) REFERENCES core_pos_points(id)
+);
+
