@@ -47,7 +47,7 @@ class DatabaseManager:
     def initialize_database(self):
         """Initialiser la base de données avec les tables et données par défaut"""
         try:
-            # Créer toutes les tables
+            # Créer toutes les tables de base (sans les modules)
             Base.metadata.create_all(bind=self.engine)
             
             # Insérer les données par défaut
@@ -63,6 +63,36 @@ class DatabaseManager:
         session = self.get_session()
         
         try:
+            # Créer une entreprise par défaut si elle n'existe pas
+            default_enterprise = session.query(Entreprise).first()
+            if not default_enterprise:
+                default_enterprise = Entreprise(
+                    name="Ayanna Solutions",
+                    address="Adresse par défaut",
+                    phone="+243 000 000 000",
+                    email="contact@ayanna.com",
+                    currency="USD",
+                    slogan="Excellence en gestion d'entreprise"
+                )
+                session.add(default_enterprise)
+                session.flush()  # Pour obtenir l'ID
+            
+            # Créer un utilisateur administrateur par défaut
+            admin_user = session.query(User).filter_by(email="admin@ayanna.com").first()
+            if not admin_user:
+                admin_user = User(
+                    enterprise_id=default_enterprise.id,
+                    name="Super Administrateur",
+                    email="admin@ayanna.com",
+                    role="super_admin"
+                )
+                admin_user.set_password("admin123")
+                session.add(admin_user)
+                print("✅ Utilisateur administrateur créé:")
+                print("   Email: admin@ayanna.com")
+                print("   Mot de passe: admin123")
+                print("   Rôle: super_admin")
+            
             # Insérer les modules par défaut
             modules_default = [
                 {"name": "SalleFete", "description": "Gestion des salles de fête et événements"},
@@ -80,6 +110,12 @@ class DatabaseManager:
                 if not existing:
                     module = Module(**module_data)
                     session.add(module)
+            
+            # S'assurer que les modules sont persistés avant de créer les POS
+            session.flush()
+            
+            # Créer automatiquement des POS pour chaque module de l'entreprise par défaut
+            self._create_pos_for_enterprise(session, default_enterprise.id)
             
             # Insérer les classes comptables SYSCOHADA par défaut
             classes_comptables_default = [
@@ -104,6 +140,60 @@ class DatabaseManager:
         except Exception as e:
             session.rollback()
             print(f"Erreur lors de l'insertion des données par défaut: {e}")
+        finally:
+            session.close()
+    
+    def _create_pos_for_enterprise(self, session, enterprise_id):
+        """Créer automatiquement tous les POS pour une entreprise"""
+        try:
+            # Récupérer tous les modules
+            modules = session.query(Module).all()
+            
+            # Noms des POS par défaut pour chaque module
+            pos_names = {
+                "SalleFete": "POS Salle de Fête Principale",
+                "Boutique": "POS Boutique Centrale", 
+                "Pharmacie": "POS Pharmacie",
+                "Restaurant": "POS Restaurant Principal",
+                "Hotel": "POS Hôtel",
+                "Achats": "POS Achats",
+                "Stock": "POS Stock Central",
+                "Comptabilite": "POS Comptabilité"
+            }
+            
+            for module in modules:
+                # Vérifier si un POS existe déjà pour ce module et cette entreprise
+                existing_pos = session.query(POSPoint).filter_by(
+                    enterprise_id=enterprise_id,
+                    module_id=module.id
+                ).first()
+                
+                if not existing_pos:
+                    pos = POSPoint(
+                        enterprise_id=enterprise_id,
+                        module_id=module.id,
+                        name=pos_names.get(module.name, f"POS {module.name}")
+                    )
+                    session.add(pos)
+                    print(f"✅ POS créé: {pos.name} pour le module {module.name}")
+            
+            session.flush()  # S'assurer que les POS sont persistés
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la création des POS: {e}")
+            raise
+    
+    def create_pos_for_new_enterprise(self, enterprise_id):
+        """Créer tous les POS pour une nouvelle entreprise (méthode publique)"""
+        session = self.get_session()
+        try:
+            self._create_pos_for_enterprise(session, enterprise_id)
+            session.commit()
+            return True
+        except Exception as e:
+            session.rollback()
+            print(f"❌ Erreur lors de la création des POS pour l'entreprise {enterprise_id}: {e}")
+            return False
         finally:
             session.close()
 
@@ -267,3 +357,21 @@ class PaymentMethod(Base):
     is_default = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+# Instance globale du gestionnaire de base de données
+_db_manager = None
+
+
+def get_database_manager():
+    """Retourne l'instance globale du gestionnaire de base de données"""
+    global _db_manager
+    if _db_manager is None:
+        _db_manager = DatabaseManager()
+    return _db_manager
+
+
+def set_database_manager(manager):
+    """Définit l'instance globale du gestionnaire de base de données"""
+    global _db_manager
+    _db_manager = manager

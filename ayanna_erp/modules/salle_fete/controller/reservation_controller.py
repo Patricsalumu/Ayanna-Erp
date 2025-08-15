@@ -1,0 +1,439 @@
+"""
+Contrôleur pour la gestion des réservations du module Salle de Fête
+Gère toutes les opérations CRUD pour les réservations
+"""
+
+import sys
+import os
+from PyQt6.QtCore import QObject, pyqtSignal
+from sqlalchemy.exc import IntegrityError
+from datetime import datetime, date, timedelta
+
+# Ajouter le chemin vers le modèle
+sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+from model.salle_fete import (EventReservation, EventClient, EventService, EventProduct,
+                              EventReservationService, EventReservationProduct, get_database_manager)
+
+
+class ReservationController(QObject):
+    """Contrôleur pour la gestion des réservations"""
+    
+    # Signaux pour la communication avec la vue
+    reservation_added = pyqtSignal(object)
+    reservation_updated = pyqtSignal(object)
+    reservation_deleted = pyqtSignal(int)
+    reservations_loaded = pyqtSignal(list)
+    error_occurred = pyqtSignal(str)
+    
+    def __init__(self, pos_id=1):
+        super().__init__()
+        self.pos_id = pos_id
+        
+    def set_pos_id(self, pos_id):
+        """Définir l'ID de l'entreprise"""
+        self.pos_id = pos_id
+        
+    def create_reservation(self, reservation_data, services_data=None, products_data=None):
+        """
+        Créer une nouvelle réservation avec services et produits
+        
+        Args:
+            reservation_data (dict): Données de la réservation
+            services_data (list): Liste des services [{service_id, quantity, unit_price}, ...]
+            products_data (list): Liste des produits [{product_id, quantity, unit_price}, ...]
+            
+        Returns:
+            EventReservation: La réservation créée ou None
+        """
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+                
+            # Créer la réservation principale
+            reservation = EventReservation(
+                pos_id=self.pos_id,
+                partner_id=reservation_data.get('partner_id'),  # Client pré-enregistré
+                client_nom=reservation_data.get('client_nom'),  # Nom saisi directement
+                client_prenom=reservation_data.get('client_prenom'),  # Prénom saisi directement
+                client_telephone=reservation_data.get('client_telephone'),  # Téléphone
+                theme=reservation_data.get('theme', ''),  # Thème de l'événement
+                event_date=reservation_data.get('event_date'),
+                event_type=reservation_data.get('event_type', ''),
+                guests_count=reservation_data.get('guests_count', 1),
+                status=reservation_data.get('status', 'draft'),
+                notes=reservation_data.get('notes', ''),
+                discount_percent=reservation_data.get('discount_percent', 0.0),
+                tax_rate=reservation_data.get('tax_rate', 20.0),
+                created_by=reservation_data.get('created_by', 1)
+            )
+            
+            session.add(reservation)
+            session.flush()  # Pour obtenir l'ID
+            
+            total_services = 0.0
+            total_products = 0.0
+            total_cost = 0.0
+            
+            # Ajouter les services
+            if services_data:
+                for service_data in services_data:
+                    service = session.query(EventService).get(service_data['service_id'])
+                    if service:
+                        line_total = service_data['quantity'] * service_data['unit_price']
+                        line_cost = service_data['quantity'] * service.cost
+                        
+                        reservation_service = EventReservationService(
+                            reservation_id=reservation.id,
+                            service_id=service_data['service_id'],
+                            quantity=service_data['quantity'],
+                            unit_price=service_data['unit_price'],
+                            line_total=line_total,
+                            line_cost=line_cost
+                        )
+                        session.add(reservation_service)
+                        total_services += line_total
+                        total_cost += line_cost
+                        
+            # Ajouter les produits
+            if products_data:
+                for product_data in products_data:
+                    product = session.query(EventProduct).get(product_data['product_id'])
+                    if product:
+                        line_total = product_data['quantity'] * product_data['unit_price']
+                        line_cost = product_data['quantity'] * product.cost
+                        
+                        reservation_product = EventReservationProduct(
+                            reservation_id=reservation.id,
+                            product_id=product_data['product_id'],
+                            quantity=product_data['quantity'],
+                            unit_price=product_data['unit_price'],
+                            line_total=line_total,
+                            line_cost=line_cost
+                        )
+                        session.add(reservation_product)
+                        total_products += line_total
+                        total_cost += line_cost
+                        
+            # Calculer les totaux
+            subtotal = total_services + total_products
+            discount_amount = subtotal * (reservation.discount_percent / 100)
+            subtotal_after_discount = subtotal - discount_amount
+            tax_amount = subtotal_after_discount * (reservation.tax_rate / 100)
+            total_amount = subtotal_after_discount + tax_amount
+            
+            # Mettre à jour les totaux de la réservation
+            reservation.total_services = total_services
+            reservation.total_products = total_products
+            reservation.total_cost = total_cost
+            reservation.tax_amount = tax_amount
+            reservation.total_amount = total_amount
+            
+            # Créer un paiement automatique si un acompte est fourni
+            deposit_amount = reservation_data.get('deposit', 0.0)
+            print(f"🔍 Debug - Acompte reçu: {deposit_amount}€")
+            
+            if deposit_amount > 0:
+                from model.salle_fete import EventPayment
+                
+                payment = EventPayment(
+                    reservation_id=reservation.id,
+                    amount=deposit_amount,
+                    payment_method='Espèces',  # Simplifier en utilisant espèces par défaut
+                    payment_date=datetime.now(),
+                    status='validated',
+                    notes=f"Acompte automatique pour réservation {reservation.client_nom} {reservation.client_prenom}"
+                )
+                session.add(payment)
+                print(f"💰 Paiement d'acompte créé: {deposit_amount}€")
+            else:
+                print("ℹ️  Aucun acompte fourni, pas de paiement créé")
+            
+            session.commit()
+            session.refresh(reservation)
+            
+            print(f"✅ Réservation créée: {reservation.client_nom} {reservation.client_prenom}")
+            self.reservation_added.emit(reservation)
+            return reservation
+            
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Erreur lors de la création de la réservation: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return None
+            
+        finally:
+            db_manager.close_session()
+            
+    def get_reservation(self, reservation_id):
+        """Récupérer une réservation par ID"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            reservation = session.query(EventReservation).filter(
+                EventReservation.id == reservation_id,
+                EventReservation.pos_id == self.pos_id
+            ).first()
+            return reservation
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération de la réservation: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return None
+            
+        finally:
+            db_manager.close_session()
+            
+    def get_all_reservations(self, date_from=None, date_to=None, status=None):
+        """
+        Récupérer toutes les réservations avec filtres optionnels
+        Filtre automatiquement par pos_id (entreprise) de l'utilisateur connecté
+        """
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            
+            # Filtrage principal par pos_id (entreprise)
+            query = session.query(EventReservation).filter(
+                EventReservation.pos_id == self.pos_id
+            ).join(EventClient, isouter=True)  # LEFT JOIN au cas où client supprimé
+            
+            # Filtres optionnels
+            if date_from:
+                query = query.filter(EventReservation.event_date >= date_from)
+            if date_to:
+                query = query.filter(EventReservation.event_date <= date_to)
+            if status:
+                query = query.filter(EventReservation.status == status)
+                
+            reservations = query.order_by(EventReservation.event_date.desc()).all()
+            
+            self.reservations_loaded.emit(reservations)
+            return reservations
+            
+        except Exception as e:
+            error_msg = f"Erreur lors du chargement des réservations: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
+            
+        finally:
+            db_manager.close_session()
+            
+    def update_reservation_status(self, reservation_id, new_status):
+        """Mettre à jour le statut d'une réservation"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            reservation = session.query(EventReservation).filter(
+                EventReservation.id == reservation_id,
+                EventReservation.pos_id == self.pos_id
+            ).first()
+            
+            if not reservation:
+                error_msg = f"Réservation {reservation_id} non trouvée"
+                self.error_occurred.emit(error_msg)
+                return False
+                
+            old_status = reservation.status
+            reservation.status = new_status
+            
+            if new_status == 'completed':
+                reservation.closed_at = datetime.now()
+                
+            session.commit()
+            session.refresh(reservation)
+            
+            print(f"✅ Statut réservation {reservation.reference}: {old_status} → {new_status}")
+            self.reservation_updated.emit(reservation)
+            return True
+            
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Erreur lors de la mise à jour du statut: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return False
+            
+        finally:
+            db_manager.close_session()
+    
+    def add_reservation(self, reservation_data):
+        """Ajouter une nouvelle réservation"""
+        try:
+            # Utiliser la méthode create_reservation existante
+            reservation = self.create_reservation(reservation_data)
+            if reservation:
+                self.reservation_added.emit(reservation)
+                return True
+            return False
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de l'ajout de la réservation: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return False
+    
+    def update_reservation(self, reservation_id, reservation_data):
+        """Mettre à jour une réservation existante"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            reservation = session.query(EventReservation).filter(
+                EventReservation.id == reservation_id,
+                EventReservation.pos_id == self.pos_id
+            ).first()
+            
+            if not reservation:
+                error_msg = f"Réservation {reservation_id} non trouvée"
+                self.error_occurred.emit(error_msg)
+                return False
+            
+            # Mettre à jour les champs
+            reservation.partner_id = reservation_data.get('partner_id', reservation.partner_id)
+            reservation.event_date = reservation_data.get('event_date', reservation.event_date)
+            reservation.event_type = reservation_data.get('event_type', reservation.event_type)
+            reservation.guests_count = reservation_data.get('guests_count', reservation.guests_count)
+            reservation.status = reservation_data.get('status', reservation.status)
+            reservation.notes = reservation_data.get('notes', reservation.notes)
+            reservation.discount_percent = reservation_data.get('discount_percent', reservation.discount_percent)
+            reservation.tax_rate = reservation_data.get('tax_rate', reservation.tax_rate)
+            
+            session.commit()
+            print(f"✅ Réservation {reservation_id} mise à jour")
+            self.reservation_updated.emit(reservation)
+            return True
+            
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Erreur lors de la mise à jour de la réservation: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return False
+            
+        finally:
+            db_manager.close_session()
+            
+    def delete_reservation(self, reservation_id):
+        """Supprimer une réservation (avec ses services et produits)"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            reservation = session.query(EventReservation).filter(
+                EventReservation.id == reservation_id,
+                EventReservation.pos_id == self.pos_id
+            ).first()
+            
+            if not reservation:
+                error_msg = f"Réservation {reservation_id} non trouvée"
+                self.error_occurred.emit(error_msg)
+                return False
+                
+            # Supprimer la réservation (cascade supprimera les services/produits liés)
+            session.delete(reservation)
+            session.commit()
+            
+            print(f"✅ Réservation supprimée: {reservation.reference}")
+            self.reservation_deleted.emit(reservation_id)
+            return True
+            
+        except Exception as e:
+            session.rollback()
+            error_msg = f"Erreur lors de la suppression: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return False
+            
+        finally:
+            db_manager.close_session()
+            
+    def get_reservations_by_date(self, target_date):
+        """Récupérer les réservations pour une date donnée"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            
+            if isinstance(target_date, datetime):
+                target_date = target_date.date()
+                
+            reservations = session.query(EventReservation).filter(
+                EventReservation.pos_id == self.pos_id,
+                EventReservation.event_date >= target_date,
+                EventReservation.event_date < target_date + timedelta(days=1)
+            ).order_by(EventReservation.event_date).all()
+            
+            return reservations
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération des réservations: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
+            
+        finally:
+            db_manager.close_session()
+    
+    def load_reservations(self):
+        print(f"POS ID: {self.pos_id}")
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            
+            # Récupérer toutes les réservations avec les clients
+            reservations_query = session.query(EventReservation).join(EventClient).filter(
+                EventReservation.pos_id == self.pos_id
+            ).order_by(EventReservation.event_date.desc())
+            
+            reservations = reservations_query.all()
+            
+            # Convertir en dictionnaires pour la vue
+            reservations_data = []
+            for reservation in reservations:
+                client = reservation.client
+                reservations_data.append({
+                    'id': reservation.id,
+                    'reference': reservation.reference or '',
+                    'client_nom': f"{client.prenom} {client.nom}" if client else 'Client inconnu',
+                    'client_id': reservation.partner_id,
+                    'event_date': reservation.event_date,
+                    'event_type': reservation.event_type or '',
+                    'guests_count': reservation.guests_count or 0,
+                    'status': reservation.status or 'draft',
+                    'total_amount': float(reservation.total_amount or 0),
+                    'total_services': float(reservation.total_services or 0),
+                    'total_products': float(reservation.total_products or 0),
+                    'notes': reservation.notes or '',
+                    'created_at': reservation.created_at
+                })
+            
+            print(f"✅ {len(reservations_data)} réservations chargées")
+            self.reservations_loaded.emit(reservations_data)
+            return reservations_data
+            
+        except Exception as e:
+            error_msg = f"Erreur lors du chargement des réservations: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
+            
+        finally:
+            db_manager.close_session()
+            
+    def search_reservations(self, search_term):
+        """Rechercher des réservations par référence, client ou type d'événement"""
+        try:
+            db_manager = get_database_manager(); session = db_manager.get_session()
+            search_pattern = f"%{search_term}%"
+            
+            reservations = session.query(EventReservation).join(EventClient).filter(
+                EventReservation.pos_id == self.pos_id,
+                (EventReservation.reference.ilike(search_pattern) |
+                 EventReservation.event_type.ilike(search_pattern) |
+                 EventClient.nom.ilike(search_pattern) |
+                 EventClient.prenom.ilike(search_pattern))
+            ).order_by(EventReservation.event_date.desc()).all()
+            
+            self.reservations_loaded.emit(reservations)
+            return reservations
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la recherche: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
+            
+        finally:
+            db_manager.close_session()

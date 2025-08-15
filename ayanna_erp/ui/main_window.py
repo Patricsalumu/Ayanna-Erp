@@ -90,7 +90,7 @@ class MainWindow(QMainWindow):
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
         self.setWindowTitle(f"Ayanna ERP - Bienvenue {self.current_user.name}")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1200, 750)
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #ECF0F1;
@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
                 padding: 20px;
             }
         """)
-        header_frame.setFixedHeight(100)
+        header_frame.setFixedHeight(140)
         
         header_layout = QHBoxLayout(header_frame)
         
@@ -368,7 +368,7 @@ class MainWindow(QMainWindow):
             
             # Importer et ouvrir le module approprié
             if module_name == "SalleFete":
-                from ayanna_erp.modules.salle_fete.salle_fete_window import SalleFeteWindow
+                from ..modules.salle_fete.view.salle_fete_window import SalleFeteWindow
                 window = SalleFeteWindow(self.current_user)
             elif module_name == "Boutique":
                 from ayanna_erp.modules.boutique.boutique_window import BoutiqueWindow

@@ -1,0 +1,297 @@
+"""
+Formulaire modal pour l'ajout/modification des services
+Module Salle de Fête - Ayanna ERP
+"""
+
+import sys
+import os
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, 
+                            QFormLayout, QLineEdit, QPushButton, 
+                            QTextEdit, QDoubleSpinBox, QComboBox,
+                            QCheckBox, QLabel, QMessageBox, QGroupBox)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
+from decimal import Decimal
+
+
+class ServiceForm(QDialog):
+    """Formulaire modal pour créer/modifier un service"""
+    
+    service_saved = pyqtSignal(dict)  # Signal émis quand un service est sauvegardé
+    
+    def __init__(self, parent=None, service_data=None, controller=None):
+        super().__init__(parent)
+        self.service_data = service_data
+        self.controller = controller
+        self.is_edit_mode = service_data is not None
+        
+        self.setup_ui()
+        self.setup_style()
+        
+        if self.is_edit_mode:
+            self.load_service_data()
+    
+    def setup_ui(self):
+        """Initialiser l'interface utilisateur"""
+        self.setWindowTitle("Modifier le service" if self.is_edit_mode else "Nouveau service")
+        self.setModal(True)
+        self.resize(500, 400)
+        
+        # Layout principal
+        layout = QVBoxLayout(self)
+        
+        # === INFORMATIONS GÉNÉRALES ===
+        general_group = QGroupBox("Informations générales")
+        general_layout = QFormLayout(general_group)
+        
+        # Nom du service
+        self.name_edit = QLineEdit()
+        self.name_edit.setPlaceholderText("Ex: Décoration florale premium")
+        general_layout.addRow("Nom du service *:", self.name_edit)
+        
+        # Description
+        self.description_edit = QTextEdit()
+        self.description_edit.setMaximumHeight(80)
+        self.description_edit.setPlaceholderText("Description détaillée du service...")
+        general_layout.addRow("Description:", self.description_edit)
+        
+        # Catégorie
+        self.category_combo = QComboBox()
+        self.category_combo.addItems([
+            "Décoration",
+            "Animation",
+            "Restauration", 
+            "Musique/DJ",
+            "Photographie",
+            "Nettoyage",
+            "Transport",
+            "Sécurité",
+            "Autre"
+        ])
+        self.category_combo.setEditable(True)
+        general_layout.addRow("Catégorie:", self.category_combo)
+        
+        layout.addWidget(general_group)
+        
+        # === TARIFICATION ===
+        pricing_group = QGroupBox("Tarification")
+        pricing_layout = QFormLayout(pricing_group)
+        
+        # Coût
+        self.cost_spinbox = QDoubleSpinBox()
+        self.cost_spinbox.setRange(0.0, 999999.99)
+        self.cost_spinbox.setDecimals(2)
+        self.cost_spinbox.setSuffix(" €")
+        self.cost_spinbox.setSpecialValueText("Gratuit")
+        pricing_layout.addRow("Coût du service:", self.cost_spinbox)
+        
+        # Prix de vente
+        self.price_spinbox = QDoubleSpinBox()
+        self.price_spinbox.setRange(0.0, 999999.99)
+        self.price_spinbox.setDecimals(2)
+        self.price_spinbox.setSuffix(" €")
+        self.price_spinbox.setSpecialValueText("Gratuit")
+        pricing_layout.addRow("Prix de vente *:", self.price_spinbox)
+        
+        # Marge automatique
+        self.margin_label = QLabel("Marge: 0.00 €")
+        pricing_layout.addRow("", self.margin_label)
+        
+        layout.addWidget(pricing_group)
+        
+        # === OPTIONS ===
+        options_group = QGroupBox("Options")
+        options_layout = QFormLayout(options_group)
+        
+        # Service actif
+        self.active_checkbox = QCheckBox("Service actif")
+        self.active_checkbox.setChecked(True)
+        options_layout.addRow("", self.active_checkbox)
+        
+        layout.addWidget(options_group)
+        
+        # === BOUTONS ===
+        buttons_layout = QHBoxLayout()
+        
+        self.cancel_btn = QPushButton("Annuler")
+        self.save_btn = QPushButton("Modifier" if self.is_edit_mode else "Créer")
+        
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.cancel_btn)
+        buttons_layout.addWidget(self.save_btn)
+        
+        layout.addLayout(buttons_layout)
+        
+        # Connecter les signaux
+        self.cancel_btn.clicked.connect(self.reject)
+        self.save_btn.clicked.connect(self.save_service)
+        self.cost_spinbox.valueChanged.connect(self.update_margin)
+        self.price_spinbox.valueChanged.connect(self.update_margin)
+        
+        # Focus sur le premier champ
+        self.name_edit.setFocus()
+    
+    def setup_style(self):
+        """Appliquer les styles"""
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                padding-top: 15px;
+                margin-top: 10px;
+                border: 2px solid #dee2e6;
+                border-radius: 8px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+                color: #495057;
+                background-color: #f8f9fa;
+            }
+            QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox {
+                padding: 8px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
+                border-color: #007bff;
+                outline: none;
+            }
+            QPushButton {
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton#save_btn {
+                background-color: #007bff;
+                color: white;
+            }
+            QPushButton#save_btn:hover {
+                background-color: #0056b3;
+            }
+            QPushButton#cancel_btn {
+                background-color: #6c757d;
+                color: white;
+            }
+            QPushButton#cancel_btn:hover {
+                background-color: #545b62;
+            }
+        """)
+        
+        self.save_btn.setObjectName("save_btn")
+        self.cancel_btn.setObjectName("cancel_btn")
+    
+    def update_margin(self):
+        """Mettre à jour l'affichage de la marge"""
+        cost = self.cost_spinbox.value()
+        price = self.price_spinbox.value()
+        margin = price - cost
+        
+        self.margin_label.setText(f"Marge: {margin:.2f} €")
+        
+        if margin < 0:
+            self.margin_label.setStyleSheet("color: #dc3545; font-weight: bold;")
+        elif margin == 0:
+            self.margin_label.setStyleSheet("color: #6c757d;")
+        else:
+            self.margin_label.setStyleSheet("color: #28a745; font-weight: bold;")
+    
+    def load_service_data(self):
+        """Charger les données du service en mode édition"""
+        if not self.service_data:
+            return
+        
+        self.name_edit.setText(self.service_data.get('name', ''))
+        self.description_edit.setPlainText(self.service_data.get('description', ''))
+        
+        # Catégorie
+        category = self.service_data.get('category', '')
+        if category:
+            index = self.category_combo.findText(category)
+            if index >= 0:
+                self.category_combo.setCurrentIndex(index)
+            else:
+                self.category_combo.setCurrentText(category)
+        
+        self.cost_spinbox.setValue(float(self.service_data.get('cost', 0)))
+        self.price_spinbox.setValue(float(self.service_data.get('price', 0)))
+        self.active_checkbox.setChecked(bool(self.service_data.get('is_active', True)))
+        
+        # Mettre à jour la marge
+        self.update_margin()
+    
+    def validate_form(self):
+        """Valider les données du formulaire"""
+        if not self.name_edit.text().strip():
+            QMessageBox.warning(self, "Erreur", "Le nom du service est obligatoire.")
+            self.name_edit.setFocus()
+            return False
+        
+        if self.price_spinbox.value() <= 0:
+            QMessageBox.warning(self, "Erreur", "Le prix de vente doit être supérieur à 0.")
+            self.price_spinbox.setFocus()
+            return False
+        
+        return True
+    
+    def get_form_data(self):
+        """Récupérer les données du formulaire"""
+        return {
+            'name': self.name_edit.text().strip(),
+            'description': self.description_edit.toPlainText().strip(),
+            'category': self.category_combo.currentText().strip(),
+            'cost': round(self.cost_spinbox.value(), 2),
+            'price': round(self.price_spinbox.value(), 2),
+            'is_active': self.active_checkbox.isChecked()
+        }
+    
+    def save_service(self):
+        """Sauvegarder le service"""
+        if not self.validate_form():
+            return
+        
+        try:
+            form_data = self.get_form_data()
+            
+            if self.controller:
+                if self.is_edit_mode:
+                    # Modification
+                    service_id = self.service_data.get('id')
+                    success = self.controller.update_service(service_id, form_data)
+                    if success:
+                        QMessageBox.information(self, "Succès", "Service modifié avec succès !")
+                    else:
+                        QMessageBox.critical(self, "Erreur", "Erreur lors de la modification du service.")
+                        return
+                else:
+                    # Création
+                    success = self.controller.add_service(form_data)
+                    if success:
+                        QMessageBox.information(self, "Succès", "Service créé avec succès !")
+                    else:
+                        QMessageBox.critical(self, "Erreur", "Erreur lors de la création du service.")
+                        return
+            
+            # Émettre le signal avec les données
+            self.service_saved.emit(form_data)
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur inattendue: {str(e)}")
+
+
+if __name__ == "__main__":
+    from PyQt6.QtWidgets import QApplication
+    
+    app = QApplication(sys.argv)
+    
+    # Test du formulaire
+    form = ServiceForm()
+    form.show()
+    
+    sys.exit(app.exec())
