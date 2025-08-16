@@ -398,7 +398,6 @@ class ReservationForm(QDialog):
         if client:
             # Pré-remplir les champs téléphone et email
             self.client_phone_edit.setText(client.telephone or "")
-            self.client_email_edit.setText(client.email or "")
     
     def on_services_loaded(self, services):
         """Callback quand les services sont chargés"""

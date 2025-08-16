@@ -103,9 +103,6 @@ class EventCalendarWidget(QWidget):
         self.calendar.setDateTextFormat(QDate(), format_default)
         
         # Appliquer les couleurs selon les événements
-        print('-----------------------EVENT BY DATE DEBUGG---------------------------')
-        print(self.events_by_date.items())
-        
         # Créer un tooltip global avec tous les événements du mois
         global_tooltip = "📅 Événements du mois:\n\n"
         total_events = 0
@@ -200,7 +197,9 @@ class EventCalendarWidget(QWidget):
     
     def update_current_tooltip(self):
         """Mettre à jour le tooltip pour la date actuellement sélectionnée"""
+        print('--------------DEBUG TOOLIP---------------')
         date = self.calendar.selectedDate()
+        print(date)
         if date.isValid():
             date_key = date.toString("yyyy_MM_dd")
             tooltip_attr = f'tooltip_{date_key}'

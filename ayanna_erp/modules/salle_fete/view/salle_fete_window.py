@@ -119,9 +119,9 @@ class SalleFeteWindow(QMainWindow):
         self.reservations_widget = ReservationIndex(self.main_controller, self.current_user)
         self.tab_widget.addTab(self.reservations_widget, "📋 Réservations")
         
-        # Onglet Clients
-        self.clients_widget = ClientIndex(self.main_controller, self.current_user)
-        self.tab_widget.addTab(self.clients_widget, "👥 Clients")
+        # # Onglet Clients
+        # self.clients_widget = ClientIndex(self.main_controller, self.current_user)
+        # self.tab_widget.addTab(self.clients_widget, "👥 Clients")
         
         # Onglet Services
         self.services_widget = ServiceIndex(self.main_controller, self.current_user)

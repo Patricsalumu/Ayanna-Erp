@@ -145,7 +145,7 @@ class ServiceIndex(QWidget):
         self.services_table = QTableWidget()
         self.services_table.setColumnCount(6)
         self.services_table.setHorizontalHeaderLabels([
-            "ID", "Nom du service", "Catégorie", "Prix unitaire", "Unité", "Statut"
+            "ID", "Nom du service", "Cout", "Prix ", "Marge", "Statut"
         ])
         
         # Configuration du tableau
@@ -260,36 +260,6 @@ class ServiceIndex(QWidget):
         self.services_table.itemSelectionChanged.connect(self.on_service_selected)
         self.search_input.textChanged.connect(self.filter_services)
         self.category_filter.currentTextChanged.connect(self.filter_services)
-    
-    def load_services(self):
-        """Charger les services depuis la base de données"""
-        # TODO: Implémenter le chargement depuis la base de données
-        # Pour l'instant, on utilise des données de test
-        sample_data = [
-            ["001", "Décoration florale premium", "Décoration", "250.00 €", "forfait", "Actif"],
-            ["002", "DJ avec équipement son", "Musique", "400.00 €", "soirée", "Actif"],
-            ["003", "Buffet traditionnel", "Restauration", "25.00 €", "personne", "Actif"],
-            ["004", "Animation enfants", "Animation", "150.00 €", "heure", "Actif"],
-            ["005", "Photobooth", "Animation", "200.00 €", "soirée", "Inactif"],
-            ["006", "Service de nettoyage", "Autre", "100.00 €", "forfait", "Actif"],
-        ]
-        
-        self.services_table.setRowCount(len(sample_data))
-        
-        for row, data in enumerate(sample_data):
-            for col, value in enumerate(data):
-                item = QTableWidgetItem(str(value))
-                
-                # Couleur selon le statut
-                if col == 5:  # Colonne statut
-                    if value == "Actif":
-                        item.setBackground(Qt.GlobalColor.green)
-                        item.setForeground(Qt.GlobalColor.white)
-                    else:
-                        item.setBackground(Qt.GlobalColor.red)
-                        item.setForeground(Qt.GlobalColor.white)
-                
-                self.services_table.setItem(row, col, item)
     
     def on_service_selected(self):
         """Gérer la sélection d'un service"""
@@ -430,17 +400,14 @@ class ServiceIndex(QWidget):
             # Nom
             self.services_table.setItem(row, 1, QTableWidgetItem(service.get('name', '')))
             
-            # Catégorie
-            category = service.get('category', '')
-            self.services_table.setItem(row, 2, QTableWidgetItem(category))
             
             # Coût
             cost = float(service.get('cost', 0))
-            self.services_table.setItem(row, 3, QTableWidgetItem(f"{cost:.2f} €"))
+            self.services_table.setItem(row, 2, QTableWidgetItem(f"{cost:.2f} €"))
             
             # Prix
             price = float(service.get('price', 0))
-            self.services_table.setItem(row, 4, QTableWidgetItem(f"{price:.2f} €"))
+            self.services_table.setItem(row, 3, QTableWidgetItem(f"{price:.2f} €"))
             
             # Marge
             margin = price - cost
@@ -449,14 +416,14 @@ class ServiceIndex(QWidget):
                 margin_item.setBackground(Qt.GlobalColor.red)
             elif margin > 0:
                 margin_item.setBackground(Qt.GlobalColor.green)
-            self.services_table.setItem(row, 5, margin_item)
+            self.services_table.setItem(row, 4, margin_item)
             
             # Statut
             status = "Actif" if service.get('is_active', True) else "Inactif"
             status_item = QTableWidgetItem(status)
             if not service.get('is_active', True):
                 status_item.setBackground(Qt.GlobalColor.lightGray)
-            self.services_table.setItem(row, 6, status_item)
+            self.services_table.setItem(row, 5, status_item)
         
         # Cacher la colonne ID
         self.services_table.hideColumn(0)

@@ -55,21 +55,6 @@ class ServiceForm(QDialog):
         self.description_edit.setPlaceholderText("Description détaillée du service...")
         general_layout.addRow("Description:", self.description_edit)
         
-        # Catégorie
-        self.category_combo = QComboBox()
-        self.category_combo.addItems([
-            "Décoration",
-            "Animation",
-            "Restauration", 
-            "Musique/DJ",
-            "Photographie",
-            "Nettoyage",
-            "Transport",
-            "Sécurité",
-            "Autre"
-        ])
-        self.category_combo.setEditable(True)
-        general_layout.addRow("Catégorie:", self.category_combo)
         
         layout.addWidget(general_group)
         
@@ -209,14 +194,6 @@ class ServiceForm(QDialog):
         self.name_edit.setText(self.service_data.get('name', ''))
         self.description_edit.setPlainText(self.service_data.get('description', ''))
         
-        # Catégorie
-        category = self.service_data.get('category', '')
-        if category:
-            index = self.category_combo.findText(category)
-            if index >= 0:
-                self.category_combo.setCurrentIndex(index)
-            else:
-                self.category_combo.setCurrentText(category)
         
         self.cost_spinbox.setValue(float(self.service_data.get('cost', 0)))
         self.price_spinbox.setValue(float(self.service_data.get('price', 0)))
@@ -244,7 +221,6 @@ class ServiceForm(QDialog):
         return {
             'name': self.name_edit.text().strip(),
             'description': self.description_edit.toPlainText().strip(),
-            'category': self.category_combo.currentText().strip(),
             'cost': round(self.cost_spinbox.value(), 2),
             'price': round(self.price_spinbox.value(), 2),
             'is_active': self.active_checkbox.isChecked()
