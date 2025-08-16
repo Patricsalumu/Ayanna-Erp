@@ -165,14 +165,88 @@ class ReservationController(QObject):
             db_manager.close_session()
             
     def get_reservation(self, reservation_id):
-        """Récupérer une réservation par ID"""
+        """Récupérer une réservation par ID avec tous ses détails"""
         try:
             db_manager = get_database_manager(); session = db_manager.get_session()
             reservation = session.query(EventReservation).filter(
                 EventReservation.id == reservation_id,
                 EventReservation.pos_id == self.pos_id
             ).first()
-            return reservation
+            
+            if not reservation:
+                return None
+                
+            # Récupérer les services liés
+            services = session.query(EventReservationService, EventService).join(
+                EventService, EventReservationService.service_id == EventService.id
+            ).filter(EventReservationService.reservation_id == reservation_id).all()
+            
+            # Récupérer les produits liés  
+            products = session.query(EventReservationProduct, EventProduct).join(
+                EventProduct, EventReservationProduct.product_id == EventProduct.id
+            ).filter(EventReservationProduct.reservation_id == reservation_id).all()
+            
+            # Récupérer les paiements liés
+            from model.salle_fete import EventPayment
+            payments = session.query(EventPayment).filter(
+                EventPayment.reservation_id == reservation_id
+            ).all()
+            
+            # Calculer le total payé
+            total_paid = sum(payment.amount for payment in payments if payment.status == 'validated')
+            remaining_amount = (reservation.total_amount or 0) - total_paid
+            
+            # Construire le dictionnaire complet
+            reservation_details = {
+                'id': reservation.id,
+                'client_nom': reservation.get_client_name(),
+                'client_telephone': reservation.client_telephone or (reservation.client.telephone if reservation.client else ''),
+                'theme': reservation.theme or '',
+                'event_date': reservation.event_date,
+                'event_type': reservation.event_type or '',
+                'guests_count': reservation.guests_count or 0,
+                'status': reservation.status or 'draft',
+                'notes': reservation.notes or '',
+                'total_services': reservation.total_services or 0,
+                'total_products': reservation.total_products or 0,
+                'total_amount': reservation.total_amount or 0,
+                'discount_percent': reservation.discount_percent or 0,
+                'tax_rate': reservation.tax_rate or 0,
+                'tax_amount': reservation.tax_amount or 0,
+                'total_paid': total_paid,
+                'remaining_amount': remaining_amount,
+                'created_at': reservation.created_at,
+                'services': [
+                    {
+                        'name': service.name,
+                        'quantity': res_service.quantity,
+                        'unit_price': res_service.unit_price,
+                        'line_total': res_service.line_total
+                    }
+                    for res_service, service in services
+                ],
+                'products': [
+                    {
+                        'name': product.name,
+                        'quantity': res_product.quantity,
+                        'unit_price': res_product.unit_price,
+                        'line_total': res_product.line_total
+                    }
+                    for res_product, product in products
+                ],
+                'payments': [
+                    {
+                        'amount': payment.amount,
+                        'payment_method': payment.payment_method,
+                        'payment_date': payment.payment_date,
+                        'status': payment.status,
+                        'notes': payment.notes or ''
+                    }
+                    for payment in payments
+                ]
+            }
+            
+            return reservation_details
             
         except Exception as e:
             error_msg = f"Erreur lors de la récupération de la réservation: {str(e)}"

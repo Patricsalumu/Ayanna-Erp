@@ -167,7 +167,7 @@ class ReservationIndex(QWidget):
             QHeaderView::section {
                 background-color: #34495E;
                 color: white;
-                padding: 10px;
+                padding: 2px;
                 border: none;
                 font-weight: bold;
             }
@@ -180,25 +180,44 @@ class ReservationIndex(QWidget):
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Type
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Statut
         
-        # Zone d'informations
+        # Zone d'informations - optimisée pour l'espace
         info_group = QGroupBox("Informations sur la réservation sélectionnée")
+        info_group.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 1px solid #BDC3C7;
+                border-radius: 5px;
+                margin-top: 1px;
+                padding-top: 2px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
         info_layout = QHBoxLayout(info_group)
+        info_layout.setContentsMargins(4, 2, 4, 2)  # Réduire les marges
+        info_layout.setSpacing(1)  # Réduire l'espacement
         
         self.reservation_details = QTextEdit()
         self.reservation_details.setReadOnly(True)
-        self.reservation_details.setMaximumHeight(120)
+        self.reservation_details.setMaximumHeight(250)  # Réduire de 120 à 200
         self.reservation_details.setStyleSheet("""
             QTextEdit {
                 border: 1px solid #BDC3C7;
                 border-radius: 5px;
                 background-color: #F8F9FA;
-                padding: 10px;
+                padding: 5px;
+                font-size: 13px;
+                line-height: 1.2;
             }
         """)
         
         info_layout.addWidget(self.reservation_details)
         
-        # Assemblage du layout
+        # Assemblage du layout avec espacements réduits
+        layout.setSpacing(8)  # Réduire l'espacement général
         layout.addLayout(toolbar_layout)
         layout.addWidget(self.reservations_table)
         layout.addWidget(info_group)
@@ -220,30 +239,141 @@ class ReservationIndex(QWidget):
         self.reservation_controller.load_reservations()
     
     def on_reservation_selected(self):
-        """Gérer la sélection d'une réservation"""
+        """Gérer la sélection d'une réservation avec tous les détails"""
         current_row = self.reservations_table.currentRow()
         if current_row >= 0:
-            # Récupérer les informations de la réservation sélectionnée
-            reservation_id = self.reservations_table.item(current_row, 0).text()
-            client = self.reservations_table.item(current_row, 1).text()
-            date_event = self.reservations_table.item(current_row, 2).text()
-            type_event = self.reservations_table.item(current_row, 3).text()
-            status = self.reservations_table.item(current_row, 4).text()
-            total = self.reservations_table.item(current_row, 5).text()
-            acompte = self.reservations_table.item(current_row, 6).text()
+            # Récupérer l'ID de la réservation
+            reservation_id = int(self.reservations_table.item(current_row, 0).text())
             
-            details = f"""
-            <b>Réservation #{reservation_id}</b><br>
-            <b>Client:</b> {client}<br>
-            <b>Type d'événement:</b> {type_event}<br>
-            <b>Date de l'événement:</b> {date_event}<br>
-            <b>Statut:</b> {status}<br>
-            <b>Montant total:</b> {total}<br>
-            <b>Acompte versé:</b> {acompte}<br>
-            <b>Solde restant:</b> {float(total.replace(' €', '').replace(',', '.')) - float(acompte.replace(' €', '').replace(',', '.'))} €
-            """
+            # Utiliser le contrôleur pour récupérer toutes les informations
+            reservation_details = self.reservation_controller.get_reservation(reservation_id)
             
-            self.reservation_details.setHtml(details)
+            if reservation_details:
+                # Formater la date d'événement
+                event_date_str = ""
+                if reservation_details['event_date']:
+                    if hasattr(reservation_details['event_date'], 'strftime'):
+                        event_date_str = reservation_details['event_date'].strftime('%d/%m/%Y à %H:%M')
+                    else:
+                        event_date_str = str(reservation_details['event_date'])
+                
+                # Formater la date de création
+                created_date_str = ""
+                if reservation_details['created_at']:
+                    if hasattr(reservation_details['created_at'], 'strftime'):
+                        created_date_str = reservation_details['created_at'].strftime('%d/%m/%Y à %H:%M')
+                    else:
+                        created_date_str = str(reservation_details['created_at'])
+                
+                # Formater les services sélectionnés
+                services_html = ""
+                if reservation_details['services']:
+                    services_html = "<br>".join([
+                        f"• {service['name']} - Qté: {service['quantity']} - Prix: {service['unit_price']:.2f}€ - Total: {service['line_total']:.2f}€"
+                        for service in reservation_details['services']
+                    ])
+                else:
+                    services_html = "<i>Aucun service sélectionné</i>"
+                
+                # Formater les produits sélectionnés
+                products_html = ""
+                if reservation_details['products']:
+                    products_html = "<br>".join([
+                        f"• {product['name']} - Qté: {product['quantity']} - Prix: {product['unit_price']:.2f}€ - Total: {product['line_total']:.2f}€"
+                        for product in reservation_details['products']
+                    ])
+                else:
+                    products_html = "<i>Aucun produit sélectionné</i>"
+                
+                # Déterminer la couleur du statut
+                status = reservation_details['status']
+                status_color = {
+                    'Confirmé': 'green',
+                    'En attente': '#FF8C00',
+                    'Annulé': 'red',
+                    'Terminé': 'blue'
+                }.get(status, 'gray')
+                
+                # Couleur du solde restant
+                remaining = reservation_details['remaining_amount']
+                remaining_color = 'green' if remaining <= 0 else '#E74C3C'
+                
+                # Format HTML complet et détaillé
+                details = f"""
+                <div style="font-family: Arial; font-size: 12px; line-height: 1.4;">
+                    <h3 style="margin: 0 0 10px 0; color: #2C3E50;">📋 Réservation #{reservation_details['id']}</h3>
+                    
+                    <table width="100%" cellpadding="3" cellspacing="0" style="border-collapse: collapse;">
+                        <tr>
+                            <td width="50%"><b>👤 Client:</b> {reservation_details['client_nom']}</td>
+                            <td><b>📞 Téléphone:</b> {reservation_details['client_telephone']}</td>
+                        </tr>
+                        <tr>
+                            <td><b>🎭 Thème:</b> {reservation_details['theme']}</td>
+                            <td><b>📅 Date événement:</b> {event_date_str}</td>
+                        </tr>
+                        <tr>
+                            <td><b>🎉 Type:</b> {reservation_details['event_type']}</td>
+                            <td><b>👥 Invités:</b> {reservation_details['guests_count']}</td>
+                        </tr>
+                        <tr>
+                            <td><b>📊 Statut:</b> <span style="color: {status_color}; font-weight: bold;">{status}</span></td>
+                            <td><b>📝 Créé le:</b> {created_date_str}</td>
+                        </tr>
+                    </table>
+                    
+                    <hr style="margin: 10px 0; border: 1px solid #BDC3C7;">
+                    
+                    <table width="100%" cellpadding="5" cellspacing="0">
+                        <tr>
+                            <td width="50%" valign="top">
+                                <h4 style="margin: 0 0 5px 0; color: #2980B9;">🛠️ Services sélectionnés:</h4>
+                                <div style="font-size: 11px;">
+                                    {services_html}
+                                </div>
+                            </td>
+                            <td width="50%" valign="top">
+                                <h4 style="margin: 0 0 5px 0; color: #2980B9;">📦 Produits sélectionnés:</h4>
+                                <div style="font-size: 11px;">
+                                    {products_html}
+                                </div>
+                            </td>
+                        </tr>
+                    </table>
+                    
+                    <hr style="margin: 10px 0; border: 1px solid #BDC3C7;">
+                    
+                    <h4 style="margin: 5px 0; color: #E74C3C;">💰 Résumé financier:</h4>
+                    <table width="100%" cellpadding="2" cellspacing="0">
+                        <tr>
+                            <td><b>Total services:</b> {reservation_details['total_services']:.2f} €</td>
+                            <td><b>Total produits:</b> {reservation_details['total_products']:.2f} €</td>
+                        </tr>
+                        <tr>
+                            <td><b>Remise:</b> {reservation_details['discount_percent']:.1f}%</td>
+                            <td><b>TVA ({reservation_details['tax_rate']:.1f}%):</b> {reservation_details['tax_amount']:.2f} €</td>
+                        </tr>
+                        <tr style="background-color: #F8F9FA;">
+                            <td><b>TOTAL TTC:</b> <span style="color: #E74C3C; font-size: 13px;">{reservation_details['total_amount']:.2f} €</span></td>
+                            <td><b>Payé:</b> {reservation_details['total_paid']:.2f} €</td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"><b>Solde restant:</b> <span style="color: {remaining_color}; font-weight: bold; font-size: 13px;">{remaining:.2f} €</span></td>
+                        </tr>
+                    </table>
+                    
+                    <h4 style="margin: 10px 0 5px 0; color: #8E44AD;">📝 Notes:</h4>
+                    <div style="margin-left: 10px; font-style: italic; background-color: #F8F9FA; padding: 5px; border-radius: 3px;">
+                        {reservation_details['notes'] or '<i>Aucune note</i>'}
+                    </div>
+                </div>
+                """
+                
+                self.reservation_details.setHtml(details)
+            else:
+                self.reservation_details.setHtml("<p>Erreur lors du chargement des détails de la réservation.</p>")
+        else:
+            self.reservation_details.setHtml("<p>Sélectionnez une réservation pour voir les détails.</p>")
     
     def filter_reservations(self):
         """Filtrer les réservations selon les critères"""
