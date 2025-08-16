@@ -278,7 +278,7 @@ class ReservationController(QObject):
             if status:
                 query = query.filter(EventReservation.status == status)
                 
-            reservations = query.order_by(EventReservation.event_date.desc()).all()
+            reservations = query.order_by(EventReservation.created_at.desc()).all()
             
             self.reservations_loaded.emit(reservations)
             return reservations
@@ -358,26 +358,134 @@ class ReservationController(QObject):
                 error_msg = f"Réservation {reservation_id} non trouvée"
                 self.error_occurred.emit(error_msg)
                 return False
+
+            print(f"🔄 Mise à jour de la réservation {reservation_id}")
+            print(f"📝 Données reçues: {reservation_data}")
             
-            # Mettre à jour les champs
-            reservation.partner_id = reservation_data.get('partner_id', reservation.partner_id)
+            # Mettre à jour les informations client
+            reservation.client_nom = reservation_data.get('client_nom', reservation.client_nom)
+            reservation.client_prenom = reservation_data.get('client_prenom', reservation.client_prenom)
+            reservation.client_telephone = reservation_data.get('client_telephone', reservation.client_telephone)
+            
+            # Mettre à jour les informations de l'événement
+            reservation.theme = reservation_data.get('theme', reservation.theme)
             reservation.event_date = reservation_data.get('event_date', reservation.event_date)
-            reservation.event_type = reservation_data.get('event_type', reservation.event_type)
-            reservation.guests_count = reservation_data.get('guests_count', reservation.guests_count)
+            reservation.event_type = reservation_data.get('type', reservation.event_type)
+            reservation.guests_count = reservation_data.get('guests', reservation.guests_count)
             reservation.status = reservation_data.get('status', reservation.status)
             reservation.notes = reservation_data.get('notes', reservation.notes)
-            reservation.discount_percent = reservation_data.get('discount_percent', reservation.discount_percent)
+            
+            # Mettre à jour les montants financiers
+            reservation.discount_percent = reservation_data.get('discount', reservation.discount_percent)
             reservation.tax_rate = reservation_data.get('tax_rate', reservation.tax_rate)
+            reservation.tax_amount = reservation_data.get('tax_amount', reservation.tax_amount)
+            reservation.total_services = reservation_data.get('total_services', reservation.total_services)
+            reservation.total_products = reservation_data.get('total_products', reservation.total_products)
+            reservation.total_amount = reservation_data.get('total', reservation.total_amount)
+            
+            # Supprimer les anciens services et produits
+            session.query(EventReservationService).filter(
+                EventReservationService.reservation_id == reservation_id
+            ).delete()
+            
+            session.query(EventReservationProduct).filter(
+                EventReservationProduct.reservation_id == reservation_id
+            ).delete()
+            
+            # Ajouter les nouveaux services
+            services_data = reservation_data.get('services', [])
+            total_services = 0
+            for service_data in services_data:
+                if hasattr(service_data, 'service_data'):
+                    # Checkbox avec service_data
+                    service = service_data.service_data
+                    service_id = service.id if hasattr(service, 'id') else service['id']
+                    unit_price = service.price if hasattr(service, 'price') else service['price']
+                    quantity = 1
+                else:
+                    # Données de service normales
+                    service_id = service_data.get('service_id') or service_data.get('id')
+                    unit_price = service_data.get('unit_price', service_data.get('price', 0))
+                    quantity = service_data.get('quantity', 1)
+                    print(f"📋 Service: ID={service_id}, Prix={unit_price}, Quantité={quantity}")
+                
+                if service_id is None:
+                    print(f"❌ Service ID manquant pour: {service_data}")
+                    continue
+                
+                line_total = float(unit_price) * quantity
+                total_services += line_total
+                
+                reservation_service = EventReservationService(
+                    reservation_id=reservation_id,
+                    service_id=service_id,
+                    quantity=quantity,
+                    unit_price=float(unit_price),
+                    line_total=line_total
+                )
+                session.add(reservation_service)
+            
+            # Ajouter les nouveaux produits
+            products_data = reservation_data.get('products', [])
+            total_products = 0
+            for product_data in products_data:
+                if hasattr(product_data, 'product_data'):
+                    # Checkbox avec product_data
+                    product = product_data.product_data
+                    product_id = product.id if hasattr(product, 'id') else product['id']
+                    unit_price = product.price_unit if hasattr(product, 'price_unit') else product['price_unit']
+                    quantity = 1
+                else:
+                    # Données de produit normales
+                    product_id = product_data.get('product_id') or product_data.get('id')
+                    unit_price = product_data.get('unit_price', product_data.get('price_unit', 0))
+                    quantity = product_data.get('quantity', 1)
+                    print(f"📋 Produit: ID={product_id}, Prix={unit_price}, Quantité={quantity}")
+                
+                if product_id is None:
+                    print(f"❌ Produit ID manquant pour: {product_data}")
+                    continue
+                
+                line_total = float(unit_price) * quantity
+                total_products += line_total
+                
+                reservation_product = EventReservationProduct(
+                    reservation_id=reservation_id,
+                    product_id=product_id,
+                    quantity=quantity,
+                    unit_price=float(unit_price),
+                    line_total=line_total
+                )
+                session.add(reservation_product)
+            
+            # Mettre à jour les totaux calculés
+            reservation.total_services = total_services
+            reservation.total_products = total_products
+            
+            # Recalculer le total
+            subtotal = total_services + total_products
+            discount_amount = subtotal * (reservation.discount_percent / 100)
+            after_discount = subtotal - discount_amount
+            tax_amount = after_discount * (reservation.tax_rate / 100)
+            total_amount = after_discount + tax_amount
+            
+            reservation.tax_amount = tax_amount
+            reservation.total_amount = total_amount
             
             session.commit()
-            print(f"✅ Réservation {reservation_id} mise à jour")
+            session.refresh(reservation)
+            
+            print(f"✅ Réservation {reservation_id} mise à jour avec succès")
+            print(f"💰 Nouveaux totaux: Services={total_services}€, Produits={total_products}€, Total={total_amount}€")
+            
             self.reservation_updated.emit(reservation)
-            return True
+            return reservation
             
         except Exception as e:
             session.rollback()
             error_msg = f"Erreur lors de la mise à jour de la réservation: {str(e)}"
             print(f"❌ {error_msg}")
+            print(f"🔍 Traceback: {e}")
             self.error_occurred.emit(error_msg)
             return False
             

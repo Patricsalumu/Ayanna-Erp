@@ -74,36 +74,6 @@ class ReservationIndex(QWidget):
             }
         """)
         
-        self.edit_reservation_button = QPushButton("✏️ Modifier")
-        self.edit_reservation_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980B9;
-            }
-        """)
-        
-        self.delete_reservation_button = QPushButton("🗑️ Supprimer")
-        self.delete_reservation_button.setStyleSheet("""
-            QPushButton {
-                background-color: #E74C3C;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #C0392B;
-            }
-        """)
-        
         # Barre de recherche
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Rechercher une réservation...")
@@ -132,8 +102,6 @@ class ReservationIndex(QWidget):
         """)
         
         toolbar_layout.addWidget(self.add_reservation_button)
-        toolbar_layout.addWidget(self.edit_reservation_button)
-        toolbar_layout.addWidget(self.delete_reservation_button)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(QLabel("Statut:"))
         toolbar_layout.addWidget(self.status_filter)
@@ -150,6 +118,7 @@ class ReservationIndex(QWidget):
         # Configuration du tableau
         self.reservations_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.reservations_table.setAlternatingRowColors(True)
+        self.reservations_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Désactiver l'édition directe
         self.reservations_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #BDC3C7;
@@ -230,8 +199,6 @@ class ReservationIndex(QWidget):
         self.search_input.textChanged.connect(self.filter_reservations)
         self.status_filter.currentTextChanged.connect(self.filter_reservations)
         self.add_reservation_button.clicked.connect(self.add_new_reservation)
-        self.edit_reservation_button.clicked.connect(self.edit_selected_reservation)
-        self.delete_reservation_button.clicked.connect(self.delete_selected_reservation)
     
     def load_reservations(self):
         """Charger les réservations depuis la base de données"""
@@ -420,16 +387,15 @@ class ReservationIndex(QWidget):
             QMessageBox.warning(self, "Attention", "Veuillez sélectionner une réservation à modifier.")
             return
         
-        # Récupérer les données de la réservation sélectionnée
-        reservation_data = {
-            'id': self.reservations_table.item(current_row, 0).text(),
-            'client': self.reservations_table.item(current_row, 1).text(),
-            'date_event': self.reservations_table.item(current_row, 2).text(),
-            'type': self.reservations_table.item(current_row, 3).text(),
-            'status': self.reservations_table.item(current_row, 4).text(),
-            'total': self.reservations_table.item(current_row, 5).text(),
-            'deposit': self.reservations_table.item(current_row, 6).text(),
-        }
+        # Récupérer l'ID de la réservation sélectionnée
+        reservation_id = self.reservations_table.item(current_row, 0).text()
+        
+        # Récupérer les données complètes de la réservation depuis la base de données
+        reservation_data = self.reservation_controller.get_reservation(int(reservation_id))
+        
+        if not reservation_data:
+            QMessageBox.warning(self, "Erreur", "Impossible de récupérer les données de la réservation.")
+            return
         
         from .reservation_form import ReservationForm
         
@@ -452,8 +418,6 @@ class ReservationIndex(QWidget):
         """Connecter les signaux des widgets aux méthodes"""
         # Boutons d'action
         self.add_reservation_button.clicked.connect(self.show_add_reservation_form)
-        self.edit_reservation_button.clicked.connect(self.show_edit_reservation_form)
-        self.delete_reservation_button.clicked.connect(self.delete_selected_reservation)
         
         # Table des réservations
         self.reservations_table.itemSelectionChanged.connect(self.on_reservation_selection_changed)
@@ -560,13 +524,9 @@ class ReservationIndex(QWidget):
             # Activer les boutons
             if hasattr(self, 'edit_reservation_button'):
                 self.edit_reservation_button.setEnabled(True)
-            if hasattr(self, 'delete_reservation_button'):
-                self.delete_reservation_button.setEnabled(True)
         else:
             if hasattr(self, 'edit_reservation_button'):
                 self.edit_reservation_button.setEnabled(False)
-            if hasattr(self, 'delete_reservation_button'):
-                self.delete_reservation_button.setEnabled(False)
     
     def show_add_reservation_form(self):
         """Afficher le formulaire d'ajout de réservation"""
@@ -574,5 +534,5 @@ class ReservationIndex(QWidget):
     
     def show_edit_reservation_form(self):
         """Afficher le formulaire de modification de réservation"""
-        pass  # À implémenter
+        self.edit_selected_reservation()
 

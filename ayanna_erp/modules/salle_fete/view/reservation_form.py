@@ -43,6 +43,7 @@ class ReservationForm(QDialog):
         # Lists pour stocker les cases à cocher
         self.service_checkboxes = []
         self.product_checkboxes = []
+        self.product_quantity_spinboxes = []  # Pour les quantités des produits
         
         self.setWindowTitle("Modifier la réservation" if self.is_edit_mode else "Nouvelle réservation")
         self.setModal(True)
@@ -50,8 +51,17 @@ class ReservationForm(QDialog):
         self.resize(1000, 800)  # Taille par défaut plus grande
         
         self.setup_ui()
+        
+        # Désactiver l'acompte en mode édition
         if self.is_edit_mode:
-            self.load_reservation_data()
+            self.deposit_spinbox.setEnabled(False)
+            self.deposit_spinbox.setToolTip("L'acompte ne peut pas être modifié. Utilisez l'onglet Paiements pour ajouter des paiements.")
+            
+        # Retarder le chargement des données jusqu'à ce que l'UI soit complètement créée
+        if self.is_edit_mode:
+            # Utiliser un timer pour retarder le chargement
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(100, self.load_reservation_data)
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -123,6 +133,18 @@ class ReservationForm(QDialog):
         general_layout.addWidget(QLabel("Notes:"), 3, 0)
         general_layout.addWidget(self.notes_edit, 3, 1, 1, 3)  # Span sur 3 colonnes
         
+        # Statut (ligne 5, visible seulement en mode édition)
+        self.status_combo = QComboBox()
+        self.status_combo.addItems(["En attente", "A venir", "Annuller", "Passé"])
+        
+        general_layout.addWidget(QLabel("Statut:"), 4, 0)
+        general_layout.addWidget(self.status_combo, 4, 1)
+        
+        # Masquer le statut en mode création
+        if not self.is_edit_mode:
+            general_layout.itemAtPosition(4, 0).widget().setVisible(False)  # Label
+            self.status_combo.setVisible(False)
+        
         # Services et produits
         items_group = QGroupBox("Services et Produits")
         items_layout = QVBoxLayout(items_group)
@@ -172,13 +194,29 @@ class ReservationForm(QDialog):
         
         items_layout.addLayout(services_products_layout)
         
-        # Résumé des sélections
+        # Résumé des sélections en deux colonnes
         selection_summary = QGroupBox("Résumé des sélections")
-        self.selection_layout = QVBoxLayout(selection_summary)
+        self.selection_layout = QHBoxLayout(selection_summary)
         
-        self.selection_label = QLabel("Aucun service ou produit sélectionné")
-        self.selection_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
-        self.selection_layout.addWidget(self.selection_label)
+        # Colonne services (gauche)
+        services_group = QGroupBox("Services sélectionnés")
+        services_layout = QVBoxLayout(services_group)
+        self.services_summary_label = QLabel("Aucun service sélectionné")
+        self.services_summary_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+        self.services_summary_label.setWordWrap(True)
+        services_layout.addWidget(self.services_summary_label)
+        
+        # Colonne produits (droite)
+        products_group = QGroupBox("Produits sélectionnés")
+        products_layout = QVBoxLayout(products_group)
+        self.products_summary_label = QLabel("Aucun produit sélectionné")
+        self.products_summary_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+        self.products_summary_label.setWordWrap(True)
+        products_layout.addWidget(self.products_summary_label)
+        
+        # Ajouter les deux colonnes
+        self.selection_layout.addWidget(services_group)
+        self.selection_layout.addWidget(products_group)
         
         items_layout.addWidget(selection_summary)
         
@@ -394,20 +432,49 @@ class ReservationForm(QDialog):
             self.products_layout.itemAt(i).widget().setParent(None)
         
         self.product_checkboxes.clear()
+        self.product_quantity_spinboxes = []  # Pour stocker les spinboxes de quantité
         
         if not products:
             self.create_default_products()
             return
         
-        # Créer une case à cocher pour chaque produit
+        # Créer une case à cocher avec quantité pour chaque produit
         for product in products:
+            # Widget conteneur pour checkbox + quantité
+            product_widget = QWidget()
+            product_layout = QHBoxLayout(product_widget)
+            product_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Checkbox du produit
             checkbox = QCheckBox(f"{product.name} - {product.price_unit:.2f} €")
             checkbox.setObjectName(f"product_{product.id}")
             checkbox.product_data = product
             checkbox.toggled.connect(self.update_selection_summary)
             
+            # Spinbox pour la quantité
+            quantity_spinbox = QSpinBox()
+            quantity_spinbox.setRange(1, 999)
+            quantity_spinbox.setValue(1)
+            quantity_spinbox.setEnabled(False)  # Désactivé par défaut
+            quantity_spinbox.setMaximumWidth(60)
+            quantity_spinbox.setToolTip("Quantité")
+            quantity_spinbox.valueChanged.connect(self.update_selection_summary)
+            
+            # Connecter checkbox et spinbox
+            checkbox.toggled.connect(lambda checked, spinbox=quantity_spinbox: spinbox.setEnabled(checked))
+            
+            # Ajouter au layout
+            product_layout.addWidget(checkbox)
+            product_layout.addWidget(QLabel("Qté:"))
+            product_layout.addWidget(quantity_spinbox)
+            product_layout.addStretch()  # Pousser vers la gauche
+            
+            # Stocker les références
             self.product_checkboxes.append(checkbox)
-            self.products_layout.addWidget(checkbox)
+            self.product_quantity_spinboxes.append(quantity_spinbox)
+            
+            # Ajouter au layout principal
+            self.products_layout.addWidget(product_widget)
         
         # Ajouter un stretch pour pousser les éléments vers le haut
         self.products_layout.addStretch()
@@ -451,41 +518,66 @@ class ReservationForm(QDialog):
         self.products_layout.addStretch()
     
     def update_selection_summary(self):
-        """Mettre à jour le résumé des sélections"""
-        selected_items = []
-        total = 0.0
+        """Mettre à jour le résumé des sélections en deux colonnes"""
+        selected_services = []
+        selected_products = []
+        total_services = 0.0
+        total_products = 0.0
         
         # Vérifier les services sélectionnés
         for checkbox in self.service_checkboxes:
             if checkbox.isChecked():
                 service_data = checkbox.service_data
                 if hasattr(service_data, 'name'):
-                    selected_items.append(f"🔧 {service_data.name}")
-                    total += float(service_data.price)
+                    name = service_data.name
+                    price = float(service_data.price)
                 else:
-                    selected_items.append(f"🔧 {service_data['name']}")
-                    total += float(service_data['price'])
+                    name = service_data['name']
+                    price = float(service_data['price'])
+                
+                selected_services.append(f"🔧 {name} - {price:.2f} €")
+                total_services += price
         
-        # Vérifier les produits sélectionnés
-        for checkbox in self.product_checkboxes:
+        # Vérifier les produits sélectionnés avec quantités
+        for i, checkbox in enumerate(self.product_checkboxes):
             if checkbox.isChecked():
                 product_data = checkbox.product_data
+                
+                # Récupérer la quantité du spinbox correspondant
+                quantity = 1
+                if i < len(self.product_quantity_spinboxes):
+                    quantity = self.product_quantity_spinboxes[i].value()
+                
                 if hasattr(product_data, 'name'):
-                    selected_items.append(f"📦 {product_data.name}")
-                    total += float(product_data.price_unit)
+                    name = product_data.name
+                    unit_price = float(product_data.price_unit)
                 else:
-                    selected_items.append(f"📦 {product_data['name']}")
-                    total += float(product_data['price'])
+                    name = product_data['name']
+                    unit_price = float(product_data['price'])
+                
+                line_total = unit_price * quantity
+                selected_products.append(f"📦 {name} (x{quantity}) - {line_total:.2f} €")
+                total_products += line_total
         
-        # Mettre à jour l'affichage
-        if selected_items:
-            summary_text = "\n".join(selected_items)
-            summary_text += f"\n\nTotal: {total:.2f} €"
-            self.selection_label.setText(summary_text)
-            self.selection_label.setStyleSheet("color: #27AE60; font-weight: bold;")
+        # Mettre à jour l'affichage des services
+        if selected_services:
+            services_text = "\n".join(selected_services)
+            services_text += f"\n\nSous-total services: {total_services:.2f} €"
+            self.services_summary_label.setText(services_text)
+            self.services_summary_label.setStyleSheet("color: #27AE60; font-weight: bold;")
         else:
-            self.selection_label.setText("Aucun service ou produit sélectionné")
-            self.selection_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+            self.services_summary_label.setText("Aucun service sélectionné")
+            self.services_summary_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
+        
+        # Mettre à jour l'affichage des produits
+        if selected_products:
+            products_text = "\n".join(selected_products)
+            products_text += f"\n\nSous-total produits: {total_products:.2f} €"
+            self.products_summary_label.setText(products_text)
+            self.products_summary_label.setStyleSheet("color: #3498DB; font-weight: bold;")
+        else:
+            self.products_summary_label.setText("Aucun produit sélectionné")
+            self.products_summary_label.setStyleSheet("color: #7F8C8D; font-style: italic;")
         
         # Calculer les totaux
         self.calculate_totals()
@@ -503,13 +595,21 @@ class ReservationForm(QDialog):
                 else:
                     subtotal += float(service_data['price'])
         
-        for checkbox in self.product_checkboxes:
+        for i, checkbox in enumerate(self.product_checkboxes):
             if checkbox.isChecked():
                 product_data = checkbox.product_data
+                
+                # Récupérer la quantité du spinbox correspondant
+                quantity = 1
+                if i < len(self.product_quantity_spinboxes):
+                    quantity = self.product_quantity_spinboxes[i].value()
+                
                 if hasattr(product_data, 'price_unit'):
-                    subtotal += float(product_data.price_unit)
+                    line_total = float(product_data.price_unit) * quantity
+                    subtotal += line_total
                 else:
-                    subtotal += float(product_data['price'])
+                    line_total = float(product_data['price']) * quantity
+                    subtotal += line_total
         
         # Appliquer la remise
         discount_percent = self.discount_spinbox.value()
@@ -542,15 +642,101 @@ class ReservationForm(QDialog):
     def load_reservation_data(self):
         """Charger les données de la réservation pour modification"""
         if not self.reservation_data:
+            print("❌ Aucune donnée de réservation fournie")
             return
         
-        # TODO: Implémenter le chargement des données depuis la base
-        # Pour l'instant, on utilise des données d'exemple
-        self.client_combo.setCurrentText(self.reservation_data.get('client', ''))
-        self.event_type_combo.setCurrentText(self.reservation_data.get('type', ''))
-        self.guests_spinbox.setValue(self.reservation_data.get('guests', 50))
-        self.reference_edit.setText(self.reservation_data.get('reference', ''))
+        print(f"🔍 Données de réservation reçues: {self.reservation_data}")
+        
+        # Pré-remplir les informations client
+        client_name = self.reservation_data.get('client_nom', '')
+        print(f"📝 Nom client: '{client_name}'")
+        self.client_combo.setCurrentText(client_name)
+        self.client_phone_edit.setText(self.reservation_data.get('client_telephone', ''))
+        
+        # Pré-remplir les informations de l'événement
+        self.event_type_combo.setCurrentText(self.reservation_data.get('event_type', ''))
+        self.guests_spinbox.setValue(self.reservation_data.get('guests_count', 50))
+        self.theme_edit.setText(self.reservation_data.get('theme', ''))
+        
+        # Pré-remplir date et heure
+        event_date = self.reservation_data.get('event_date')
+        if event_date:
+            from datetime import datetime
+            if isinstance(event_date, str):
+                try:
+                    event_date = datetime.fromisoformat(event_date.replace('Z', '+00:00'))
+                except:
+                    event_date = datetime.now()
+            
+            # Utiliser le widget QDateTimeEdit combiné
+            self.event_datetime.setDateTime(event_date)
+        
+        # Pré-remplir les notes
         self.notes_edit.setPlainText(self.reservation_data.get('notes', ''))
+        
+        # Pré-remplir le statut (seulement en mode édition)
+        if self.is_edit_mode:
+            status = self.reservation_data.get('status', 'En attente')
+            index = self.status_combo.findText(status)
+            if index >= 0:
+                self.status_combo.setCurrentIndex(index)
+        
+        # Pré-remplir les montants et taux
+        self.tax_rate_spinbox.setValue(self.reservation_data.get('tax_rate', 0))
+        self.discount_spinbox.setValue(self.reservation_data.get('discount_percent', 0))
+        
+        # Pré-remplir l'acompte (même si désactivé)
+        total_paid = self.reservation_data.get('total_paid', 0)
+        self.deposit_spinbox.setValue(total_paid)
+        
+        # Pré-cocher les services sélectionnés
+        self._load_selected_services()
+        
+        # Pré-cocher les produits sélectionnés  
+        self._load_selected_products()
+        
+        # Mettre à jour l'affichage des totaux
+        self.calculate_totals()
+    
+    def _load_selected_services(self):
+        """Charger et cocher les services sélectionnés"""
+        if not self.reservation_data:
+            return
+            
+        selected_services = self.reservation_data.get('services', [])
+        service_names = [service['name'] for service in selected_services]
+        
+        # Parcourir les checkboxes de services et cocher ceux qui sont sélectionnés
+        for checkbox in self.service_checkboxes:
+            if hasattr(checkbox, 'service_data'):
+                service_name = checkbox.service_data.name
+                
+                # Vérifier si ce service est dans les services sélectionnés
+                if service_name in service_names:
+                    checkbox.setChecked(True)
+    
+    def _load_selected_products(self):
+        """Charger et cocher les produits sélectionnés"""
+        if not self.reservation_data:
+            return
+            
+        selected_products = self.reservation_data.get('products', [])
+        
+        # Parcourir les checkboxes de produits et cocher ceux qui sont sélectionnés
+        for i, checkbox in enumerate(self.product_checkboxes):
+            if hasattr(checkbox, 'product_data'):
+                product_name = checkbox.product_data.name
+                
+                # Trouver le produit correspondant dans les données
+                matching_product = next((p for p in selected_products if p['name'] == product_name), None)
+                
+                if matching_product:
+                    checkbox.setChecked(True)
+                    
+                    # Restaurer la quantité si on a un spinbox correspondant
+                    if i < len(self.product_quantity_spinboxes):
+                        quantity = matching_product.get('quantity', 1)
+                        self.product_quantity_spinboxes[i].setValue(int(quantity))
     
     def save_reservation(self):
         """Sauvegarder la réservation"""
@@ -605,7 +791,7 @@ class ReservationForm(QDialog):
             'total': float(self.total_label.text().replace(" €", "").replace(",", ".")),
             'deposit': self.deposit_spinbox.value(),
             'remaining': float(self.remaining_label.text().replace(" €", "").replace(",", ".")),
-            'status': 'En attente',
+            'status': self.status_combo.currentText() if self.is_edit_mode else 'En attente',
             'items': []
         }
         
@@ -643,16 +829,17 @@ class ReservationForm(QDialog):
                 'client_prenom': reservation_data['client_prenom'],  # Prénom client direct
                 'client_telephone': reservation_data['client_telephone'],  # Téléphone
                 'theme': reservation_data['theme'],  # Thème de l'événement
-                'event_date': reservation_data['event_datetime'],  # Conversion nom de champ
-                'event_type': reservation_data['event_type'],
-                'guests_count': reservation_data['guests'],  # Conversion nom de champ
-                'status': 'En attente',
-                'notes': reservation_data['notes'],
-                'discount_percent': reservation_data['discount'],
-                'tax_rate': reservation_data['tax_rate'],
-                'deposit': reservation_data['deposit'],  # Acompte pour création de paiement
-                'payment_method': 'cash',  # Méthode de paiement par défaut
-                'created_by': 1  # ID utilisateur par défaut
+                'event_date': reservation_data['event_datetime'],  # Date et heure de l'événement
+                'type': reservation_data['event_type'],  # Type d'événement (attention au nom !)
+                'guests': reservation_data['guests'],  # Nombre d'invités
+                'status': reservation_data['status'],  # Statut
+                'notes': reservation_data['notes'],  # Notes
+                'discount': reservation_data['discount'],  # Remise
+                'tax_rate': reservation_data['tax_rate'],  # Taux de TVA
+                'tax_amount': reservation_data['tax_amount'],  # Montant de TVA
+                'total': reservation_data['total'],  # Total
+                'total_services': 0,  # Sera calculé dans le contrôleur
+                'total_products': 0   # Sera calculé dans le contrôleur
             }
             
             # Debug : afficher les données client
@@ -677,24 +864,28 @@ class ReservationForm(QDialog):
             
             # Préparer les données des produits
             products_data = []
-            for checkbox in self.product_checkboxes:
+            for i, checkbox in enumerate(self.product_checkboxes):
                 if checkbox.isChecked():
                     product_data = checkbox.product_data
                     if hasattr(product_data, 'id'):  # Objet réel de la DB
+                        # Récupérer la quantité du spinbox correspondant
+                        quantity = self.product_quantity_spinboxes[i].value() if i < len(self.product_quantity_spinboxes) else 1
                         products_data.append({
                             'product_id': product_data.id,
-                            'quantity': 1,
+                            'quantity': quantity,
                             'unit_price': float(product_data.price_unit)
                         })
             
             if self.is_edit_mode:
                 # Modification d'une réservation existante
                 controller_data['id'] = self.reservation_data.get('id')
+                # Ajouter les services et produits aux données du contrôleur
+                controller_data['services'] = services_data
+                controller_data['products'] = products_data
+                
                 updated_reservation = self.reservation_controller.update_reservation(
                     controller_data['id'], 
-                    controller_data,
-                    services_data,
-                    products_data
+                    controller_data
                 )
                 if updated_reservation:
                     # Émettre le signal avec les données originales
