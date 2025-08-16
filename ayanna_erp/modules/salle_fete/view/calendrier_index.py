@@ -22,6 +22,7 @@ class EventCalendarWidget(QWidget):
     """Widget calendrier pour visualiser les événements"""
     
     event_selected = pyqtSignal(int)  # Signal émis quand un événement est sélectionné
+    reservation_requested = pyqtSignal(object)  # Signal pour demander création réservation
     
     def __init__(self):
         super().__init__()
@@ -31,10 +32,52 @@ class EventCalendarWidget(QWidget):
         self.connect_signals()
         self.load_current_month()
     
+    def setup_ui(self):
+        """Configuration de l'interface"""
+        layout = QVBoxLayout()
+        
+        # Calendrier
+        self.calendar = QCalendarWidget()
+        
+        self.calendar.setStyleSheet("""
+            QCalendarWidget {
+                background-color: white;
+                alternate-background-color: #F8F9FA;
+                selection-background-color: rgba(52, 152, 219, 0.3);
+            }
+            QCalendarWidget QToolButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                padding: 5px;
+                border-radius: 3px;
+            }
+            QCalendarWidget QToolButton:hover {
+                background-color: #2980B9;
+            }
+            QCalendarWidget QMenu {
+                background-color: white;
+                border: 1px solid #BDC3C7;
+            }
+            QCalendarWidget QTableView {
+                selection-background-color: rgba(52, 152, 219, 0.2);
+                color: black;
+            }
+            QCalendarWidget QTableView::item:selected {
+                background-color: rgba(52, 152, 219, 0.3);
+                color: black;
+            }
+        """)
+        
+        layout.addWidget(self.calendar)
+        self.setLayout(layout)
+    
     def connect_signals(self):
         """Connecter les signaux"""
         self.calendar.currentPageChanged.connect(self.on_month_changed)
         self.calendar.clicked.connect(self.on_date_clicked)
+        self.calendar.activated.connect(self.on_date_double_clicked)  # Double-clic
+        self.calendar.selectionChanged.connect(self.on_date_selection_changed)  # Changement de sélection
     
     def load_current_month(self):
         """Charger les événements du mois actuel"""
@@ -62,6 +105,11 @@ class EventCalendarWidget(QWidget):
         # Appliquer les couleurs selon les événements
         print('-----------------------EVENT BY DATE DEBUGG---------------------------')
         print(self.events_by_date.items())
+        
+        # Créer un tooltip global avec tous les événements du mois
+        global_tooltip = "📅 Événements du mois:\n\n"
+        total_events = 0
+        
         for date, events in self.events_by_date.items():
             qdate = QDate(date.year, date.month, date.day)
             
@@ -77,6 +125,14 @@ class EventCalendarWidget(QWidget):
             
             # Créer un texte personnalisé pour la cellule
             if events:
+                total_events += len(events)
+                
+                # Ajouter au tooltip global
+                global_tooltip += f"📅 {date.strftime('%d/%m')} - {len(events)} événement(s)\n"
+                for event in events:
+                    global_tooltip += f"   🎉 {event['client_name']} - {event['event_type']}\n"
+                global_tooltip += "\n"
+                
                 # Prendre le premier client pour l'affichage
                 main_client = events[0]['client_name']
                 if len(main_client) > 10:
@@ -87,20 +143,22 @@ class EventCalendarWidget(QWidget):
                 # Ajouter un indicateur s'il y a plusieurs événements
                 if len(events) > 1:
                     display_text += f" (+{len(events)-1})"
-                
-                # Créer un tooltip détaillé
-                tooltip_text = f"📅 {date.strftime('%d/%m/%Y')} - {len(events)} événement(s)\n\n"
-                for i, event in enumerate(events):
-                    tooltip_text += f"🎉 {event['client_name']}\n"
-                    tooltip_text += f"   🎭 {event['event_type']} à {event['datetime'].strftime('%H:%M')}\n"
-                    if event['theme']:
-                        tooltip_text += f"   🎨 {event['theme']}\n"
-                    tooltip_text += f"   📊 {event['status']}\n\n"
-                
-                # Utiliser setToolTip pour afficher les détails
-                self.calendar.setToolTip(tooltip_text)
             
             self.calendar.setDateTextFormat(qdate, format_date)
+        
+        # Définir le tooltip global
+        if total_events > 0:
+            global_tooltip += f"\n📊 Total: {total_events} événements\n\n"
+            global_tooltip += "💡 Cliquez sur une date pour voir les détails\n"
+            global_tooltip += "💡 Double-cliquez pour créer une nouvelle réservation"
+        else:
+            global_tooltip = "📅 Aucun événement ce mois-ci\n\n"
+            global_tooltip += "💡 Double-cliquez sur une date pour créer une réservation"
+        
+        self.calendar.setToolTip(global_tooltip)
+        
+        # Mettre à jour le tooltip pour la date actuellement sélectionnée
+        self.update_current_tooltip()
     
     def get_date_color(self, events):
         """Déterminer la couleur d'une date selon ses événements"""
@@ -135,6 +193,35 @@ class EventCalendarWidget(QWidget):
             if events:
                 # Émettre le signal avec l'ID du premier événement
                 self.event_selected.emit(events[0]['id'])
+    
+    def on_date_selection_changed(self):
+        """Callback quand la sélection de date change - met à jour le tooltip"""
+        self.update_current_tooltip()
+    
+    def update_current_tooltip(self):
+        """Mettre à jour le tooltip pour la date actuellement sélectionnée"""
+        date = self.calendar.selectedDate()
+        if date.isValid():
+            date_key = date.toString("yyyy_MM_dd")
+            tooltip_attr = f'tooltip_{date_key}'
+            
+            # Vérifier si on a un tooltip pour cette date
+            if hasattr(self, tooltip_attr):
+                tooltip_text = getattr(self, tooltip_attr)
+                self.calendar.setToolTip(tooltip_text)
+            else:
+                # Pas d'événement pour cette date
+                date_str = date.toString("dd/MM/yyyy")
+                self.calendar.setToolTip(f"📅 {date_str}\nAucun événement\n\nDouble-cliquez pour créer une réservation")
+    
+    def on_date_double_clicked(self, date):
+        """Callback quand une date est double-cliquée - ouvrir fenêtre de création"""
+        self.open_reservation_form(date)
+    
+    def open_reservation_form(self, date):
+        """Ouvrir la fenêtre de création de réservation pour une date"""
+        # Émettre le signal vers la classe parent
+        self.reservation_requested.emit(date.toPyDate())
 
 
 class CalendrierIndex(QWidget):
@@ -253,6 +340,7 @@ class CalendrierIndex(QWidget):
     def connect_signals(self):
         """Connecter les signaux"""
         self.event_calendar.event_selected.connect(self.on_event_selected)
+        self.event_calendar.reservation_requested.connect(self.on_reservation_requested)
         self.calendrier_controller.events_loaded.connect(self.on_events_loaded)
         self.calendrier_controller.event_details_loaded.connect(self.on_event_details_loaded)
         self.calendrier_controller.error_occurred.connect(self.on_error_occurred)
@@ -317,6 +405,39 @@ class CalendrierIndex(QWidget):
         """Callback quand un événement est sélectionné dans le calendrier"""
         print(f"📋 Événement sélectionné: {event_id}")
         self.calendrier_controller.get_event_details(event_id)
+    
+    def on_reservation_requested(self, date):
+        """Callback quand une réservation est demandée pour une date"""
+        self.open_reservation_form(date)
+    
+    def open_reservation_form(self, date):
+        """Ouvrir la fenêtre de création de réservation pour une date"""
+        try:
+            from ayanna_erp.modules.salle_fete.view.reservation_form import ReservationForm
+            from PyQt6.QtCore import QDateTime, QDate, QTime
+            
+            # Créer la fenêtre de réservation avec les paramètres corrects
+            reservation_form = ReservationForm(
+                parent=self,
+                reservation_data=None,  # Nouvelle réservation
+                db_manager=self.db_manager,
+                pos_id=1  # ID du point de vente par défaut
+            )
+            
+            # Pré-remplir la date/heure avec la date sélectionnée à 18h00
+            # Convertir la date en QDate puis créer QDateTime avec QTime
+            qdate = QDate(date.year, date.month, date.day)
+            qtime = QTime(18, 0)  # 18h00
+            selected_datetime = QDateTime(qdate, qtime)
+            reservation_form.event_datetime.setDateTime(selected_datetime)
+            
+            if reservation_form.exec():
+                # Recharger les données après création
+                self.refresh_data()
+                
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'ouverture du formulaire: {str(e)}")
+            print(f"❌ Erreur lors de l'ouverture du formulaire: {str(e)}")
     
     def on_event_details_loaded(self, details):
         """Callback quand les détails d'un événement sont chargés"""
