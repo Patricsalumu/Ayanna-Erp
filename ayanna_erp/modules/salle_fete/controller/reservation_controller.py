@@ -57,11 +57,11 @@ class ReservationController(QObject):
                 client_telephone=reservation_data.get('client_telephone'),  # Téléphone
                 theme=reservation_data.get('theme', ''),  # Thème de l'événement
                 event_date=reservation_data.get('event_date'),
-                event_type=reservation_data.get('event_type', ''),
-                guests_count=reservation_data.get('guests_count', 1),
+                event_type=reservation_data.get('type', ''),  # Mapper 'type' -> 'event_type'
+                guests_count=reservation_data.get('guests', 1),  # Mapper 'guests' -> 'guests_count'
                 status=reservation_data.get('status', 'draft'),
                 notes=reservation_data.get('notes', ''),
-                discount_percent=reservation_data.get('discount_percent', 0.0),
+                discount_percent=reservation_data.get('discount', 0.0),  # Mapper 'discount' -> 'discount_percent'
                 tax_rate=reservation_data.get('tax_rate', 20.0),
                 created_by=reservation_data.get('created_by', 1)
             )

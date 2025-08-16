@@ -808,15 +808,24 @@ class ReservationForm(QDialog):
                 }
                 reservation_data['items'].append(item)
         
-        for checkbox in self.product_checkboxes:
+        for i, checkbox in enumerate(self.product_checkboxes):
             if checkbox.isChecked():
                 product_data = checkbox.product_data
+                
+                # Récupérer la quantité du spinbox correspondant
+                quantity = 1
+                if i < len(self.product_quantity_spinboxes):
+                    quantity = self.product_quantity_spinboxes[i].value()
+                
+                unit_price = float(product_data.price_unit) if hasattr(product_data, 'price_unit') else float(product_data['price'])
+                total_price = unit_price * quantity
+                
                 item = {
                     'type': 'Produit',
                     'name': product_data.name if hasattr(product_data, 'name') else product_data['name'],
-                    'unit_price': float(product_data.price_unit) if hasattr(product_data, 'price_unit') else float(product_data['price']),
-                    'quantity': 1,
-                    'total': float(product_data.price_unit) if hasattr(product_data, 'price_unit') else float(product_data['price'])
+                    'unit_price': unit_price,
+                    'quantity': quantity,
+                    'total': total_price
                 }
                 reservation_data['items'].append(item)
         
@@ -830,7 +839,7 @@ class ReservationForm(QDialog):
                 'client_telephone': reservation_data['client_telephone'],  # Téléphone
                 'theme': reservation_data['theme'],  # Thème de l'événement
                 'event_date': reservation_data['event_datetime'],  # Date et heure de l'événement
-                'type': reservation_data['event_type'],  # Type d'événement (attention au nom !)
+                'type': reservation_data['event_type'],  # Type d'événement
                 'guests': reservation_data['guests'],  # Nombre d'invités
                 'status': reservation_data['status'],  # Statut
                 'notes': reservation_data['notes'],  # Notes
@@ -838,6 +847,7 @@ class ReservationForm(QDialog):
                 'tax_rate': reservation_data['tax_rate'],  # Taux de TVA
                 'tax_amount': reservation_data['tax_amount'],  # Montant de TVA
                 'total': reservation_data['total'],  # Total
+                'deposit': reservation_data['deposit'],  # Acompte
                 'total_services': 0,  # Sera calculé dans le contrôleur
                 'total_products': 0   # Sera calculé dans le contrôleur
             }
