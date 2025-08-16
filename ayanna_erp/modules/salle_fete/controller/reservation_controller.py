@@ -11,7 +11,7 @@ from datetime import datetime, date, timedelta
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from model.salle_fete import (EventReservation, EventClient, EventService, EventProduct,
+from ayanna_erp.modules.salle_fete.model.salle_fete import (EventReservation, EventClient, EventService, EventProduct,
                               EventReservationService, EventReservationProduct, get_database_manager)
 
 
@@ -132,7 +132,7 @@ class ReservationController(QObject):
             print(f"🔍 Debug - Acompte reçu: {deposit_amount}€")
             
             if deposit_amount > 0:
-                from model.salle_fete import EventPayment
+                from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
                 
                 payment = EventPayment(
                     reservation_id=reservation.id,
@@ -187,7 +187,7 @@ class ReservationController(QObject):
             ).filter(EventReservationProduct.reservation_id == reservation_id).all()
             
             # Récupérer les paiements liés
-            from model.salle_fete import EventPayment
+            from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
             payments = session.query(EventPayment).filter(
                 EventPayment.reservation_id == reservation_id
             ).all()

@@ -368,7 +368,7 @@ class ReservationIndex(QWidget):
     def add_new_reservation(self):
         """Ouvrir le formulaire pour une nouvelle réservation"""
         from .reservation_form import ReservationForm
-        from model.salle_fete import get_database_manager
+        from ayanna_erp.modules.salle_fete.model.salle_fete import get_database_manager
         
         # Récupérer le gestionnaire de base de données
         db_manager = get_database_manager()

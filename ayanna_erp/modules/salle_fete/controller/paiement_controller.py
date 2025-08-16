@@ -12,7 +12,7 @@ from datetime import datetime, date
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from model.salle_fete import EventPayment, EventReservation, get_database_manager
+from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment, EventReservation, get_database_manager
 
 
 class PaiementController(QObject):

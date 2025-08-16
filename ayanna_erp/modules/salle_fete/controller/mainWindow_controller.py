@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from model.salle_fete import initialize_salle_fete_module, get_database_manager
+from ayanna_erp.modules.salle_fete.model.salle_fete import initialize_salle_fete_module, get_database_manager
 
 
 class MainWindowController(QObject):
@@ -81,7 +81,7 @@ class MainWindowController(QObject):
             
         try:
             # Vérifier d'abord si le module est déjà initialisé dans la base de données
-            from model.salle_fete import EventService, get_database_manager
+            from ayanna_erp.modules.salle_fete.model.salle_fete import EventService, get_database_manager
             
             db_manager = get_database_manager()
             session = db_manager.get_session()
