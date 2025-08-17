@@ -411,15 +411,47 @@ class ReservationForm(QDialog):
             self.create_default_services()
             return
         
-        # Créer une case à cocher pour chaque service
+        # Créer une ligne pour chaque service avec checkbox et quantité
         for service in services:
+            # Widget conteneur pour chaque service
+            service_container = QWidget()
+            service_layout = QHBoxLayout(service_container)
+            service_layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Case à cocher pour le service
             checkbox = QCheckBox(f"{service.name} - {service.price:.2f} €")
             checkbox.setObjectName(f"service_{service.id}")
             checkbox.service_data = service
             checkbox.toggled.connect(self.update_selection_summary)
+            checkbox.toggled.connect(self.calculate_totals)
             
+            # Champ de quantité
+            quantity_spinbox = QSpinBox()
+            quantity_spinbox.setMinimum(1)
+            quantity_spinbox.setMaximum(9999)
+            quantity_spinbox.setValue(1)
+            quantity_spinbox.setEnabled(False)  # Désactivé par défaut
+            quantity_spinbox.setObjectName(f"quantity_service_{service.id}")
+            quantity_spinbox.valueChanged.connect(self.update_selection_summary)
+            quantity_spinbox.valueChanged.connect(self.calculate_totals)
+            
+            # Connecter la case à cocher pour activer/désactiver la quantité
+            def on_service_toggled(checked, spinbox=quantity_spinbox):
+                spinbox.setEnabled(checked)
+            
+            checkbox.toggled.connect(on_service_toggled)
+            
+            # Ajouter les widgets au layout
+            service_layout.addWidget(checkbox)
+            service_layout.addWidget(QLabel("Qté:"))
+            service_layout.addWidget(quantity_spinbox)
+            service_layout.addStretch()
+            
+            # Stocker les références
+            checkbox.quantity_spinbox = quantity_spinbox
             self.service_checkboxes.append(checkbox)
-            self.services_layout.addWidget(checkbox)
+            
+            self.services_layout.addWidget(service_container)
         
         # Ajouter un stretch pour pousser les éléments vers le haut
         self.services_layout.addStretch()
@@ -523,10 +555,16 @@ class ReservationForm(QDialog):
         total_services = 0.0
         total_products = 0.0
         
-        # Vérifier les services sélectionnés
+        # Vérifier les services sélectionnés avec quantités
         for checkbox in self.service_checkboxes:
             if checkbox.isChecked():
                 service_data = checkbox.service_data
+                
+                # Récupérer la quantité du spinbox
+                quantity = 1
+                if hasattr(checkbox, 'quantity_spinbox'):
+                    quantity = checkbox.quantity_spinbox.value()
+                
                 if hasattr(service_data, 'name'):
                     name = service_data.name
                     price = float(service_data.price)
@@ -534,8 +572,9 @@ class ReservationForm(QDialog):
                     name = service_data['name']
                     price = float(service_data['price'])
                 
-                selected_services.append(f"🔧 {name} - {price:.2f} €")
-                total_services += price
+                line_total = price * quantity
+                selected_services.append(f"🔧 {name} - {price:.2f} € x{quantity} = {line_total:.2f} €")
+                total_services += line_total
         
         # Vérifier les produits sélectionnés avec quantités
         for i, checkbox in enumerate(self.product_checkboxes):
@@ -585,14 +624,22 @@ class ReservationForm(QDialog):
         """Calculer les totaux"""
         subtotal = 0.0
         
-        # Calculer le sous-total basé sur les sélections
+        # Calculer le sous-total basé sur les sélections avec quantités
         for checkbox in self.service_checkboxes:
             if checkbox.isChecked():
                 service_data = checkbox.service_data
+                
+                # Récupérer la quantité du spinbox
+                quantity = 1
+                if hasattr(checkbox, 'quantity_spinbox'):
+                    quantity = checkbox.quantity_spinbox.value()
+                
                 if hasattr(service_data, 'price'):
-                    subtotal += float(service_data.price)
+                    line_total = float(service_data.price) * quantity
+                    subtotal += line_total
                 else:
-                    subtotal += float(service_data['price'])
+                    line_total = float(service_data['price']) * quantity
+                    subtotal += line_total
         
         for i, checkbox in enumerate(self.product_checkboxes):
             if checkbox.isChecked():
@@ -698,21 +745,28 @@ class ReservationForm(QDialog):
         self.calculate_totals()
     
     def _load_selected_services(self):
-        """Charger et cocher les services sélectionnés"""
+        """Charger et cocher les services sélectionnés avec leurs quantités"""
         if not self.reservation_data:
             return
             
         selected_services = self.reservation_data.get('services', [])
-        service_names = [service['name'] for service in selected_services]
         
         # Parcourir les checkboxes de services et cocher ceux qui sont sélectionnés
         for checkbox in self.service_checkboxes:
             if hasattr(checkbox, 'service_data'):
                 service_name = checkbox.service_data.name
                 
-                # Vérifier si ce service est dans les services sélectionnés
-                if service_name in service_names:
+                # Trouver le service correspondant dans les données
+                matching_service = next((s for s in selected_services if s['name'] == service_name), None)
+                
+                if matching_service:
                     checkbox.setChecked(True)
+                    
+                    # Restaurer la quantité si on a un spinbox correspondant
+                    if hasattr(checkbox, 'quantity_spinbox'):
+                        quantity = matching_service.get('quantity', 1)
+                        checkbox.quantity_spinbox.setValue(int(quantity))
+                        checkbox.quantity_spinbox.setEnabled(True)  # Activer le spinbox
     
     def _load_selected_products(self):
         """Charger et cocher les produits sélectionnés"""
@@ -794,16 +848,25 @@ class ReservationForm(QDialog):
             'items': []
         }
         
-        # Récupération des services et produits sélectionnés
+        # Récupération des services et produits sélectionnés avec quantités
         for checkbox in self.service_checkboxes:
             if checkbox.isChecked():
                 service_data = checkbox.service_data
+                
+                # Récupérer la quantité du spinbox
+                quantity = 1
+                if hasattr(checkbox, 'quantity_spinbox'):
+                    quantity = checkbox.quantity_spinbox.value()
+                
+                unit_price = float(service_data.price) if hasattr(service_data, 'price') else float(service_data['price'])
+                total_price = unit_price * quantity
+                
                 item = {
                     'type': 'Service',
                     'name': service_data.name if hasattr(service_data, 'name') else service_data['name'],
-                    'unit_price': float(service_data.price) if hasattr(service_data, 'price') else float(service_data['price']),
-                    'quantity': 1,
-                    'total': float(service_data.price) if hasattr(service_data, 'price') else float(service_data['price'])
+                    'unit_price': unit_price,
+                    'quantity': quantity,
+                    'total': total_price
                 }
                 reservation_data['items'].append(item)
         
@@ -859,15 +922,20 @@ class ReservationForm(QDialog):
             print(f"   - client_telephone: {controller_data['client_telephone']}")
             print(f"   - theme: {controller_data['theme']}")
             
-            # Préparer les données des services
+            # Préparer les données des services avec quantités
             services_data = []
             for checkbox in self.service_checkboxes:
                 if checkbox.isChecked():
                     service_data = checkbox.service_data
                     if hasattr(service_data, 'id'):  # Objet réel de la DB
+                        # Récupérer la quantité du spinbox
+                        quantity = 1
+                        if hasattr(checkbox, 'quantity_spinbox'):
+                            quantity = checkbox.quantity_spinbox.value()
+                        
                         services_data.append({
                             'service_id': service_data.id,
-                            'quantity': 1,
+                            'quantity': quantity,
                             'unit_price': float(service_data.price)
                         })
             
@@ -884,6 +952,14 @@ class ReservationForm(QDialog):
                             'quantity': quantity,
                             'unit_price': float(product_data.price_unit)
                         })
+            
+            # Debug : afficher les données services et produits
+            print(f"🔧 Debug - Services à sauvegarder: {len(services_data)}")
+            for service in services_data:
+                print(f"   - Service ID: {service['service_id']}, Quantité: {service['quantity']}, Prix: {service['unit_price']}")
+            print(f"📦 Debug - Produits à sauvegarder: {len(products_data)}")
+            for product in products_data:
+                print(f"   - Produit ID: {product['product_id']}, Quantité: {product['quantity']}, Prix: {product['unit_price']}")
             
             if self.is_edit_mode:
                 # Modification d'une réservation existante
