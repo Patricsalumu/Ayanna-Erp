@@ -7,7 +7,7 @@ import sys
 import os
 from datetime import datetime, timedelta
 from sqlalchemy.orm import sessionmaker, joinedload
-from sqlalchemy import desc, and_, or_, func
+from sqlalchemy import desc, and_, or_, func, text
 from PyQt6.QtCore import QObject, pyqtSignal
 
 # Import des modèles et du gestionnaire de base de données
@@ -334,20 +334,35 @@ class PaiementController(QObject):
                 }
                 products.append(product_data)
             
-            # Préparer les paiements
+            # Préparer les paiements avec les noms d'utilisateurs
             payments = []
             total_paid = 0
-            for payment in reservation.payments:
-                if payment.status == 'validated':
-                    total_paid += payment.amount
+            
+            # Récupérer les paiements avec une jointure sur la table core_users
+            payments_query = session.execute(text("""
+                SELECT 
+                    ep.id, ep.amount, ep.payment_method, ep.payment_date, 
+                    ep.status, ep.user_id, ep.notes,
+                    COALESCE(cu.name, 'Utilisateur inconnu') as user_name
+                FROM event_payments ep
+                LEFT JOIN core_users cu ON ep.user_id = cu.id
+                WHERE ep.reservation_id = :reservation_id
+                ORDER BY ep.payment_date DESC
+            """), {'reservation_id': reservation_id})
+            
+            for payment_row in payments_query:
+                if payment_row.status == 'validated':
+                    total_paid += payment_row.amount
                     
                 payment_data = {
-                    'id': payment.id,
-                    'amount': payment.amount,
-                    'payment_method': payment.payment_method,
-                    'payment_date': payment.payment_date,
-                    'status': payment.status,
-                    'notes': payment.notes
+                    'id': payment_row.id,
+                    'amount': payment_row.amount,
+                    'payment_method': payment_row.payment_method,
+                    'payment_date': payment_row.payment_date,
+                    'status': payment_row.status,
+                    'user_id': payment_row.user_id,
+                    'user_name': payment_row.user_name,
+                    'notes': payment_row.notes
                 }
                 payments.append(payment_data)
             
@@ -437,6 +452,7 @@ class PaiementController(QObject):
                 payment_method=payment_data['payment_method'],
                 payment_date=payment_data.get('payment_date', datetime.now()),
                 status=payment_data.get('status', 'validated'),
+                user_id=payment_data.get('user_id', 1),  # TODO: Récupérer l'ID de l'utilisateur connecté
                 notes=payment_data.get('notes', '')
             )
             

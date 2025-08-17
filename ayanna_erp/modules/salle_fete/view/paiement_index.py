@@ -95,6 +95,7 @@ class PaymentDialog(QDialog):
             'amount': self.amount_input.value(),
             'payment_method': self.payment_method.currentText(),
             'payment_date': payment_date,
+            'user_id': 1,  # TODO: Récupérer l'ID de l'utilisateur connecté
             'notes': self.notes.toPlainText(),
             'status': 'validated'
         }
@@ -249,8 +250,8 @@ class PaiementIndex(QWidget):
         payments_layout = QVBoxLayout(payments_group)
         
         self.payments_table = QTableWidget()
-        self.payments_table.setColumnCount(4)
-        self.payments_table.setHorizontalHeaderLabels(["Date", "Montant", "Méthode", "Notes"])
+        self.payments_table.setColumnCount(5)
+        self.payments_table.setHorizontalHeaderLabels(["Date", "Montant", "Méthode", "Utilisateur", "Notes"])
         self.payments_table.horizontalHeader().setStretchLastSection(True)
         self.payments_table.setMaximumHeight(150)
         
@@ -321,8 +322,10 @@ class PaiementIndex(QWidget):
         self.date_filter.dateChanged.connect(self.filter_by_date)
         self.clear_date_button.clicked.connect(self.clear_date_filter)
         
-        # Sélection de réservation
+        # Sélection de réservation - plusieurs signaux pour garantir la sélection
         self.reservations_table.itemSelectionChanged.connect(self.on_reservation_selected)
+        self.reservations_table.cellClicked.connect(self.on_cell_clicked)
+        self.reservations_table.currentItemChanged.connect(self.on_current_item_changed)
         
         # Boutons d'action
         self.pay_button.clicked.connect(self.open_payment_dialog)
@@ -385,6 +388,11 @@ class PaiementIndex(QWidget):
             
             # Stocker les données de la réservation
             self.reservations_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, reservation)
+        
+        # Sélectionner automatiquement la première ligne s'il y en a une
+        if len(reservations) > 0:
+            self.reservations_table.selectRow(0)
+            self.select_reservation_at_row(0)
     
     def perform_search(self):
         """Effectuer une recherche dans la base de données"""
@@ -430,18 +438,35 @@ class PaiementIndex(QWidget):
     def on_reservation_selected(self):
         """Callback quand une réservation est sélectionnée"""
         current_row = self.reservations_table.currentRow()
-        if current_row >= 0:
-            item = self.reservations_table.item(current_row, 0)
+        self.select_reservation_at_row(current_row)
+    
+    def on_cell_clicked(self, row, column):
+        """Callback quand une cellule est cliquée"""
+        self.select_reservation_at_row(row)
+    
+    def on_current_item_changed(self, current, previous):
+        """Callback quand l'élément courant change"""
+        if current:
+            row = current.row()
+            self.select_reservation_at_row(row)
+    
+    def select_reservation_at_row(self, row):
+        """Sélectionner la réservation à la ligne donnée"""
+        if row >= 0 and row < self.reservations_table.rowCount():
+            item = self.reservations_table.item(row, 0)
             if item:
                 self.selected_reservation = item.data(Qt.ItemDataRole.UserRole)
                 self.load_reservation_details()
                 self.pay_button.setEnabled(True)
                 self.print_receipt_button.setEnabled(True)
-        else:
-            self.selected_reservation = None
-            self.clear_reservation_details()
-            self.pay_button.setEnabled(False)
-            self.print_receipt_button.setEnabled(False)
+                
+                # S'assurer que la ligne est sélectionnée visuellement
+                self.reservations_table.selectRow(row)
+            else:
+                self.selected_reservation = None
+                self.clear_reservation_details()
+                self.pay_button.setEnabled(False)
+                self.print_receipt_button.setEnabled(False)
     
     def load_reservation_details(self):
         """Charger les détails complets de la réservation depuis la BDD"""
@@ -579,9 +604,13 @@ class PaiementIndex(QWidget):
                 method = payment.get('payment_method', 'N/A')
                 self.payments_table.setItem(row, 2, QTableWidgetItem(method))
                 
+                # Utilisateur
+                user_name = payment.get('user_name', f"Utilisateur {payment.get('user_id', 'N/A')}")
+                self.payments_table.setItem(row, 3, QTableWidgetItem(user_name))
+                
                 # Notes
                 notes = payment.get('notes', '')
-                self.payments_table.setItem(row, 3, QTableWidgetItem(notes))
+                self.payments_table.setItem(row, 4, QTableWidgetItem(notes))
                 
         except Exception as e:
             print(f"Erreur lors du chargement de l'historique des paiements: {e}")
@@ -718,16 +747,18 @@ class PaiementIndex(QWidget):
             <div class="section">
                 <h3>Historique des paiements</h3>
                 <table>
-                    <tr><th>Date</th><th>Montant</th><th>Méthode</th><th>Notes</th></tr>
+                    <tr><th>Date</th><th>Montant</th><th>Méthode</th><th>Utilisateur</th><th>Notes</th></tr>
         """
         
         for payment in payments:
             date_str = payment.payment_date.strftime('%d/%m/%Y %H:%M') if payment.payment_date else 'N/A'
+            user_name = getattr(payment, 'user_name', f"Utilisateur {payment.user_id}") if hasattr(payment, 'user_id') else 'N/A'
             html += f"""
                     <tr>
                         <td>{date_str}</td>
                         <td>{payment.amount:.2f} €</td>
                         <td>{payment.payment_method or 'N/A'}</td>
+                        <td>{user_name}</td>
                         <td>{payment.notes or ''}</td>
                     </tr>
             """

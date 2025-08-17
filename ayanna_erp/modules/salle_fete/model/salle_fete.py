@@ -190,6 +190,7 @@ class EventPayment(Base):
     amount = Column(Float, nullable=False)
     payment_date = Column(DateTime, default=func.current_timestamp())
     status = Column(String(50), default='validated')  # validated, pending, cancelled
+    user_id = Column(Integer, nullable=False)  # ID de l'utilisateur qui a reçu le paiement
     notes = Column(Text)
     journal_id = Column(Integer)  # Journal comptable
     

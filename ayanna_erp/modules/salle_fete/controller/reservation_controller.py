@@ -7,6 +7,7 @@ import sys
 import os
 from PyQt6.QtCore import QObject, pyqtSignal
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text
 from datetime import datetime, date, timedelta
 
 # Ajouter le chemin vers le modèle
@@ -129,7 +130,6 @@ class ReservationController(QObject):
             
             # Créer un paiement automatique si un acompte est fourni
             deposit_amount = reservation_data.get('deposit', 0.0)
-            print(f"🔍 Debug - Acompte reçu: {deposit_amount}€")
             
             if deposit_amount > 0:
                 from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
@@ -140,6 +140,7 @@ class ReservationController(QObject):
                     payment_method='Espèces',  # Simplifier en utilisant espèces par défaut
                     payment_date=datetime.now(),
                     status='validated',
+                    user_id=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
                     notes=f"Acompte automatique pour réservation {reservation.client_nom} {reservation.client_prenom}"
                 )
                 session.add(payment)
@@ -186,14 +187,37 @@ class ReservationController(QObject):
                 EventProduct, EventReservationProduct.product_id == EventProduct.id
             ).filter(EventReservationProduct.reservation_id == reservation_id).all()
             
-            # Récupérer les paiements liés
-            from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
-            payments = session.query(EventPayment).filter(
-                EventPayment.reservation_id == reservation_id
-            ).all()
+            # Récupérer les paiements liés avec les noms d'utilisateurs
+            payments_query = session.execute(text("""
+                SELECT 
+                    ep.id, ep.amount, ep.payment_method, ep.payment_date, 
+                    ep.status, ep.user_id, ep.notes,
+                    COALESCE(cu.name, 'Utilisateur inconnu') as user_name
+                FROM event_payments ep
+                LEFT JOIN core_users cu ON ep.user_id = cu.id
+                WHERE ep.reservation_id = :reservation_id
+                ORDER BY ep.payment_date DESC
+            """), {'reservation_id': reservation_id})
             
-            # Calculer le total payé
-            total_paid = sum(payment.amount for payment in payments if payment.status == 'validated')
+            # Calculer le total payé et construire la liste des paiements
+            payments_list = []
+            total_paid = 0
+            
+            for payment_row in payments_query:
+                if payment_row.status == 'validated':
+                    total_paid += payment_row.amount
+                    
+                payment_data = {
+                    'amount': payment_row.amount,
+                    'payment_method': payment_row.payment_method,
+                    'payment_date': payment_row.payment_date,
+                    'status': payment_row.status,
+                    'user_id': payment_row.user_id,
+                    'user_name': payment_row.user_name,
+                    'notes': payment_row.notes or ''
+                }
+                payments_list.append(payment_data)
+            
             remaining_amount = (reservation.total_amount or 0) - total_paid
             
             # Construire le dictionnaire complet
@@ -234,16 +258,7 @@ class ReservationController(QObject):
                     }
                     for res_product, product in products
                 ],
-                'payments': [
-                    {
-                        'amount': payment.amount,
-                        'payment_method': payment.payment_method,
-                        'payment_date': payment.payment_date,
-                        'status': payment.status,
-                        'notes': payment.notes or ''
-                    }
-                    for payment in payments
-                ]
+                'payments': payments_list
             }
             
             return reservation_details
