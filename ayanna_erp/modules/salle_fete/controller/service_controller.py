@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from ayanna_erp.modules.salle_fete.model.salle_fete import EventService, get_database_manager
+from ayanna_erp.modules.salle_fete.model.salle_fete import EventService, EventReservation, EventReservationService, get_database_manager
 
 
 class ServiceController(QObject):
@@ -89,23 +89,9 @@ class ServiceController(QObject):
                 EventService.pos_id == self.pos_id
             ).order_by(EventService.name).all()
             
-            # Convertir en dictionnaires pour la vue
-            services_data = []
-            for service in services:
-                services_data.append({
-                    'id': service.id,
-                    'name': service.name or '',
-                    'description': service.description or '',
-                    'category': getattr(service, 'category', ''),  # Si le champ existe
-                    'cost': float(service.cost or 0),
-                    'price': float(service.price or 0),
-                    'is_active': service.is_active,
-                    'created_at': service.created_at
-                })
-            
-            print(f"✅ {len(services_data)} services chargés")
-            self.services_loaded.emit(services_data)
-            return services_data
+            print(f"✅ {len(services)} services chargés")
+            self.services_loaded.emit(services)
+            return services
             
         except Exception as e:
             error_msg = f"Erreur lors du chargement des services: {str(e)}"
@@ -292,6 +278,108 @@ class ServiceController(QObject):
             print(f"❌ {error_msg}")
             self.error_occurred.emit(error_msg)
             return None
+            
+        finally:
+            db_manager.close_session()
+    
+    def get_service_usage_statistics(self, service_id):
+        """
+        Récupère les statistiques d'utilisation pour un service donné
+        Retourne: dict avec total_uses, total_quantity, total_revenue, average_quantity, last_used
+        """
+        try:
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+            
+            # Jointure pour récupérer les données d'utilisation du service
+            usage_data = (session.query(
+                    EventReservationService.quantity,
+                    (EventReservationService.quantity * EventReservationService.unit_price).label('revenue'),
+                    EventReservation.event_date
+                )
+                .join(EventReservation, EventReservationService.reservation_id == EventReservation.id)
+                .filter(EventReservationService.service_id == service_id)
+                .all()
+            )
+            
+            if not usage_data:
+                return {
+                    'total_uses': 0,
+                    'total_quantity': 0,
+                    'total_revenue': 0.0,
+                    'average_quantity': 0.0,
+                    'last_used': None
+                }
+            
+            # Calcul des statistiques
+            total_uses = len(usage_data)
+            total_quantity = sum(usage.quantity for usage in usage_data)
+            total_revenue = sum(float(usage.revenue) for usage in usage_data)
+            average_quantity = total_quantity / total_uses if total_uses > 0 else 0.0
+            last_used = max(usage.event_date for usage in usage_data)
+            
+            return {
+                'total_uses': total_uses,
+                'total_quantity': total_quantity,
+                'total_revenue': total_revenue,
+                'average_quantity': round(average_quantity, 2),
+                'last_used': last_used
+            }
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération des statistiques: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return None
+            
+        finally:
+            db_manager.close_session()
+    
+    def get_service_recent_usage(self, service_id, limit=10):
+        """
+        Récupère les dernières utilisations d'un service
+        Retourne: liste des dernières utilisations avec date, client et quantité
+        """
+        try:
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+            
+            # Récupération des dernières utilisations
+            recent_usage = (session.query(
+                    EventReservation.event_date,
+                    EventReservation.client_nom,
+                    EventReservation.client_prenom,
+                    EventReservation.client_telephone,
+                    EventReservationService.quantity,
+                    EventReservationService.unit_price
+                )
+                .join(EventReservationService, EventReservation.id == EventReservationService.reservation_id)
+                .filter(EventReservationService.service_id == service_id)
+                .order_by(EventReservation.event_date.desc())
+                .limit(limit)
+                .all()
+            )
+            
+            # Formatage des résultats
+            usage_list = []
+            for usage in recent_usage:
+                client_name = f"{usage.client_nom or ''} {usage.client_prenom or ''}".strip() or "Client non spécifié"
+                usage_list.append({
+                    'event_date': usage.event_date,
+                    'client_name': client_name,
+                    'client_telephone': usage.client_telephone,
+                    'quantity': usage.quantity,
+                    'unit_price': usage.unit_price,
+                    'total_line': usage.quantity * usage.unit_price
+                })
+            
+            return usage_list
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération des dernières utilisations: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
             
         finally:
             db_manager.close_session()

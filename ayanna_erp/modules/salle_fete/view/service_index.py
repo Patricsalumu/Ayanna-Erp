@@ -264,58 +264,99 @@ class ServiceIndex(QWidget):
     def on_service_selected(self):
         """Gérer la sélection d'un service"""
         current_row = self.services_table.currentRow()
-        if current_row >= 0:
-            # Récupérer les informations du service sélectionné
-            service_id = self.services_table.item(current_row, 0).text()
-            nom = self.services_table.item(current_row, 1).text()
-            categorie = self.services_table.item(current_row, 2).text()
-            prix = self.services_table.item(current_row, 3).text()
-            unite = self.services_table.item(current_row, 4).text()
-            statut = self.services_table.item(current_row, 5).text()
+        if current_row >= 0 and current_row < len(self.services_data):
+            # Récupérer le service depuis les données chargées
+            service = self.services_data[current_row]
+            self.selected_service = service
             
-            # Mettre à jour les détails
-            self.service_name_label.setText(nom)
-            self.service_category_label.setText(categorie)
-            self.service_price_label.setText(prix)
-            self.service_unit_label.setText(unite)
-            self.service_status_label.setText(statut)
+            # Mettre à jour les détails du service
+            self.service_name_label.setText(service.name)
+            self.service_category_label.setText(getattr(service, 'category', 'Non spécifiée'))
+            self.service_price_label.setText(f"{service.price:.2f} €")
+            self.service_unit_label.setText(getattr(service, 'unit', 'Service'))
+            self.service_status_label.setText("Actif" if service.is_active else "Inactif")
+            self.service_description_label.setText(service.description or "Aucune description")
             
-            # Description d'exemple selon le service
-            descriptions = {
-                "Décoration florale premium": "Décoration complète avec fleurs fraîches, compositions centrales et décoration de la salle",
-                "DJ avec équipement son": "DJ professionnel avec système son complet, éclairage et musique adaptée",
-                "Buffet traditionnel": "Buffet avec entrées, plats principaux, desserts et boissons",
-                "Animation enfants": "Animateur professionnel avec jeux et activités adaptés aux enfants",
-                "Photobooth": "Borne photo avec accessoires et impression instantanée",
-                "Service de nettoyage": "Nettoyage complet de la salle après l'événement"
-            }
+            # Charger les statistiques d'utilisation réelles
+            self.load_service_statistics(service.id)
             
-            self.service_description_label.setText(descriptions.get(nom, "Description non disponible"))
+            # Charger les dernières utilisations réelles
+            self.load_recent_usage(service.id)
+    
+    def load_service_statistics(self, service_id):
+        """Charger les statistiques d'utilisation d'un service"""
+        try:
+            # Récupérer les statistiques depuis le contrôleur
+            stats = self.service_controller.get_service_usage_statistics(service_id)
             
-            # Mettre à jour les statistiques (données d'exemple)
-            self.times_used_label.setText("15")
-            self.total_revenue_label.setText("3,750.00 €")
-            self.last_used_label.setText("2025-08-12")
-            self.avg_quantity_label.setText("1.2")
-            
-            # Charger les dernières utilisations
-            self.load_recent_usage(service_id)
+            if stats:
+                # Mettre à jour les labels avec les vraies données
+                self.times_used_label.setText(str(stats['total_uses']))
+                self.total_revenue_label.setText(f"{stats['total_revenue']:.2f} €")
+                
+                # Formatage de la dernière utilisation
+                if stats['last_used']:
+                    last_used = stats['last_used']
+                    if hasattr(last_used, 'strftime'):
+                        self.last_used_label.setText(last_used.strftime("%d/%m/%Y"))
+                    else:
+                        self.last_used_label.setText(str(last_used))
+                else:
+                    self.last_used_label.setText("Jamais utilisé")
+                
+                # Quantité moyenne
+                if stats['average_quantity'] > 0:
+                    self.avg_quantity_label.setText(f"{stats['average_quantity']:.1f}")
+                else:
+                    self.avg_quantity_label.setText("0")
+            else:
+                # Aucune statistique disponible
+                self.times_used_label.setText("0")
+                self.total_revenue_label.setText("0.00 €")
+                self.last_used_label.setText("Jamais utilisé")
+                self.avg_quantity_label.setText("0")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des statistiques: {str(e)}")
+            # Valeurs par défaut en cas d'erreur
+            self.times_used_label.setText("Erreur")
+            self.total_revenue_label.setText("Erreur")
+            self.last_used_label.setText("Erreur")
+            self.avg_quantity_label.setText("Erreur")
     
     def load_recent_usage(self, service_id):
         """Charger les dernières utilisations d'un service"""
-        # TODO: Implémenter le chargement depuis la base de données
-        # Pour l'instant, on utilise des données de test
-        self.recent_usage_list.clear()
-        
-        sample_usage = [
-            "2025-08-12 - Mariage Dupont - Qté: 1 - 250.00 €",
-            "2025-08-08 - Anniversaire Martin - Qté: 1 - 250.00 €",
-            "2025-08-05 - Baptême Moreau - Qté: 1 - 250.00 €",
-            "2025-08-01 - Réunion ABC Corp - Qté: 2 - 500.00 €",
-        ]
-        
-        for usage in sample_usage:
-            self.recent_usage_list.addItem(usage)
+        try:
+            # Vider la liste actuelle
+            self.recent_usage_list.clear()
+            
+            # Récupérer les dernières utilisations depuis le contrôleur
+            recent_usage = self.service_controller.get_service_recent_usage(service_id, limit=10)
+            
+            if recent_usage and len(recent_usage) > 0:
+                for usage in recent_usage:
+                    # Formatage de la date
+                    event_date = usage['event_date']
+                    if hasattr(event_date, 'strftime'):
+                        date_str = event_date.strftime("%d/%m/%Y")
+                    else:
+                        date_str = str(event_date)
+                    
+                    # Formatage de l'élément de liste
+                    client_name = usage['client_name'] or "Client non spécifié"
+                    quantity = usage['quantity']
+                    total_line = usage['total_line']
+                    
+                    usage_text = f"{date_str} - {client_name} - Qté: {quantity} - {total_line:.2f} €"
+                    self.recent_usage_list.addItem(usage_text)
+            else:
+                # Aucune utilisation trouvée
+                self.recent_usage_list.addItem("Aucune utilisation enregistrée")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des dernières utilisations: {str(e)}")
+            self.recent_usage_list.clear()
+            self.recent_usage_list.addItem("Erreur lors du chargement")
     
     def filter_services(self):
         """Filtrer les services selon les critères"""
@@ -395,18 +436,17 @@ class ServiceIndex(QWidget):
         
         for row, service in enumerate(self.services_data):
             # ID (caché)
-            self.services_table.setItem(row, 0, QTableWidgetItem(str(service.get('id', ''))))
+            self.services_table.setItem(row, 0, QTableWidgetItem(str(service.id)))
             
             # Nom
-            self.services_table.setItem(row, 1, QTableWidgetItem(service.get('name', '')))
-            
+            self.services_table.setItem(row, 1, QTableWidgetItem(service.name or ''))
             
             # Coût
-            cost = float(service.get('cost', 0))
+            cost = float(service.cost or 0)
             self.services_table.setItem(row, 2, QTableWidgetItem(f"{cost:.2f} €"))
             
             # Prix
-            price = float(service.get('price', 0))
+            price = float(service.price or 0)
             self.services_table.setItem(row, 3, QTableWidgetItem(f"{price:.2f} €"))
             
             # Marge
@@ -419,9 +459,9 @@ class ServiceIndex(QWidget):
             self.services_table.setItem(row, 4, margin_item)
             
             # Statut
-            status = "Actif" if service.get('is_active', True) else "Inactif"
+            status = "Actif" if service.is_active else "Inactif"
             status_item = QTableWidgetItem(status)
-            if not service.get('is_active', True):
+            if not service.is_active:
                 status_item.setBackground(Qt.GlobalColor.lightGray)
             self.services_table.setItem(row, 5, status_item)
         
@@ -439,7 +479,7 @@ class ServiceIndex(QWidget):
             # Trouver le service sélectionné dans les données
             self.selected_service = None
             for service in self.services_data:
-                if service.get('id') == service_id:
+                if service.id == service_id:
                     self.selected_service = service
                     break
             
@@ -500,11 +540,11 @@ class ServiceIndex(QWidget):
             return
         
         total_services = len(self.services_data)
-        active_services = sum(1 for s in self.services_data if s.get('is_active', True))
+        active_services = sum(1 for s in self.services_data if s.is_active)
         
         # Calcul des totaux financiers
-        total_cost = sum(float(s.get('cost', 0)) for s in self.services_data)
-        total_price = sum(float(s.get('price', 0)) for s in self.services_data)
+        total_cost = sum(float(s.cost or 0) for s in self.services_data)
+        total_price = sum(float(s.price or 0) for s in self.services_data)
         total_margin = total_price - total_cost
         
         # Mise à jour des labels (si ils existent)
