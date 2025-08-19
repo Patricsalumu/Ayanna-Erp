@@ -41,13 +41,11 @@ class ComptaComptes(Base):
     libelle = Column(String(255), nullable=False)
     actif = Column(Boolean, default=True)  # Actif ou inactif
     classe_comptable_id = Column(Integer, ForeignKey('compta_classes.id'), nullable=False)
-    enterprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     
     # Relations
     classe_comptable = relationship("ComptaClasses", back_populates="comptes")
-    enterprise = relationship("Entreprise")
     ecritures = relationship("ComptaEcritures", back_populates="compte_comptable")
     
     def __repr__(self):

@@ -237,13 +237,11 @@ class DatabaseManager:
                 
                 if classe:
                     existing = session.query(ComptaComptes).filter_by(
-                        numero=compte_data["numero"],
-                        enterprise_id=enterprise_id
-                    ).first()
+                        numero=compte_data["numero"]
+                    ).join(ComptaClasses).filter(ComptaClasses.enterprise_id == enterprise_id).first()
                     
                     if not existing:
                         compte = ComptaComptes(
-                            enterprise_id=enterprise_id,
                             classe_comptable_id=classe.id,
                             **compte_data
                         )
