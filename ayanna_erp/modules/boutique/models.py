@@ -32,7 +32,7 @@ class ShopProduct(Base):
     cost = Column(Numeric(15, 2), default=0.0)
     price_unit = Column(Numeric(15, 2), default=0.0)
     stock_quantity = Column(Numeric(15, 2), default=0.0)
-    account_id = Column(Integer, ForeignKey('comptes_comptables.id'))
+    account_id = Column(Integer, ForeignKey('compta_comptes.id'))
     category_id = Column(Integer, ForeignKey('shop_product_categories.id'))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
@@ -53,7 +53,7 @@ class ShopService(Base):
     description = Column(Text)
     cost = Column(Numeric(15, 2), default=0.0)
     price = Column(Numeric(15, 2), default=0.0)
-    account_id = Column(Integer, ForeignKey('comptes_comptables.id'))
+    account_id = Column(Integer, ForeignKey('compta_comptes.id'))
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     

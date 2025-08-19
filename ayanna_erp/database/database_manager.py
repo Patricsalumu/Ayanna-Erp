@@ -14,6 +14,13 @@ import bcrypt
 
 Base = declarative_base()
 
+# Import des modèles comptables pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaClasses, ComptaComptes, ComptaConfig
+except ImportError:
+    # Les modèles comptables ne sont pas encore disponibles
+    pass
+
 
 class DatabaseManager:
     """Gestionnaire principal de la base de données"""
@@ -117,23 +124,8 @@ class DatabaseManager:
             # Créer automatiquement des POS pour chaque module de l'entreprise par défaut
             self._create_pos_for_enterprise(session, default_enterprise.id)
             
-            # Insérer les classes comptables SYSCOHADA par défaut
-            classes_comptables_default = [
-                {"code": "1", "nom": "COMPTES DE RESSOURCES DURABLES", "libelle": "Comptes de ressources durables", "type": "passif", "document": "bilan"},
-                {"code": "2", "nom": "COMPTES D'ACTIF IMMOBILISE", "libelle": "Comptes d'actif immobilisé", "type": "actif", "document": "bilan"},
-                {"code": "3", "nom": "COMPTES DE STOCKS", "libelle": "Comptes de stocks", "type": "actif", "document": "bilan"},
-                {"code": "4", "nom": "COMPTES DE TIERS", "libelle": "Comptes de tiers", "type": "actif", "document": "bilan"},
-                {"code": "5", "nom": "COMPTES DE TRESORERIE", "libelle": "Comptes de trésorerie", "type": "actif", "document": "bilan"},
-                {"code": "6", "nom": "COMPTES DE CHARGES", "libelle": "Comptes de charges", "type": "charge", "document": "resultat"},
-                {"code": "7", "nom": "COMPTES DE PRODUITS", "libelle": "Comptes de produits", "type": "produit", "document": "resultat"},
-                {"code": "8", "nom": "COMPTES DES AUTRES CHARGES ET DES AUTRES PRODUITS", "libelle": "Autres charges et produits", "type": "charge", "document": "resultat"}
-            ]
-            
-            for classe_data in classes_comptables_default:
-                existing = session.query(ClasseComptable).filter_by(code=classe_data["code"]).first()
-                if not existing:
-                    classe = ClasseComptable(**classe_data)
-                    session.add(classe)
+            # Initialiser les données comptables par défaut
+            self._insert_default_accounting_data(session, default_enterprise.id)
             
             session.commit()
             
@@ -181,6 +173,117 @@ class DatabaseManager:
             
         except Exception as e:
             print(f"❌ Erreur lors de la création des POS: {e}")
+            raise
+    
+    def _insert_default_accounting_data(self, session, enterprise_id):
+        """Insérer les données comptables par défaut SYSCOHADA"""
+        try:
+            # Insérer les classes comptables SYSCOHADA par défaut
+            classes_comptables_default = [
+                {"code": "1", "nom": "COMPTES DE RESSOURCES DURABLES", "libelle": "Comptes de ressources durables", "type": "passif", "document": "bilan"},
+                {"code": "2", "nom": "COMPTES D'ACTIF IMMOBILISE", "libelle": "Comptes d'actif immobilisé", "type": "actif", "document": "bilan"},
+                {"code": "3", "nom": "COMPTES DE STOCKS", "libelle": "Comptes de stocks", "type": "actif", "document": "bilan"},
+                {"code": "4", "nom": "COMPTES DE TIERS", "libelle": "Comptes de tiers", "type": "mixte", "document": "bilan"},
+                {"code": "5", "nom": "COMPTES DE TRESORERIE", "libelle": "Comptes de trésorerie", "type": "actif", "document": "bilan"},
+                {"code": "6", "nom": "COMPTES DE CHARGES", "libelle": "Comptes de charges", "type": "charge", "document": "resultat"},
+                {"code": "7", "nom": "COMPTES DE PRODUITS", "libelle": "Comptes de produits", "type": "produit", "document": "resultat"},
+                {"code": "8", "nom": "COMPTES DES AUTRES CHARGES ET DES AUTRES PRODUITS", "libelle": "Autres charges et produits", "type": "mixte", "document": "resultat"}
+            ]
+            
+            classes_created = {}
+            for classe_data in classes_comptables_default:
+                existing = session.query(ComptaClasses).filter_by(
+                    code=classe_data["code"], 
+                    enterprise_id=enterprise_id
+                ).first()
+                if not existing:
+                    classe = ComptaClasses(
+                        enterprise_id=enterprise_id,
+                        **classe_data
+                    )
+                    session.add(classe)
+                    session.flush()  # Pour obtenir l'ID
+                    classes_created[classe_data["code"]] = classe
+                    print(f"✅ Classe comptable créée: {classe.code} - {classe.nom}")
+                else:
+                    classes_created[classe_data["code"]] = existing
+            
+            # Insérer quelques comptes de base essentiels
+            comptes_default = [
+                # Classe 4 - Comptes de tiers
+                {"numero": "411", "nom": "Clients", "libelle": "Clients ordinaires", "classe": "4"},
+                {"numero": "401", "nom": "Fournisseurs", "libelle": "Fournisseurs ordinaires", "classe": "4"},
+                
+                # Classe 5 - Comptes de trésorerie
+                {"numero": "57", "nom": "Caisse", "libelle": "Caisse générale", "classe": "5"},
+                {"numero": "521", "nom": "Banque", "libelle": "Banque locale", "classe": "5"},
+                
+                # Classe 6 - Comptes de charges
+                {"numero": "601", "nom": "Achats stockés - matières premières", "libelle": "Achats de matières premières", "classe": "6"},
+                {"numero": "604", "nom": "Achats stockés - matières consommables", "libelle": "Achats de matières et fournitures consommables", "classe": "6"},
+                {"numero": "622", "nom": "Rémunérations intermédiaires et honoraires", "libelle": "Rémunérations d'intermédiaires et honoraires", "classe": "6"},
+                {"numero": "624", "nom": "Transports", "libelle": "Transports sur achats et ventes", "classe": "6"},
+                
+                # Classe 7 - Comptes de produits
+                {"numero": "701", "nom": "Ventes marchandises", "libelle": "Ventes de marchandises dans la région", "classe": "7"},
+                {"numero": "706", "nom": "Services vendus", "libelle": "Services vendus dans la région", "classe": "7"},
+                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers de gestion courante", "classe": "7"}
+            ]
+            
+            comptes_created = {}
+            for compte_data in comptes_default:
+                classe_code = compte_data.pop("classe")
+                classe = classes_created.get(classe_code)
+                
+                if classe:
+                    existing = session.query(ComptaComptes).filter_by(
+                        numero=compte_data["numero"],
+                        enterprise_id=enterprise_id
+                    ).first()
+                    
+                    if not existing:
+                        compte = ComptaComptes(
+                            enterprise_id=enterprise_id,
+                            classe_comptable_id=classe.id,
+                            **compte_data
+                        )
+                        session.add(compte)
+                        session.flush()  # Pour obtenir l'ID
+                        comptes_created[compte_data["numero"]] = compte
+                        print(f"✅ Compte comptable créé: {compte.numero} - {compte.nom}")
+                    else:
+                        comptes_created[compte_data["numero"]] = existing
+            
+            # Créer une configuration comptable pour chaque POS de l'entreprise
+            pos_list = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
+            
+            for pos in pos_list:
+                existing_config = session.query(ComptaConfig).filter_by(
+                    enterprise_id=enterprise_id, 
+                    pos_id=pos.id
+                ).first()
+                
+                if not existing_config:
+                    config = ComptaConfig(
+                        enterprise_id=enterprise_id,
+                        pos_id=pos.id,
+                        compte_caisse_id=comptes_created.get("57").id if comptes_created.get("57") else None,
+                        compte_banque_id=comptes_created.get("521").id if comptes_created.get("521") else None,
+                        compte_client_id=comptes_created.get("411").id if comptes_created.get("411") else None,
+                        compte_fournisseur_id=comptes_created.get("401").id if comptes_created.get("401") else None,
+                        compte_vente_id=comptes_created.get("701").id if comptes_created.get("701") else None,
+                        compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None
+                    )
+                    session.add(config)
+                    print(f"✅ Configuration comptable créée pour POS: {pos.name}")
+            
+            if not pos_list:
+                print("⚠️  Aucun POS trouvé pour l'entreprise, configuration comptable non créée")
+            
+            session.flush()
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'insertion des données comptables: {e}")
             raise
     
     def create_pos_for_new_enterprise(self, enterprise_id):
@@ -287,65 +390,6 @@ class POSPoint(Base):
     module = relationship("Module", back_populates="pos_points")
 
 
-class ClasseComptable(Base):
-    __tablename__ = "classes_comptables"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(10))
-    nom = Column(String(100), nullable=False)
-    libelle = Column(String(255), nullable=False)
-    type = Column(String(20), nullable=False)  # actif, passif, charge, produit
-    entreprise_id = Column(Integer, ForeignKey('core_enterprises.id'))
-    document = Column(String(255))  # bilan ou resultat
-    
-    # Relations
-    comptes = relationship("CompteComptable", back_populates="classe_comptable")
-
-
-class CompteComptable(Base):
-    __tablename__ = "comptes_comptables"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(20), nullable=False)
-    nom = Column(String(255), nullable=False)
-    libelle = Column(String(255), nullable=False)
-    classe_comptable_id = Column(Integer, ForeignKey('classes_comptables.id'), nullable=False)
-    
-    # Relations
-    classe_comptable = relationship("ClasseComptable", back_populates="comptes")
-    ecritures = relationship("EcritureComptable", back_populates="compte_comptable")
-
-
-class JournalComptable(Base):
-    __tablename__ = "journal_comptables"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    libelle = Column(String(255), nullable=False)
-    montant = Column(Numeric(15, 2), nullable=False)
-    type_operation = Column(String(20), nullable=False)  # paiement, depense, transfert
-    entreprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relations
-    ecritures = relationship("EcritureComptable", back_populates="journal")
-
-
-class EcritureComptable(Base):
-    __tablename__ = "ecritures_comptables"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    journal_id = Column(Integer, ForeignKey('journal_comptables.id'), nullable=False)
-    compte_comptable_id = Column(Integer, ForeignKey('comptes_comptables.id'), nullable=False)
-    debit = Column(Numeric(15, 2), default=0)
-    credit = Column(Numeric(15, 2), default=0)
-    ordre = Column(Integer, nullable=False)  # 1 pour débit, 2 pour crédit
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relations
-    journal = relationship("JournalComptable", back_populates="ecritures")
-    compte_comptable = relationship("CompteComptable", back_populates="ecritures")
-
-
 class PaymentMethod(Base):
     __tablename__ = "module_payment_methods"
     
@@ -353,7 +397,7 @@ class PaymentMethod(Base):
     module_id = Column(Integer, ForeignKey('modules.id'), nullable=False)
     pos_id = Column(Integer, ForeignKey('core_pos_points.id'), nullable=False)
     name = Column(String(100), nullable=False)
-    account_id = Column(Integer, ForeignKey('comptes_comptables.id'))
+    account_id = Column(Integer, ForeignKey('compta_comptes.id'))
     is_default = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
