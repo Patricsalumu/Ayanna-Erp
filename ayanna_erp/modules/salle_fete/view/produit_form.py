@@ -265,31 +265,61 @@ class ProduitForm(QDialog):
         if not self.produit_data:
             return
         
-        self.name_edit.setText(self.produit_data.get('name', ''))
-        self.description_edit.setPlainText(self.produit_data.get('description', ''))
-        
-        # Catégorie
-        category = self.produit_data.get('category', '')
-        if category:
-            index = self.category_combo.findText(category)
+        # Gestion des objets SQLAlchemy et dictionnaires
+        if hasattr(self.produit_data, 'name'):
+            # Objet SQLAlchemy
+            self.name_edit.setText(self.produit_data.name or '')
+            self.description_edit.setPlainText(self.produit_data.description or '')
+            
+            # Catégorie
+            category = self.produit_data.category or ''
+            if category:
+                index = self.category_combo.findText(category)
+                if index >= 0:
+                    self.category_combo.setCurrentIndex(index)
+                else:
+                    self.category_combo.setCurrentText(category)
+            
+            # Unité
+            unit = self.produit_data.unit or 'pièce'
+            index = self.unit_combo.findText(unit)
             if index >= 0:
-                self.category_combo.setCurrentIndex(index)
+                self.unit_combo.setCurrentIndex(index)
             else:
-                self.category_combo.setCurrentText(category)
-        
-        # Unité
-        unit = self.produit_data.get('unit', 'pièce')
-        index = self.unit_combo.findText(unit)
-        if index >= 0:
-            self.unit_combo.setCurrentIndex(index)
+                self.unit_combo.setCurrentText(unit)
+            
+            self.cost_spinbox.setValue(float(self.produit_data.cost or 0))
+            self.price_spinbox.setValue(float(self.produit_data.price_unit or 0))
+            self.stock_spinbox.setValue(float(self.produit_data.stock_quantity or 0))
+            self.stock_min_spinbox.setValue(float(self.produit_data.stock_min or 0))
+            self.active_checkbox.setChecked(bool(self.produit_data.is_active))
         else:
-            self.unit_combo.setCurrentText(unit)
-        
-        self.cost_spinbox.setValue(float(self.produit_data.get('cost', 0)))
-        self.price_spinbox.setValue(float(self.produit_data.get('price_unit', 0)))
-        self.stock_spinbox.setValue(float(self.produit_data.get('stock_quantity', 0)))
-        self.stock_min_spinbox.setValue(float(self.produit_data.get('stock_min', 0)))
-        self.active_checkbox.setChecked(bool(self.produit_data.get('is_active', True)))
+            # Dictionnaire (rétrocompatibilité)
+            self.name_edit.setText(self.produit_data.get('name', ''))
+            self.description_edit.setPlainText(self.produit_data.get('description', ''))
+            
+            # Catégorie
+            category = self.produit_data.get('category', '')
+            if category:
+                index = self.category_combo.findText(category)
+                if index >= 0:
+                    self.category_combo.setCurrentIndex(index)
+                else:
+                    self.category_combo.setCurrentText(category)
+            
+            # Unité
+            unit = self.produit_data.get('unit', 'pièce')
+            index = self.unit_combo.findText(unit)
+            if index >= 0:
+                self.unit_combo.setCurrentIndex(index)
+            else:
+                self.unit_combo.setCurrentText(unit)
+            
+            self.cost_spinbox.setValue(float(self.produit_data.get('cost', 0)))
+            self.price_spinbox.setValue(float(self.produit_data.get('price_unit', 0)))
+            self.stock_spinbox.setValue(float(self.produit_data.get('stock_quantity', 0)))
+            self.stock_min_spinbox.setValue(float(self.produit_data.get('stock_min', 0)))
+            self.active_checkbox.setChecked(bool(self.produit_data.get('is_active', True)))
         
         # Mettre à jour les calculs
         self.update_margin()
@@ -334,7 +364,10 @@ class ProduitForm(QDialog):
             if self.controller:
                 if self.is_edit_mode:
                     # Modification
-                    produit_id = self.produit_data.get('id')
+                    if hasattr(self.produit_data, 'id'):
+                        produit_id = self.produit_data.id  # Objet SQLAlchemy
+                    else:
+                        produit_id = self.produit_data.get('id')  # Dictionnaire
                     success = self.controller.update_product(produit_id, form_data)
                     if success:
                         QMessageBox.information(self, "Succès", "Produit modifié avec succès !")

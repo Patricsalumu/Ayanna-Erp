@@ -123,7 +123,7 @@ class EntreeSortieIndex(QWidget):
     """Journal de Caisse - Gestion des entrées et sorties d'argent"""
     
     def __init__(self, main_controller, current_user):
-        super().__init__()
+        super().__init__(self)
         self.main_controller = main_controller
         self.current_user = current_user
         self.journal_data = []
@@ -365,93 +365,42 @@ class EntreeSortieIndex(QWidget):
         self.search_edit.textChanged.connect(self.filter_journal)
     
     def load_journal_data(self):
-        """
-        Charger les données du journal - Version démo en attendant la table journal_comptable
-        
-        TODO: Remplacer par une vraie requête vers la table journal_comptable:
-        
-        SELECT * FROM journal_comptable 
-        WHERE DATE(date_operation) = :selected_date 
-        ORDER BY date_operation DESC
-        
-        Colonnes attendues:
-        - id: identifiant unique
-        - date_operation: datetime de l'opération  
-        - type_operation: 'Entrée' ou 'Sortie'
-        - libelle: description de l'opération
-        - categorie: catégorie (Paiement client, Achat matériel, etc.)
-        - montant: montant de l'opération
-        - utilisateur_id: ID de l'utilisateur qui a saisi
-        - description: détails supplémentaires
-        """
+        """Charger les données du journal depuis la base de données"""
         try:
-            # Obtenir la date sélectionnée
-            if hasattr(self, 'date_filter'):
-                qdate = self.date_filter.date()
-                selected_date = date(qdate.year(), qdate.month(), qdate.day())
-            else:
-                selected_date = date.today()
+            # Charger les paiements reçus (entrées)
+            from ayanna_erp.modules.salle_fete.controller.paiement_controller import PaiementController
+            paiement_controller = PaiementController()
             
-            # Données de démonstration pour l'interface
-            # À remplacer par la lecture de la table journal_comptable
+            # Obtenir la date sélectionnée
+            selected_date = self.date_filter.date().toPython() if hasattr(self, 'date_filter') else date.today()
+            
+            # Récupérer les paiements du jour
+            paiements = paiement_controller.get_payments_by_date(selected_date)
+            
+            # Convertir les paiements en entrées de journal
             self.journal_data = []
             
-            # Ajouter quelques entrées de démo pour aujourd'hui
-            if selected_date == date.today():
-                demo_entries = [
-                    {
-                        'id': 'DEMO_001',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=9, minute=30)),
-                        'type': 'Entrée',
-                        'libelle': 'Paiement réservation mariage',
-                        'categorie': 'Paiement client',
-                        'montant_entree': 2500.00,
-                        'montant_sortie': 0.0,
-                        'utilisateur': 'Admin',
-                        'description': 'Acompte 50% mariage famille Dupont'
-                    },
-                    {
-                        'id': 'DEMO_002',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=11, minute=15)),
-                        'type': 'Sortie',
-                        'libelle': 'Achat décoration florale',
-                        'categorie': 'Achat matériel',
-                        'montant_entree': 0.0,
-                        'montant_sortie': 350.00,
-                        'utilisateur': 'Manager',
-                        'description': 'Fleurs pour événement du weekend'
-                    },
-                    {
-                        'id': 'DEMO_003',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=14, minute=45)),
-                        'type': 'Entrée',
-                        'libelle': 'Paiement anniversaire',
-                        'categorie': 'Paiement client',
-                        'montant_entree': 800.00,
-                        'montant_sortie': 0.0,
-                        'utilisateur': 'Admin',
-                        'description': 'Solde anniversaire 50 personnes'
-                    },
-                    {
-                        'id': 'DEMO_004',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=16, minute=20)),
-                        'type': 'Sortie',
-                        'libelle': 'Transport matériel',
-                        'categorie': 'Transport',
-                        'montant_entree': 0.0,
-                        'montant_sortie': 120.00,
-                        'utilisateur': 'Staff',
-                        'description': 'Livraison chaises et tables'
-                    }
-                ]
-                self.journal_data.extend(demo_entries)
+            for paiement in paiements:
+                entry = {
+                    'id': f"PAY_{paiement.id}",
+                    'datetime': paiement.date_paiement,
+                    'type': 'Entrée',
+                    'libelle': f"Paiement réservation #{paiement.reservation_id}",
+                    'categorie': 'Paiement client',
+                    'montant_entree': float(paiement.montant),
+                    'montant_sortie': 0.0,
+                    'utilisateur': paiement.user_nom if hasattr(paiement, 'user_nom') else 'Système',
+                    'description': f"Mode: {paiement.mode_paiement}"
+                }
+                self.journal_data.append(entry)
             
-            # Charger les dépenses réelles saisies via l'interface
+            # Charger les dépenses depuis un fichier JSON temporaire
+            # (À remplacer par une vraie table de base de données plus tard)
             try:
                 import json
                 import os
                 
-                # Fichier temporaire pour stocker les dépenses saisies
+                # Fichier temporaire pour stocker les dépenses
                 depenses_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'depenses.json')
                 
                 if os.path.exists(depenses_file):
@@ -459,7 +408,7 @@ class EntreeSortieIndex(QWidget):
                         depenses = json.load(f)
                     
                     for depense in depenses:
-                        # Filtrer par date
+                        # Filtrer par date si nécessaire
                         depense_date = datetime.fromisoformat(depense['datetime']).date()
                         if depense_date == selected_date:
                             entry = {
@@ -470,7 +419,7 @@ class EntreeSortieIndex(QWidget):
                                 'categorie': depense['categorie'],
                                 'montant_entree': 0.0,
                                 'montant_sortie': depense['montant'],
-                                'utilisateur': depense.get('utilisateur', 'Utilisateur'),
+                                'utilisateur': depense.get('utilisateur', self.current_user['nom']),
                                 'description': depense.get('description', '')
                             }
                             self.journal_data.append(entry)
@@ -486,7 +435,7 @@ class EntreeSortieIndex(QWidget):
             
         except Exception as e:
             print(f"Erreur lors du chargement du journal: {e}")
-            # Ne pas afficher de popup d'erreur pour les données de démo
+            QMessageBox.warning(self, "Erreur", f"Impossible de charger les données: {str(e)}")
     
     def update_journal_display(self):
         """Mettre à jour l'affichage du tableau et des statistiques"""
@@ -549,8 +498,7 @@ class EntreeSortieIndex(QWidget):
         
         # Filtre par date
         if hasattr(self, 'date_filter'):
-            qdate = self.date_filter.date()
-            selected_date = date(qdate.year(), qdate.month(), qdate.day())
+            selected_date = self.date_filter.date().toPython()
             filtered_data = [entry for entry in filtered_data 
                            if entry['datetime'].date() == selected_date]
         
@@ -648,7 +596,7 @@ class EntreeSortieIndex(QWidget):
                 'montant': depense_data['montant'],
                 'categorie': depense_data['categorie'],
                 'description': depense_data['description'],
-                'utilisateur': self.current_user.get('name', 'Utilisateur'),
+                'utilisateur': self.current_user.get('nom', 'Utilisateur'),
                 'user_id': self.current_user.get('id', 1)
             }
             
@@ -678,8 +626,7 @@ class EntreeSortieIndex(QWidget):
             import os
             
             # Nom du fichier
-            qdate = self.date_filter.date()
-            selected_date = date(qdate.year(), qdate.month(), qdate.day())
+            selected_date = self.date_filter.date().toPython()
             filename = f"journal_caisse_{selected_date.strftime('%Y%m%d')}.pdf"
             
             # Créer le document

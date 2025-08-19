@@ -1,0 +1,32 @@
+[
+  {
+    "id": "DEP_test001",
+    "datetime": "2024-01-15T10:30:00",
+    "libelle": "Achat de matériel de décoration",
+    "montant": 150.50,
+    "categorie": "Achat matériel",
+    "description": "Ballons, guirlandes et accessoires pour événement",
+    "utilisateur": "Admin Test",
+    "user_id": 1
+  },
+  {
+    "id": "DEP_test002",
+    "datetime": "2024-01-15T14:15:00",
+    "libelle": "Transport équipe",
+    "montant": 45.00,
+    "categorie": "Transport",
+    "description": "Frais de transport pour équipe événement",
+    "utilisateur": "Admin Test",
+    "user_id": 1
+  },
+  {
+    "id": "DEP_test003",
+    "datetime": "2024-01-15T16:45:00",
+    "libelle": "Achat produits traiteur",
+    "montant": 320.75,
+    "categorie": "Achat nourriture/boisson",
+    "description": "Produits pour cocktail événement",
+    "utilisateur": "Admin Test",
+    "user_id": 1
+  }
+]

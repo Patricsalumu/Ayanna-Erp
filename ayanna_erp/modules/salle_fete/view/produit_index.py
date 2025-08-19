@@ -174,9 +174,9 @@ class ProduitIndex(QWidget):
         
         # Table des produits (côté gauche)
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(8)
+        self.products_table.setColumnCount(9)
         self.products_table.setHorizontalHeaderLabels([
-            "ID", "Nom du produit", "Catégorie", "Prix unitaire", "Stock", "Seuil min.", "Unité", "Statut"
+            "ID", "Nom du produit", "Catégorie", "Cout", "Prix unitaire", "Seuil min.", "Unité", "Stock", "Statut"
         ])
         
         # Configuration du tableau
@@ -219,6 +219,7 @@ class ProduitIndex(QWidget):
         
         self.product_name_label = QLabel("-")
         self.product_category_label = QLabel("-")
+        self.product_cost_label = QLabel("-")
         self.product_price_label = QLabel("-")
         self.product_stock_label = QLabel("-")
         self.product_min_threshold_label = QLabel("-")
@@ -229,11 +230,12 @@ class ProduitIndex(QWidget):
         
         product_info_layout.addRow("Nom:", self.product_name_label)
         product_info_layout.addRow("Catégorie:", self.product_category_label)
-        product_info_layout.addRow("Prix unitaire:", self.product_price_label)
-        product_info_layout.addRow("Stock actuel:", self.product_stock_label)
+        product_info_layout.addRow("Coût:", self.product_price_label)
+        product_info_layout.addRow("Prix unitaire:", self.product_stock_label)
+        product_info_layout.addRow("Stock actuel:", self.product_status_label)
         product_info_layout.addRow("Seuil minimum:", self.product_min_threshold_label)
         product_info_layout.addRow("Unité:", self.product_unit_label)
-        product_info_layout.addRow("Statut:", self.product_status_label)
+        # product_info_layout.addRow("Statut:", "-")
         product_info_layout.addRow("Description:", self.product_description_label)
         
         # Mouvements de stock récents
@@ -348,63 +350,115 @@ class ProduitIndex(QWidget):
     def on_product_selected(self):
         """Gérer la sélection d'un produit"""
         current_row = self.products_table.currentRow()
-        if current_row >= 0:
-            # Récupérer les informations du produit sélectionné
-            product_id = self.products_table.item(current_row, 0).text()
-            nom = self.products_table.item(current_row, 1).text()
-            categorie = self.products_table.item(current_row, 2).text()
-            prix = self.products_table.item(current_row, 3).text()
-            stock = self.products_table.item(current_row, 4).text()
-            seuil_min = self.products_table.item(current_row, 5).text()
-            unite = self.products_table.item(current_row, 6).text()
-            statut = self.products_table.item(current_row, 7).text()
+        if current_row >= 0 and current_row < len(self.products_data):
+            # Récupérer le produit depuis les données chargées
+            product = self.products_data[current_row]
+            self.selected_product = product
             
-            # Mettre à jour les détails
-            self.product_name_label.setText(nom)
-            self.product_category_label.setText(categorie)
-            self.product_price_label.setText(prix)
-            self.product_stock_label.setText(f"{stock} {unite}")
-            self.product_min_threshold_label.setText(f"{seuil_min} {unite}")
-            self.product_unit_label.setText(unite)
-            self.product_status_label.setText(statut)
+            # Mettre à jour les détails du produit
+            self.product_name_label.setText(product.name)
+            self.product_category_label.setText(product.category or "Non spécifiée")
+            self.product_price_label.setText(f"{product.price_unit:.2f} €")
+            self.product_stock_label.setText(f"{product.stock_quantity} {product.unit}")
+            self.product_min_threshold_label.setText(f"{product.stock_min} {product.unit}")
+            self.product_unit_label.setText(product.unit or "Unité")
+            self.product_status_label.setText("Actif" if product.is_active else "Inactif")
+            self.product_description_label.setText(product.description or "Aucune description")
             
-            # Description d'exemple selon le produit
-            descriptions = {
-                "Champagne Moët & Chandon": "Champagne premium pour les événements spéciaux",
-                "Petits fours assortis": "Assortiment de petits fours salés et sucrés",
-                "Nappe blanche 3m": "Nappe en lin blanc pour tables de 3 mètres",
-                "Bouquet de roses": "Bouquet de 12 roses rouges fraîches",
-                "Assiettes jetables": "Assiettes en carton blanc biodégradables",
-                "Vin rouge Bordeaux": "Vin rouge AOC Bordeaux millésime 2020"
-            }
+            # Charger les statistiques de vente réelles
+            self.load_product_sales_statistics(product.id)
             
-            self.product_description_label.setText(descriptions.get(nom, "Description non disponible"))
+            # Charger les mouvements de stock réels
+            self.load_stock_movements(product.id)
+    
+    def load_product_sales_statistics(self, product_id):
+        """Charger les statistiques de vente d'un produit"""
+        try:
+            # Récupérer les statistiques depuis le contrôleur
+            stats = self.produit_controller.get_product_sales_statistics(product_id)
             
-            # Mettre à jour les statistiques (données d'exemple)
-            self.times_sold_label.setText("12")
-            self.total_sold_label.setText("45")
-            self.total_revenue_label.setText("2,025.00 €")
-            self.last_sold_label.setText("2025-08-12")
-            self.avg_quantity_label.setText("3.8")
-            
-            # Charger les mouvements de stock
-            self.load_stock_movements(product_id)
+            if stats:
+                # Mettre à jour les labels avec les vraies données
+                self.times_sold_label.setText(str(stats['total_sales']))
+                self.total_sold_label.setText(str(stats['total_sold']))
+                self.total_revenue_label.setText(f"{stats['total_revenue']:.2f} €")
+                
+                # Formatage de la dernière vente
+                if stats['last_sale']:
+                    last_sale = stats['last_sale']
+                    if hasattr(last_sale, 'strftime'):
+                        self.last_sold_label.setText(last_sale.strftime("%d/%m/%Y"))
+                    else:
+                        self.last_sold_label.setText(str(last_sale))
+                else:
+                    self.last_sold_label.setText("Jamais vendu")
+                
+                # Quantité moyenne
+                if stats['average_quantity'] > 0:
+                    self.avg_quantity_label.setText(f"{stats['average_quantity']:.1f}")
+                else:
+                    self.avg_quantity_label.setText("0")
+            else:
+                # Aucune statistique disponible
+                self.times_sold_label.setText("0")
+                self.total_sold_label.setText("0")
+                self.total_revenue_label.setText("0.00 €")
+                self.last_sold_label.setText("Jamais vendu")
+                self.avg_quantity_label.setText("0")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des statistiques de vente: {str(e)}")
+            # Valeurs par défaut en cas d'erreur
+            self.times_sold_label.setText("Erreur")
+            self.total_sold_label.setText("Erreur")
+            self.total_revenue_label.setText("Erreur")
+            self.last_sold_label.setText("Erreur")
+            self.avg_quantity_label.setText("Erreur")
     
     def load_stock_movements(self, product_id):
         """Charger les mouvements de stock d'un produit"""
-        # TODO: Implémenter le chargement depuis la base de données
-        # Pour l'instant, on utilise des données de test
-        self.stock_movements_list.clear()
-        
-        sample_movements = [
-            "2025-08-12 - Sortie: -3 (Événement #001) - Stock: 25",
-            "2025-08-10 - Entrée: +10 (Réapprovisionnement) - Stock: 28",
-            "2025-08-08 - Sortie: -2 (Événement #002) - Stock: 18",
-            "2025-08-05 - Sortie: -5 (Événement #003) - Stock: 20",
-        ]
-        
-        for movement in sample_movements:
-            self.stock_movements_list.addItem(movement)
+        try:
+            # Vider la liste actuelle
+            self.stock_movements_list.clear()
+            
+            # Récupérer les mouvements récents depuis le contrôleur
+            movements = self.produit_controller.get_product_recent_movements(product_id, limit=10)
+            
+            if movements and len(movements) > 0:
+                for movement in movements:
+                    # Formatage de la date
+                    movement_date = movement['date']
+                    if hasattr(movement_date, 'strftime'):
+                        date_str = movement_date.strftime("%d/%m/%Y")
+                    else:
+                        date_str = str(movement_date)
+                    
+                    # Formatage du mouvement
+                    movement_type = movement['type']
+                    client_name = movement['client_name'] or "Système"
+                    quantity = movement['quantity']
+                    reason = movement['reason']
+                    
+                    # Couleur selon le type de mouvement
+                    if movement_type == 'SORTIE':
+                        movement_text = f"{date_str} - {movement_type}: -{quantity} ({client_name})"
+                    elif movement_type == 'ENTREE':
+                        movement_text = f"{date_str} - {movement_type}: +{quantity} ({reason})"
+                    else:
+                        movement_text = f"{date_str} - {movement_type}: {quantity} ({reason})"
+                    
+                    if movement['total_line'] > 0:
+                        movement_text += f" - {movement['total_line']:.2f} €"
+                    
+                    self.stock_movements_list.addItem(movement_text)
+            else:
+                # Aucun mouvement trouvé
+                self.stock_movements_list.addItem("Aucun mouvement enregistré")
+                
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des mouvements: {str(e)}")
+            self.stock_movements_list.clear()
+            self.stock_movements_list.addItem("Erreur lors du chargement")
     
     def filter_products(self):
         """Filtrer les produits selon les critères"""
@@ -496,31 +550,36 @@ class ProduitIndex(QWidget):
         
         for row, product in enumerate(self.products_data):
             # ID (caché)
-            self.products_table.setItem(row, 0, QTableWidgetItem(str(product.get('id', ''))))
+            self.products_table.setItem(row, 0, QTableWidgetItem(str(product.id)))
             
             # Nom
-            self.products_table.setItem(row, 1, QTableWidgetItem(product.get('name', '')))
+            self.products_table.setItem(row, 1, QTableWidgetItem(product.name or ''))
             
             # Catégorie
-            category = product.get('category', '')
+            category = product.category or ''
             self.products_table.setItem(row, 2, QTableWidgetItem(category))
             
             # Coût
-            cost = float(product.get('cost', 0))
+            cost = float(product.cost or 0)
             self.products_table.setItem(row, 3, QTableWidgetItem(f"{cost:.2f} €"))
             
             # Prix
-            price = float(product.get('price_unit', 0))
+            price = float(product.price_unit or 0)
             self.products_table.setItem(row, 4, QTableWidgetItem(f"{price:.2f} €"))
             
-            # Stock
-            stock = float(product.get('stock_quantity', 0))
-            unit = product.get('unit', 'pièce')
-            self.products_table.setItem(row, 5, QTableWidgetItem(f"{stock:.0f} {unit}"))
-            
             # Seuil minimum
-            stock_min = float(product.get('stock_min', 0))
-            self.products_table.setItem(row, 6, QTableWidgetItem(f"{stock_min:.0f}"))
+            stock_min = float(product.stock_min or 0)
+            self.products_table.setItem(row, 5, QTableWidgetItem(f"{stock_min:.0f}"))
+            
+            #Unite
+            unit = product.unit or 'pièce'
+            self.products_table.setItem(row, 6, QTableWidgetItem(unit))
+            
+            # Stock
+            stock = float(product.stock_quantity or 0)
+            self.products_table.setItem(row, 7, QTableWidgetItem(f"{stock:.0f}"))
+
+            
             
             # Statut stock
             if stock == 0:
@@ -535,14 +594,8 @@ class ProduitIndex(QWidget):
             
             status_item = QTableWidgetItem(status)
             status_item.setBackground(status_color)
-            self.products_table.setItem(row, 7, status_item)
+            self.products_table.setItem(row, 8, status_item)
             
-            # Statut actif
-            active_status = "Actif" if product.get('is_active', True) else "Inactif"
-            active_item = QTableWidgetItem(active_status)
-            if not product.get('is_active', True):
-                active_item.setBackground(Qt.GlobalColor.lightGray)
-            self.products_table.setItem(row, 8, active_item)
         
         # Cacher la colonne ID
         self.products_table.hideColumn(0)
@@ -558,7 +611,7 @@ class ProduitIndex(QWidget):
             # Trouver le produit sélectionné dans les données
             self.selected_product = None
             for product in self.products_data:
-                if product.get('id') == product_id:
+                if product.id == product_id:
                     self.selected_product = product
                     break
             
@@ -619,7 +672,7 @@ class ProduitIndex(QWidget):
             return
         
         total_products = len(self.products_data)
-        active_products = sum(1 for p in self.products_data if p.get('is_active', True))
+        active_products = sum(1 for p in self.products_data if p.is_active)
         
         # Calcul du stock total et alertes
         total_stock_value = 0
@@ -627,9 +680,9 @@ class ProduitIndex(QWidget):
         out_of_stock_count = 0
         
         for product in self.products_data:
-            stock = float(product.get('stock_quantity', 0))
-            cost = float(product.get('cost', 0))
-            stock_min = float(product.get('stock_min', 0))
+            stock = float(product.stock_quantity or 0)
+            cost = float(product.cost or 0)
+            stock_min = float(product.stock_min or 0)
             
             total_stock_value += stock * cost
             

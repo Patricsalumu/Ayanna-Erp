@@ -191,13 +191,21 @@ class ServiceForm(QDialog):
         if not self.service_data:
             return
         
-        self.name_edit.setText(self.service_data.get('name', ''))
-        self.description_edit.setPlainText(self.service_data.get('description', ''))
-        
-        
-        self.cost_spinbox.setValue(float(self.service_data.get('cost', 0)))
-        self.price_spinbox.setValue(float(self.service_data.get('price', 0)))
-        self.active_checkbox.setChecked(bool(self.service_data.get('is_active', True)))
+        # Gestion des objets SQLAlchemy et dictionnaires
+        if hasattr(self.service_data, 'name'):
+            # Objet SQLAlchemy
+            self.name_edit.setText(self.service_data.name or '')
+            self.description_edit.setPlainText(self.service_data.description or '')
+            self.cost_spinbox.setValue(float(self.service_data.cost or 0))
+            self.price_spinbox.setValue(float(self.service_data.price or 0))
+            self.active_checkbox.setChecked(bool(self.service_data.is_active))
+        else:
+            # Dictionnaire (rétrocompatibilité)
+            self.name_edit.setText(self.service_data.get('name', ''))
+            self.description_edit.setPlainText(self.service_data.get('description', ''))
+            self.cost_spinbox.setValue(float(self.service_data.get('cost', 0)))
+            self.price_spinbox.setValue(float(self.service_data.get('price', 0)))
+            self.active_checkbox.setChecked(bool(self.service_data.get('is_active', True)))
         
         # Mettre à jour la marge
         self.update_margin()
@@ -237,7 +245,10 @@ class ServiceForm(QDialog):
             if self.controller:
                 if self.is_edit_mode:
                     # Modification
-                    service_id = self.service_data.get('id')
+                    if hasattr(self.service_data, 'id'):
+                        service_id = self.service_data.id  # Objet SQLAlchemy
+                    else:
+                        service_id = self.service_data.get('id')  # Dictionnaire
                     success = self.controller.update_service(service_id, form_data)
                     if success:
                         QMessageBox.information(self, "Succès", "Service modifié avec succès !")

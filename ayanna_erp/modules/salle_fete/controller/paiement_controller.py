@@ -604,3 +604,46 @@ class PaiementController(QObject):
                 'average_payment': 0,
                 'payment_methods': []
             }
+    
+    def get_payments_by_date(self, target_date):
+        """
+        Récupérer tous les paiements pour une date donnée
+        
+        Args:
+            target_date (date): Date pour laquelle récupérer les paiements
+            
+        Returns:
+            list: Liste des paiements avec les informations utilisateur
+        """
+        try:
+            session = self.get_session()
+            
+            # Définir les bornes de la journée
+            start_datetime = datetime.combine(target_date, datetime.min.time())
+            end_datetime = datetime.combine(target_date, datetime.max.time())
+            
+            # Requête avec jointure pour récupérer le nom de l'utilisateur
+            payments = session.query(EventPayment)\
+                .filter(EventPayment.payment_date.between(start_datetime, end_datetime))\
+                .order_by(desc(EventPayment.payment_date))\
+                .all()
+            
+            # Ajouter les noms d'utilisateur
+            for payment in payments:
+                if payment.user_id:
+                    # Requête pour récupérer le nom de l'utilisateur
+                    user_name = session.execute(
+                        text("SELECT name FROM core_users WHERE id = :user_id"),
+                        {"user_id": payment.user_id}
+                    ).scalar()
+                    payment.user_nom = user_name or "Utilisateur inconnu"
+                else:
+                    payment.user_nom = "Système"
+            
+            session.close()
+            return payments
+            
+        except Exception as e:
+            print(f"Erreur lors de la récupération des paiements: {str(e)}")
+            self.error_occurred.emit(f"Erreur lors de la récupération des paiements: {str(e)}")
+            return []

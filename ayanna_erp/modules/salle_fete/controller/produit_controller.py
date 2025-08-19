@@ -11,7 +11,9 @@ from datetime import datetime
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from ayanna_erp.modules.salle_fete.model.salle_fete import EventProduct, EventStockMovement, get_database_manager
+from ayanna_erp.modules.salle_fete.model.salle_fete import (
+    EventProduct, EventStockMovement, EventReservation, EventReservationProduct, get_database_manager
+)
 
 
 class ProduitController(QObject):
@@ -103,26 +105,9 @@ class ProduitController(QObject):
                 EventProduct.pos_id == self.pos_id
             ).order_by(EventProduct.name).all()
             
-            # Convertir en dictionnaires pour la vue
-            products_data = []
-            for product in products:
-                products_data.append({
-                    'id': product.id,
-                    'name': product.name or '',
-                    'description': product.description or '',
-                    'category': product.category or '',
-                    'unit': product.unit or 'pièce',
-                    'cost': float(product.cost or 0),
-                    'price_unit': float(product.price_unit or 0),
-                    'stock_quantity': float(product.stock_quantity or 0),
-                    'stock_min': float(product.stock_min or 0),
-                    'is_active': product.is_active,
-                    'created_at': product.created_at
-                })
-            
-            print(f"✅ {len(products_data)} produits chargés")
-            self.products_loaded.emit(products_data)
-            return products_data
+            print(f"✅ {len(products)} produits chargés")
+            self.products_loaded.emit(products)
+            return products
             
         except Exception as e:
             error_msg = f"Erreur lors du chargement des produits: {str(e)}"
@@ -417,6 +402,133 @@ class ProduitController(QObject):
             print(f"❌ {error_msg}")
             self.error_occurred.emit(error_msg)
             return []
+            
+        finally:
+            db_manager.close_session()
+    
+    def get_product_recent_movements(self, product_id, limit=10):
+        """
+        Récupère les mouvements de stock récents pour un produit
+        Retourne: liste des dernières sorties avec date, client et quantité
+        """
+        try:
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+            
+            # Récupération des sorties de stock (ventes) depuis les réservations
+            recent_sales = (session.query(
+                    EventReservation.event_date,
+                    EventReservation.client_nom,
+                    EventReservation.client_prenom,
+                    EventReservation.client_telephone,
+                    EventReservationProduct.quantity,
+                    EventReservationProduct.unit_price
+                )
+                .join(EventReservationProduct, EventReservation.id == EventReservationProduct.reservation_id)
+                .filter(EventReservationProduct.product_id == product_id)
+                .order_by(EventReservation.event_date.desc())
+                .limit(limit)
+                .all()
+            )
+            
+            # Formatage des résultats pour les ventes
+            movements_list = []
+            for sale in recent_sales:
+                client_name = f"{sale.client_nom or ''} {sale.client_prenom or ''}".strip() or "Client non spécifié"
+                movements_list.append({
+                    'type': 'SORTIE',
+                    'date': sale.event_date,
+                    'client_name': client_name,
+                    'client_telephone': sale.client_telephone,
+                    'quantity': sale.quantity,
+                    'unit_price': sale.unit_price,
+                    'total_line': sale.quantity * sale.unit_price,
+                    'reason': 'Vente - Réservation'
+                })
+            
+            # Récupération des autres mouvements de stock (entrées, ajustements, etc.)
+            stock_movements = (session.query(EventStockMovement)
+                             .filter(EventStockMovement.product_id == product_id)
+                             .order_by(EventStockMovement.movement_date.desc())
+                             .limit(limit)
+                             .all())
+            
+            # Ajouter les mouvements de stock
+            for movement in stock_movements:
+                movements_list.append({
+                    'type': movement.movement_type,
+                    'date': movement.movement_date,
+                    'client_name': movement.reference or 'Système',
+                    'client_telephone': '',
+                    'quantity': movement.quantity,
+                    'unit_price': 0.0,
+                    'total_line': 0.0,
+                    'reason': movement.reason or movement.movement_type
+                })
+            
+            # Trier par date (les plus récents en premier)
+            movements_list.sort(key=lambda x: x['date'], reverse=True)
+            
+            return movements_list[:limit]
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération des mouvements: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return []
+            
+        finally:
+            db_manager.close_session()
+    
+    def get_product_sales_statistics(self, product_id):
+        """
+        Récupère les statistiques de vente pour un produit donné
+        Retourne: dict avec total_sold, total_revenue, last_sale, average_quantity
+        """
+        try:
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+            
+            # Jointure pour récupérer les données de vente du produit
+            sales_data = (session.query(
+                    EventReservationProduct.quantity,
+                    (EventReservationProduct.quantity * EventReservationProduct.unit_price).label('revenue'),
+                    EventReservation.event_date
+                )
+                .join(EventReservation, EventReservationProduct.reservation_id == EventReservation.id)
+                .filter(EventReservationProduct.product_id == product_id)
+                .all()
+            )
+            
+            if not sales_data:
+                return {
+                    'total_sold': 0,
+                    'total_sales': 0,
+                    'total_revenue': 0.0,
+                    'average_quantity': 0.0,
+                    'last_sale': None
+                }
+            
+            # Calcul des statistiques
+            total_sales = len(sales_data)  # Nombre de ventes
+            total_sold = sum(sale.quantity for sale in sales_data)  # Quantité totale vendue
+            total_revenue = sum(float(sale.revenue) for sale in sales_data)  # Revenus totaux
+            average_quantity = total_sold / total_sales if total_sales > 0 else 0.0
+            last_sale = max(sale.event_date for sale in sales_data)
+            
+            return {
+                'total_sold': total_sold,
+                'total_sales': total_sales,
+                'total_revenue': total_revenue,
+                'average_quantity': round(average_quantity, 2),
+                'last_sale': last_sale
+            }
+            
+        except Exception as e:
+            error_msg = f"Erreur lors de la récupération des statistiques de vente: {str(e)}"
+            print(f"❌ {error_msg}")
+            self.error_occurred.emit(error_msg)
+            return None
             
         finally:
             db_manager.close_session()
