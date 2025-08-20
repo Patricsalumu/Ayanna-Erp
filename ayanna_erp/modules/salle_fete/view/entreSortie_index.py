@@ -19,6 +19,10 @@ from decimal import Decimal
 from datetime import datetime, timedelta, date
 import json
 
+# Import des contrôleurs
+from ..controller.entre_sortie_controller import EntreSortieController
+from ..controller.paiement_controller import PaiementController
+
 
 class DepenseDialog(QDialog):
     """Dialog pour enregistrer une dépense"""
@@ -27,8 +31,10 @@ class DepenseDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Enregistrer une dépense")
         self.setModal(True)
-        self.resize(400, 300)
+        self.resize(450, 400)
+        self.comptes_charges = []
         self.setup_ui()
+        self.load_comptes_charges()
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -49,6 +55,11 @@ class DepenseDialog(QDialog):
         self.montant_spinbox.setSuffix(" €")
         form_layout.addRow("Montant *:", self.montant_spinbox)
         
+        # Compte comptable (nouveau)
+        self.compte_combo = QComboBox()
+        self.compte_combo.setPlaceholderText("Sélectionner un compte de charges...")
+        form_layout.addRow("Compte de charges *:", self.compte_combo)
+        
         # Catégorie
         self.categorie_combo = QComboBox()
         self.categorie_combo.addItems([
@@ -63,6 +74,16 @@ class DepenseDialog(QDialog):
         ])
         self.categorie_combo.setEditable(True)
         form_layout.addRow("Catégorie:", self.categorie_combo)
+        
+        # Fournisseur (nouveau)
+        self.fournisseur_edit = QLineEdit()
+        self.fournisseur_edit.setPlaceholderText("Nom du fournisseur (optionnel)")
+        form_layout.addRow("Fournisseur:", self.fournisseur_edit)
+        
+        # Numéro de facture (nouveau)
+        self.facture_edit = QLineEdit()
+        self.facture_edit.setPlaceholderText("Numéro de facture (optionnel)")
+        form_layout.addRow("N° Facture:", self.facture_edit)
         
         # Description
         self.description_edit = QTextEdit()
@@ -101,6 +122,37 @@ class DepenseDialog(QDialog):
         self.save_btn.clicked.connect(self.validate_and_accept)
         self.libelle_edit.setFocus()
     
+    def load_comptes_charges(self):
+        """Charger les comptes de charges (classe 6) depuis la base de données"""
+        try:
+            from ayanna_erp.database.database_manager import DatabaseManager
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
+            
+            db_manager = DatabaseManager()
+            session = db_manager.get_session()
+            
+            # Récupérer les comptes de classe 6 (charges)
+            comptes = session.query(ComptaComptes)\
+                .join(ComptaClasses)\
+                .filter(ComptaClasses.code.like('6%'))\
+                .filter(ComptaComptes.actif == True)\
+                .order_by(ComptaComptes.numero)\
+                .all()
+            
+            self.comptes_charges = comptes
+            self.compte_combo.clear()
+            
+            for compte in comptes:
+                display_text = f"{compte.numero} - {compte.nom}"
+                self.compte_combo.addItem(display_text, compte.id)
+            
+            session.close()
+            print(f"✅ {len(comptes)} comptes de charges chargés")
+            
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des comptes: {e}")
+            QMessageBox.warning(self, "Erreur", f"Impossible de charger les comptes de charges: {e}")
+    
     def validate_and_accept(self):
         if not self.libelle_edit.text().strip():
             QMessageBox.warning(self, "Erreur", "Le libellé est obligatoire.")
@@ -108,13 +160,21 @@ class DepenseDialog(QDialog):
         if self.montant_spinbox.value() <= 0:
             QMessageBox.warning(self, "Erreur", "Le montant doit être supérieur à 0.")
             return
+        if self.compte_combo.currentIndex() == -1:
+            QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un compte de charges.")
+            return
         self.accept()
     
     def get_data(self):
+        selected_compte_id = self.compte_combo.currentData() if self.compte_combo.currentIndex() != -1 else None
+        
         return {
             'libelle': self.libelle_edit.text().strip(),
             'montant': self.montant_spinbox.value(),
+            'compte_id': selected_compte_id,
             'categorie': self.categorie_combo.currentText().strip(),
+            'fournisseur': self.fournisseur_edit.text().strip() or None,
+            'facture': self.facture_edit.text().strip() or None,
             'description': self.description_edit.toPlainText().strip()
         }
 
@@ -127,6 +187,10 @@ class EntreeSortieIndex(QWidget):
         self.main_controller = main_controller
         self.current_user = current_user
         self.journal_data = []
+        
+        # Initialiser le contrôleur des dépenses
+        from ayanna_erp.modules.salle_fete.controller.entre_sortie_controller import EntreSortieController
+        self.expense_controller = EntreSortieController(pos_id=1)  # TODO: Récupérer le vrai pos_id
         
         self.setup_ui()
         self.load_journal_data()
@@ -366,23 +430,10 @@ class EntreeSortieIndex(QWidget):
     
     def load_journal_data(self):
         """
-        Charger les données du journal - Version démo en attendant la table journal_comptable
-        
-        TODO: Remplacer par une vraie requête vers la table journal_comptable:
-        
-        SELECT * FROM journal_comptable 
-        WHERE DATE(date_operation) = :selected_date 
-        ORDER BY date_operation DESC
-        
-        Colonnes attendues:
-        - id: identifiant unique
-        - date_operation: datetime de l'opération  
-        - type_operation: 'Entrée' ou 'Sortie'
-        - libelle: description de l'opération
-        - categorie: catégorie (Paiement client, Achat matériel, etc.)
-        - montant: montant de l'opération
-        - utilisateur_id: ID de l'utilisateur qui a saisi
-        - description: détails supplémentaires
+        Charger les données du journal depuis les tables métier
+        - event_expenses (sorties)
+        - event_payments (entrées)
+        Filtrées par POS courant et date sélectionnée
         """
         try:
             # Obtenir la date sélectionnée
@@ -392,91 +443,58 @@ class EntreeSortieIndex(QWidget):
             else:
                 selected_date = date.today()
             
-            # Données de démonstration pour l'interface
-            # À remplacer par la lecture de la table journal_comptable
+            # Initialiser la liste des données
             self.journal_data = []
             
-            # Ajouter quelques entrées de démo pour aujourd'hui
-            if selected_date == date.today():
-                demo_entries = [
-                    {
-                        'id': 'DEMO_001',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=9, minute=30)),
-                        'type': 'Entrée',
-                        'libelle': 'Paiement réservation mariage',
-                        'categorie': 'Paiement client',
-                        'montant_entree': 2500.00,
-                        'montant_sortie': 0.0,
-                        'utilisateur': 'Admin',
-                        'description': 'Acompte 50% mariage famille Dupont'
-                    },
-                    {
-                        'id': 'DEMO_002',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=11, minute=15)),
-                        'type': 'Sortie',
-                        'libelle': 'Achat décoration florale',
-                        'categorie': 'Achat matériel',
-                        'montant_entree': 0.0,
-                        'montant_sortie': 350.00,
-                        'utilisateur': 'Manager',
-                        'description': 'Fleurs pour événement du weekend'
-                    },
-                    {
-                        'id': 'DEMO_003',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=14, minute=45)),
-                        'type': 'Entrée',
-                        'libelle': 'Paiement anniversaire',
-                        'categorie': 'Paiement client',
-                        'montant_entree': 800.00,
-                        'montant_sortie': 0.0,
-                        'utilisateur': 'Admin',
-                        'description': 'Solde anniversaire 50 personnes'
-                    },
-                    {
-                        'id': 'DEMO_004',
-                        'datetime': datetime.combine(selected_date, datetime.min.time().replace(hour=16, minute=20)),
-                        'type': 'Sortie',
-                        'libelle': 'Transport matériel',
-                        'categorie': 'Transport',
-                        'montant_entree': 0.0,
-                        'montant_sortie': 120.00,
-                        'utilisateur': 'Staff',
-                        'description': 'Livraison chaises et tables'
-                    }
-                ]
-                self.journal_data.extend(demo_entries)
-            
-            # Charger les dépenses réelles saisies via l'interface
+            # Charger les sorties (dépenses) depuis event_expenses
             try:
-                import json
-                import os
+                entre_sortie_controller = EntreSortieController()
+                expenses = entre_sortie_controller.get_expenses_by_date_and_pos(
+                    selected_date, 
+                    self.current_pos_id if hasattr(self, 'current_pos_id') else 1
+                )
                 
-                # Fichier temporaire pour stocker les dépenses saisies
-                depenses_file = os.path.join(os.path.dirname(__file__), '..', 'data', 'depenses.json')
-                
-                if os.path.exists(depenses_file):
-                    with open(depenses_file, 'r', encoding='utf-8') as f:
-                        depenses = json.load(f)
+                for expense in expenses:
+                    entry = {
+                        'id': f'EXP_{expense.id}',
+                        'datetime': expense.date_creation,
+                        'type': 'Sortie',
+                        'libelle': expense.libelle,
+                        'categorie': expense.categorie,
+                        'montant_entree': 0.0,
+                        'montant_sortie': float(expense.montant),
+                        'utilisateur': getattr(expense, 'utilisateur_nom', 'Utilisateur'),
+                        'description': expense.description or ''
+                    }
+                    self.journal_data.append(entry)
                     
-                    for depense in depenses:
-                        # Filtrer par date
-                        depense_date = datetime.fromisoformat(depense['datetime']).date()
-                        if depense_date == selected_date:
-                            entry = {
-                                'id': depense['id'],
-                                'datetime': datetime.fromisoformat(depense['datetime']),
-                                'type': 'Sortie',
-                                'libelle': depense['libelle'],
-                                'categorie': depense['categorie'],
-                                'montant_entree': 0.0,
-                                'montant_sortie': depense['montant'],
-                                'utilisateur': depense.get('utilisateur', 'Utilisateur'),
-                                'description': depense.get('description', '')
-                            }
-                            self.journal_data.append(entry)
-            
             except Exception as e:
                 print(f"Erreur lors du chargement des dépenses: {e}")
+            
+            # Charger les entrées (paiements) depuis event_payments
+            try:
+                paiement_controller = PaiementController()
+                payments = paiement_controller.get_payments_by_date_and_pos(
+                    selected_date,
+                    self.current_pos_id if hasattr(self, 'current_pos_id') else 1
+                )
+                
+                for payment in payments:
+                    entry = {
+                        'id': f'PAY_{payment.id}',
+                        'datetime': payment.date_paiement,
+                        'type': 'Entrée',
+                        'libelle': f'Paiement {payment.mode_paiement}',
+                        'categorie': 'Paiement client',
+                        'montant_entree': float(payment.montant),
+                        'montant_sortie': 0.0,
+                        'utilisateur': getattr(payment, 'utilisateur_nom', 'Utilisateur'),
+                        'description': f'Réservation #{payment.reservation_id}' if payment.reservation_id else ''
+                    }
+                    self.journal_data.append(entry)
+                    
+            except Exception as e:
+                print(f"Erreur lors du chargement des paiements: {e}")
             
             # Trier par date/heure décroissante
             self.journal_data.sort(key=lambda x: x['datetime'], reverse=True)
@@ -486,7 +504,8 @@ class EntreeSortieIndex(QWidget):
             
         except Exception as e:
             print(f"Erreur lors du chargement du journal: {e}")
-            # Ne pas afficher de popup d'erreur pour les données de démo
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement du journal: {str(e)}")
+    
     
     def update_journal_display(self):
         """Mettre à jour l'affichage du tableau et des statistiques"""
@@ -503,12 +522,7 @@ class EntreeSortieIndex(QWidget):
             
             # Type
             type_item = QTableWidgetItem(entry['type'])
-            if entry['type'] == 'Entrée':
-                type_item.setBackground(Qt.GlobalColor.green)
-                type_item.setForeground(Qt.GlobalColor.white)
-            else:
-                type_item.setBackground(Qt.GlobalColor.red)
-                type_item.setForeground(Qt.GlobalColor.white)
+            type_item.setForeground(Qt.GlobalColor.black)  # Texte noir pour une meilleure visibilité
             self.journal_table.setItem(row, 1, type_item)
             
             # Libellé
@@ -561,6 +575,7 @@ class EntreeSortieIndex(QWidget):
                 filtered_data = [entry for entry in filtered_data if entry['type'] == 'Entrée']
             elif type_filter == "Sorties":
                 filtered_data = [entry for entry in filtered_data if entry['type'] == 'Sortie']
+            # Si "Tous" est sélectionné, on ne filtre pas (on garde toutes les données)
         
         # Filtre par recherche
         if hasattr(self, 'search_edit'):
@@ -621,48 +636,22 @@ class EntreeSortieIndex(QWidget):
             self.save_depense(data)
     
     def save_depense(self, depense_data):
-        """Sauvegarder une nouvelle dépense"""
+        """Sauvegarder une nouvelle dépense avec intégration comptable"""
         try:
-            import json
-            import os
-            import uuid
+            # Utiliser le contrôleur pour créer la dépense avec intégration comptable
+            expense = self.expense_controller.create_expense(depense_data)
             
-            # Créer le dossier data s'il n'existe pas
-            data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
-            os.makedirs(data_dir, exist_ok=True)
-            
-            # Fichier temporaire pour stocker les dépenses
-            depenses_file = os.path.join(data_dir, 'depenses.json')
-            
-            # Charger les dépenses existantes
-            depenses = []
-            if os.path.exists(depenses_file):
-                with open(depenses_file, 'r', encoding='utf-8') as f:
-                    depenses = json.load(f)
-            
-            # Ajouter la nouvelle dépense
-            nouvelle_depense = {
-                'id': f"DEP_{uuid.uuid4().hex[:8]}",
-                'datetime': datetime.now().isoformat(),
-                'libelle': depense_data['libelle'],
-                'montant': depense_data['montant'],
-                'categorie': depense_data['categorie'],
-                'description': depense_data['description'],
-                'utilisateur': self.current_user.get('name', 'Utilisateur'),
-                'user_id': self.current_user.get('id', 1)
-            }
-            
-            depenses.append(nouvelle_depense)
-            
-            # Sauvegarder dans le fichier
-            with open(depenses_file, 'w', encoding='utf-8') as f:
-                json.dump(depenses, f, ensure_ascii=False, indent=2)
-            
-            # Recharger les données
-            self.load_journal_data()
-            
-            QMessageBox.information(self, "Succès", "Dépense enregistrée avec succès!")
-            
+            if expense:
+                # Recharger les données
+                self.load_journal_data()
+                
+                QMessageBox.information(self, "Succès", 
+                    f"Dépense enregistrée avec succès!\n"
+                    f"Montant: {expense.amount}€\n"
+                    f"Écritures comptables créées automatiquement.")
+            else:
+                QMessageBox.critical(self, "Erreur", "Impossible d'enregistrer la dépense.")
+                
         except Exception as e:
             print(f"Erreur lors de la sauvegarde: {e}")
             QMessageBox.critical(self, "Erreur", f"Impossible d'enregistrer la dépense: {str(e)}")

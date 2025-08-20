@@ -35,6 +35,11 @@ class ReservationController(QObject):
         self.pos_id = pos_id
         
     def create_reservation(self, reservation_data, services_data=None, products_data=None):
+        from ayanna_erp.modules.comptabilite.model.comptabilite import (
+            ComptaEcritures as EcritureComptable, 
+            ComptaJournaux as JournalComptable, 
+            ComptaComptes as CompteComptable
+        )
         """
         Créer une nouvelle réservation avec services et produits
         
@@ -133,6 +138,7 @@ class ReservationController(QObject):
             
             if deposit_amount > 0:
                 from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
+                from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaConfig
                 
                 payment = EventPayment(
                     reservation_id=reservation.id,
@@ -144,10 +150,63 @@ class ReservationController(QObject):
                     notes=f"Acompte automatique pour réservation {reservation.client_nom} {reservation.client_prenom}"
                 )
                 session.add(payment)
+                session.flush()  # Pour avoir l'ID du paiement
                 print(f"💰 Paiement d'acompte créé: {deposit_amount}€")
+                
+                # Récupérer la configuration comptable pour ce POS
+                config = session.query(ComptaConfig).filter_by(pos_id=self.pos_id).first()
+                if not config:
+                    print("⚠️  Configuration comptable manquante pour ce point de vente")
+                else:
+                    # Créer la ligne de journal comptable
+                    libelle = f"Paiement Accompte Reservation: {reservation.client_nom} {reservation.client_prenom}"
+                    journal = JournalComptable(
+                        enterprise_id=1,  # TODO: Récupérer l'ID de l'entreprise du POS
+                        libelle=libelle,
+                        montant=deposit_amount,
+                        type_operation="entree",  # 'entree' pour un paiement
+                        reference=f"PAY-{payment.id}",
+                        description=f"Acompte réservation ID: {reservation.id}",
+                        user_id=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
+                        date_operation=datetime.now()
+                    )
+                    session.add(journal)
+                    session.flush()  # Pour avoir l'id du journal
+
+                    # Récupérer les comptes configurés
+                    compte_debit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
+                    if not compte_debit:
+                        raise Exception("Le compte caisse configuré n'existe pas ou n'est pas actif.")
+
+                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_client_id).first()
+                    if not compte_credit:
+                        raise Exception("Le compte client configuré n'existe pas ou n'est pas actif.")
+
+                    # Créer l'écriture comptable de débit (caisse augmente)
+                    ecriture_debit = EcritureComptable(
+                        journal_id=journal.id,
+                        compte_comptable_id=compte_debit.id,
+                        debit=deposit_amount,
+                        credit=0,
+                        ordre=1,
+                        libelle=f"Encaissement acompte - {reservation.client_nom}"
+                    )
+                    session.add(ecriture_debit)
+                    
+                    # Créer l'écriture comptable de crédit (client diminue - avance reçue)
+                    ecriture_credit = EcritureComptable(
+                        journal_id=journal.id,
+                        compte_comptable_id=compte_credit.id,
+                        debit=0,
+                        credit=deposit_amount,
+                        ordre=2,
+                        libelle=f"Avance reçue - {reservation.client_nom}"
+                    )
+                    session.add(ecriture_credit)
+                    print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
             else:
                 print("ℹ️  Aucun acompte fourni, pas de paiement créé")
-            
+                
             session.commit()
             session.refresh(reservation)
             

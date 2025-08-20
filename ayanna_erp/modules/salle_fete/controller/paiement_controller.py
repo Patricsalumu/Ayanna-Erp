@@ -457,6 +457,68 @@ class PaiementController(QObject):
             )
             
             session.add(payment)
+            session.flush()  # Pour avoir l'ID du paiement
+            
+            # === INTEGRATION COMPTABLE ===
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaConfig,
+                ComptaEcritures as EcritureComptable, 
+                ComptaJournaux as JournalComptable, 
+                ComptaComptes as CompteComptable
+            )
+            
+            # Récupérer la configuration comptable pour ce POS
+            config = session.query(ComptaConfig).filter_by(pos_id=self.pos_id).first()
+            if not config:
+                print("⚠️  Configuration comptable manquante pour ce point de vente")
+            else:
+                # Créer la ligne de journal comptable
+                libelle = f"Paiement Réservation: {reservation.get_client_name()}"
+                journal = JournalComptable(
+                    enterprise_id=1,  # TODO: Récupérer l'ID de l'entreprise du POS
+                    libelle=libelle,
+                    montant=payment_data['amount'],
+                    type_operation="entree",  # 'entree' pour un paiement
+                    reference=f"PAY-{payment.id}",
+                    description=f"Paiement réservation ID: {reservation.id}",
+                    user_id=payment_data.get('user_id', 1),
+                    date_operation=payment_data.get('payment_date', datetime.now())
+                )
+                session.add(journal)
+                session.flush()  # Pour avoir l'id du journal
+
+                # Récupérer les comptes configurés
+                compte_debit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
+                if not compte_debit:
+                    print("⚠️  Le compte caisse configuré n'existe pas ou n'est pas actif.")
+                else:
+                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_client_id).first()
+                    if not compte_credit:
+                        print("⚠️  Le compte client configuré n'existe pas ou n'est pas actif.")
+                    else:
+                        # Créer l'écriture comptable de débit (caisse augmente)
+                        ecriture_debit = EcritureComptable(
+                            journal_id=journal.id,
+                            compte_comptable_id=compte_debit.id,
+                            debit=payment_data['amount'],
+                            credit=0,
+                            ordre=1,
+                            libelle=f"Encaissement - {reservation.get_client_name()}"
+                        )
+                        session.add(ecriture_debit)
+                        
+                        # Créer l'écriture comptable de crédit (client diminue - paiement reçu)
+                        ecriture_credit = EcritureComptable(
+                            journal_id=journal.id,
+                            compte_comptable_id=compte_credit.id,
+                            debit=0,
+                            credit=payment_data['amount'],
+                            ordre=2,
+                            libelle=f"Paiement reçu - {reservation.get_client_name()}"
+                        )
+                        session.add(ecriture_credit)
+                        print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
+            
             session.commit()
             
             # Émettre le signal de succès
@@ -466,8 +528,12 @@ class PaiementController(QObject):
             return True
             
         except Exception as e:
-            print(f"Erreur lors de la création du paiement: {str(e)}")
+            session.rollback()
+            print(f"❌ Erreur lors de la création du paiement: {str(e)}")
+            import traceback
+            traceback.print_exc()
             self.error_occurred.emit(f"Erreur lors de la création du paiement: {str(e)}")
+            session.close()
             return False
     
     def get_payments_by_reservation(self, reservation_id):
@@ -645,5 +711,60 @@ class PaiementController(QObject):
             
         except Exception as e:
             print(f"Erreur lors de la récupération des paiements: {str(e)}")
+            self.error_occurred.emit(f"Erreur lors de la récupération des paiements: {str(e)}")
+            return []
+    
+    def get_payments_by_date_and_pos(self, target_date, pos_id):
+        """
+        Récupérer les paiements pour une date et un POS donnés
+        
+        Args:
+            target_date (date): La date cible  
+            pos_id (int): L'ID du point de vente
+            
+        Returns:
+            list: Liste des paiements avec les informations utilisateur
+        """
+        try:
+            session = self.get_session()
+            
+            if isinstance(target_date, datetime):
+                target_date = target_date.date()
+                
+            # Définir les bornes de la journée
+            start_datetime = datetime.combine(target_date, datetime.min.time())
+            end_datetime = datetime.combine(target_date, datetime.max.time())
+            
+            # Requête pour récupérer les paiements de la date (EventPayment est toujours pour POS 1 - salle de fête)
+            payments = session.query(EventPayment)\
+                .filter(
+                    EventPayment.payment_date.between(start_datetime, end_datetime)
+                )\
+                .order_by(desc(EventPayment.payment_date))\
+                .all()
+            
+            # Ajouter les noms d'utilisateur et informations supplémentaires
+            for payment in payments:
+                if payment.user_id:
+                    # Requête pour récupérer le nom de l'utilisateur
+                    user_name = session.execute(
+                        text("SELECT name FROM core_users WHERE id = :user_id"),
+                        {"user_id": payment.user_id}
+                    ).scalar()
+                    payment.user_nom = user_name or "Utilisateur inconnu"
+                else:
+                    payment.user_nom = "Système"
+                
+                # Ajouter des alias pour compatibilité avec l'interface
+                payment.utilisateur_nom = payment.user_nom
+                payment.date_paiement = payment.payment_date
+                payment.mode_paiement = payment.payment_method
+                payment.montant = payment.amount
+            
+            session.close()
+            return payments
+            
+        except Exception as e:
+            print(f"Erreur lors de la récupération des paiements par date et POS: {str(e)}")
             self.error_occurred.emit(f"Erreur lors de la récupération des paiements: {str(e)}")
             return []
