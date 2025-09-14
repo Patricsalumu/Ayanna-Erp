@@ -83,6 +83,16 @@ class PDFExporter:
         """Créer l'en-tête avec informations entreprise"""
         canvas.saveState()
         
+        # FILIGRANE EN BAS - Plus visible
+        canvas.setFont('Helvetica-Bold', 11)
+        canvas.setFillColor(HexColor('#555555'))  # Gris plus foncé
+        generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
+        filigrane_text = f"Gérée par Ayanna ERP © - Généré le {generation_time}"
+        # Position en bas de page - centré
+        text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
+        x_center = (A4[0] - text_width) / 2
+        canvas.drawString(x_center, 15, filigrane_text)  # 15 points du bas
+        
         # Rectangle de fond pour l'en-tête
         canvas.setFillColor(HexColor('#F8F9FA'))
         canvas.rect(0, A4[1] - 120, A4[0], 120, fill=1, stroke=0)
@@ -124,9 +134,12 @@ class PDFExporter:
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(HexColor('#7F8C8D'))
         
-        # Numéro de page
+        # Numéro de page - déplacé plus haut pour laisser place au filigrane
         page_num = canvas.getPageNumber()
-        canvas.drawCentredText(A4[0] / 2, 30, f"Page {page_num}")
+        page_text = f"Page {page_num}"
+        text_width = canvas.stringWidth(page_text, 'Helvetica', 8)
+        x_center = (A4[0] - text_width) / 2
+        canvas.drawString(x_center, 40, page_text)  # Position plus haute
         
         # Ligne de séparation
         canvas.setStrokeColor(HexColor('#BDC3C7'))
@@ -169,7 +182,7 @@ class PDFExporter:
     
     def export_monthly_report(self, data, comparison, figure, filename):
         """Exporter le rapport mensuel en PDF"""
-        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=130)
+        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=150, bottomMargin=60)
         story = []
         
         # Titre du rapport
@@ -244,7 +257,7 @@ class PDFExporter:
     
     def export_yearly_report(self, data, comparison, figure, filename):
         """Exporter le rapport annuel en PDF"""
-        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=130)
+        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=150, bottomMargin=60)
         story = []
         
         # Titre du rapport
@@ -319,7 +332,7 @@ class PDFExporter:
     
     def export_financial_report(self, data, figure, filename):
         """Exporter le rapport financier en PDF"""
-        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=130)
+        doc = SimpleDocTemplate(filename, pagesize=A4, topMargin=150, bottomMargin=60)
         story = []
         
         # Titre du rapport

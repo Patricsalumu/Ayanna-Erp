@@ -542,9 +542,35 @@ class RapportIndex(QWidget):
                         x, y = dates[ind], expenses[ind]
                         text = f"Dépenses\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} €"
                     
-                    # Afficher le tooltip
+                    # Déterminer la position du tooltip selon la position de la souris
+                    fig_width, fig_height = self.financial_figure.get_size_inches()
+                    ax_bbox = ax.get_position()
+                    
+                    # Position de la souris en coordonnées relatives (0-1)
+                    mouse_x_rel = (event.x / (fig_width * self.financial_figure.dpi)) 
+                    mouse_y_rel = (event.y / (fig_height * self.financial_figure.dpi))
+                    
+                    # Déterminer l'alignement horizontal
+                    if mouse_x_rel > 0.7:  # Si proche du bord droit
+                        ha = 'right'
+                        xytext = (-20, 20)  # Tooltip à gauche et en haut
+                    else:
+                        ha = 'left'
+                        xytext = (20, 20)   # Tooltip à droite et en haut
+                    
+                    # Déterminer l'alignement vertical
+                    if mouse_y_rel > 0.7:  # Si proche du bord supérieur
+                        va = 'top'
+                        xytext = (xytext[0], -20)  # Tooltip en bas
+                    else:
+                        va = 'bottom'
+                    
+                    # Mettre à jour le tooltip avec le nouveau positionnement
                     self.tooltip_annotation.xy = (x, y)
                     self.tooltip_annotation.set_text(text)
+                    self.tooltip_annotation.xytext = xytext
+                    self.tooltip_annotation.set_ha(ha)
+                    self.tooltip_annotation.set_va(va)
                     self.tooltip_annotation.set_visible(True)
                     self.financial_canvas.draw_idle()
                 else:
