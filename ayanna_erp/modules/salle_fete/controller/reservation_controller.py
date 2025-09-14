@@ -178,7 +178,7 @@ class ReservationController(QObject):
                     if not compte_debit:
                         raise Exception("Le compte caisse configuré n'existe pas ou n'est pas actif.")
 
-                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_client_id).first()
+                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
                     if not compte_credit:
                         raise Exception("Le compte client configuré n'existe pas ou n'est pas actif.")
 

@@ -1,6 +1,6 @@
 """
 Onglet Rapports pour le module Salle de Fête
-Génération et affichage des rapports
+Interface redesignée avec dashboards intuitifs
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
@@ -9,652 +9,622 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox,
                             QGroupBox, QGridLayout, QListWidget, QSplitter,
                             QFrame, QScrollArea, QFormLayout, QCheckBox,
-                            QDateTimeEdit, QHeaderView, QDateEdit)
+                            QDateTimeEdit, QHeaderView, QDateEdit, QTabWidget)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDateTime, QDate
 from PyQt6.QtGui import QFont, QPixmap, QIcon
 from decimal import Decimal
-from datetime import datetime, timedelta
-from ayanna_erp.database.database_manager import DatabaseManager
+from datetime import datetime, timedelta, date
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
+import numpy as np
+
+try:
+    from ayanna_erp.modules.salle_fete.controller.rapport_controller import RapportController
+except ImportError:
+    from ..controller.rapport_controller import RapportController
 
 
 class RapportIndex(QWidget):
-    """Onglet pour la génération et visualisation des rapports"""
+    """Onglet pour la génération et visualisation des rapports avec dashboards intuitifs"""
     
     def __init__(self, db_manager, current_user):
         super().__init__()
         self.db_manager = db_manager
         self.current_user = current_user
+        self.rapport_controller = RapportController()
         self.setup_ui()
     
     def setup_ui(self):
-        """Configuration de l'interface utilisateur"""
+        """Configuration de l'interface utilisateur avec onglets"""
         layout = QVBoxLayout(self)
         
-        # Zone de sélection des rapports
-        reports_selection_group = QGroupBox("Sélection du rapport")
-        selection_layout = QGridLayout(reports_selection_group)
-        
-        # Différents types de rapports
-        self.daily_events_button = QPushButton("📊 Événements du jour")
-        self.daily_events_button.setStyleSheet(self.get_button_style("#3498DB"))
-        
-        self.weekly_events_button = QPushButton("📈 Événements de la semaine")
-        self.weekly_events_button.setStyleSheet(self.get_button_style("#27AE60"))
-        
-        self.monthly_events_button = QPushButton("📉 Événements du mois")
-        self.monthly_events_button.setStyleSheet(self.get_button_style("#9B59B6"))
-        
-        self.revenue_report_button = QPushButton("💰 Rapport de revenus")
-        self.revenue_report_button.setStyleSheet(self.get_button_style("#E67E22"))
-        
-        self.client_report_button = QPushButton("👥 Rapport clients")
-        self.client_report_button.setStyleSheet(self.get_button_style("#E74C3C"))
-        
-        self.product_report_button = QPushButton("📦 Rapport produits")
-        self.product_report_button.setStyleSheet(self.get_button_style("#1ABC9C"))
-        
-        self.service_report_button = QPushButton("🔧 Rapport services")
-        self.service_report_button.setStyleSheet(self.get_button_style("#34495E"))
-        
-        self.financial_summary_button = QPushButton("💼 Résumé financier")
-        self.financial_summary_button.setStyleSheet(self.get_button_style("#F39C12"))
-        
-        # Disposition des boutons
-        selection_layout.addWidget(self.daily_events_button, 0, 0)
-        selection_layout.addWidget(self.weekly_events_button, 0, 1)
-        selection_layout.addWidget(self.monthly_events_button, 0, 2)
-        selection_layout.addWidget(self.revenue_report_button, 1, 0)
-        selection_layout.addWidget(self.client_report_button, 1, 1)
-        selection_layout.addWidget(self.product_report_button, 1, 2)
-        selection_layout.addWidget(self.service_report_button, 2, 0)
-        selection_layout.addWidget(self.financial_summary_button, 2, 1)
-        
-        # Zone de filtres personnalisés
-        filters_group = QGroupBox("Filtres personnalisés")
-        filters_layout = QHBoxLayout(filters_group)
-        
-        # Filtre par période
-        filters_layout.addWidget(QLabel("De:"))
-        self.start_date = QDateEdit()
-        self.start_date.setDate(QDate.currentDate().addDays(-30))
-        self.start_date.setStyleSheet("""
-            QDateEdit {
-                padding: 8px 12px;
-                border: 1px solid #BDC3C7;
-                border-radius: 5px;
-                background-color: white;
-            }
-        """)
-        
-        filters_layout.addWidget(self.start_date)
-        filters_layout.addWidget(QLabel("À:"))
-        
-        self.end_date = QDateEdit()
-        self.end_date.setDate(QDate.currentDate())
-        self.end_date.setStyleSheet("""
-            QDateEdit {
-                padding: 8px 12px;
-                border: 1px solid #BDC3C7;
-                border-radius: 5px;
-                background-color: white;
-            }
-        """)
-        
-        filters_layout.addWidget(self.end_date)
-        
-        # Bouton de génération personnalisée
-        self.generate_custom_button = QPushButton("🔄 Générer rapport personnalisé")
-        self.generate_custom_button.setStyleSheet(self.get_button_style("#8E44AD"))
-        filters_layout.addWidget(self.generate_custom_button)
-        
-        filters_layout.addStretch()
-        
-        # Boutons d'export
-        self.export_pdf_button = QPushButton("📄 Exporter PDF")
-        self.export_pdf_button.setStyleSheet(self.get_button_style("#C0392B"))
-        
-        self.export_excel_button = QPushButton("📊 Exporter Excel")
-        self.export_excel_button.setStyleSheet(self.get_button_style("#27AE60"))
-        
-        filters_layout.addWidget(self.export_pdf_button)
-        filters_layout.addWidget(self.export_excel_button)
-        
-        # Zone d'affichage des rapports
-        display_group = QGroupBox("Résultat du rapport")
-        display_layout = QVBoxLayout(display_group)
-        
-        # En-tête du rapport
-        header_layout = QHBoxLayout()
-        self.report_title = QLabel("Sélectionnez un type de rapport")
-        self.report_title.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        self.report_title.setStyleSheet("color: #2C3E50; padding: 10px;")
-        
-        self.report_date = QLabel(f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-        self.report_date.setStyleSheet("color: #7F8C8D; padding: 10px;")
-        
-        header_layout.addWidget(self.report_title)
-        header_layout.addStretch()
-        header_layout.addWidget(self.report_date)
-        
-        # Zone de contenu du rapport
-        self.reports_display = QTextEdit()
-        self.reports_display.setReadOnly(True)
-        self.reports_display.setStyleSheet("""
-            QTextEdit {
-                border: 1px solid #BDC3C7;
-                border-radius: 5px;
-                background-color: white;
+        # Titre principal
+        title_label = QLabel("📊 RAPPORTS SALLE DE FÊTE")
+        title_label.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #2C3E50;
                 padding: 15px;
-                font-family: 'Courier New';
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
+                    stop:0 #3498DB, stop:1 #2980B9);
+                color: white;
+                border-radius: 8px;
+                margin: 10px;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(title_label)
+        
+        # Création des onglets
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: 2px solid #BDC3C7;
+                border-radius: 8px;
+                background-color: white;
+            }
+            QTabBar::tab {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #ECF0F1, stop:1 #BDC3C7);
+                border: 1px solid #95A5A6;
+                padding: 12px 20px;
+                margin-right: 2px;
+                border-top-left-radius: 6px;
+                border-top-right-radius: 6px;
+                font-weight: bold;
                 font-size: 12px;
             }
+            QTabBar::tab:selected {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #3498DB, stop:1 #2980B9);
+                color: white;
+                border-bottom: none;
+            }
+            QTabBar::tab:!selected {
+                margin-top: 2px;
+            }
         """)
         
-        display_layout.addLayout(header_layout)
-        display_layout.addWidget(self.reports_display)
+        # Onglet 1: Événements du mois
+        self.monthly_tab = self.create_monthly_events_tab()
+        self.tab_widget.addTab(self.monthly_tab, "📅 Événements du mois")
         
-        # Assemblage du layout principal
-        layout.addWidget(reports_selection_group)
-        layout.addWidget(filters_group)
-        layout.addWidget(display_group)
+        # Onglet 2: Événements de l'année
+        self.yearly_tab = self.create_yearly_events_tab()
+        self.tab_widget.addTab(self.yearly_tab, "📊 Événements de l'année")
         
-        # Connexion des signaux
-        self.daily_events_button.clicked.connect(lambda: self.generate_report("daily_events"))
-        self.weekly_events_button.clicked.connect(lambda: self.generate_report("weekly_events"))
-        self.monthly_events_button.clicked.connect(lambda: self.generate_report("monthly_events"))
-        self.revenue_report_button.clicked.connect(lambda: self.generate_report("revenue"))
-        self.client_report_button.clicked.connect(lambda: self.generate_report("clients"))
-        self.product_report_button.clicked.connect(lambda: self.generate_report("products"))
-        self.service_report_button.clicked.connect(lambda: self.generate_report("services"))
-        self.financial_summary_button.clicked.connect(lambda: self.generate_report("financial"))
-        self.generate_custom_button.clicked.connect(lambda: self.generate_report("custom"))
+        # Onglet 3: Rapport financier
+        self.financial_tab = self.create_financial_report_tab()
+        self.tab_widget.addTab(self.financial_tab, "💰 Rapport financier")
         
-        # Affichage du rapport par défaut
-        self.generate_report("daily_events")
+        layout.addWidget(self.tab_widget)
+        
+        # Connexions des onglets
+        self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        
+        # Charger les données par défaut
+        self.load_monthly_data()
+    
+    def create_monthly_events_tab(self):
+        """Créer l'onglet des événements du mois"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Zone de filtres
+        filter_group = QGroupBox("🔍 Filtres")
+        filter_layout = QHBoxLayout(filter_group)
+        
+        filter_layout.addWidget(QLabel("Mois:"))
+        self.month_combo = QComboBox()
+        months = ["Janvier", "Février", "Mars", "Avril", "Mai", "Juin",
+                 "Juillet", "Août", "Septembre", "Octobre", "Novembre", "Décembre"]
+        self.month_combo.addItems(months)
+        self.month_combo.setCurrentIndex(datetime.now().month - 1)
+        
+        filter_layout.addWidget(QLabel("Année:"))
+        self.year_spin = QSpinBox()
+        self.year_spin.setRange(2020, 2030)
+        self.year_spin.setValue(datetime.now().year)
+        
+        self.update_monthly_btn = QPushButton("🔄 Actualiser")
+        self.update_monthly_btn.setStyleSheet(self.get_button_style("#3498DB"))
+        
+        filter_layout.addWidget(self.month_combo)
+        filter_layout.addWidget(self.year_spin)
+        filter_layout.addWidget(self.update_monthly_btn)
+        filter_layout.addStretch()
+        
+        layout.addWidget(filter_group)
+        
+        # Zone du graphique et statistiques
+        content_layout = QHBoxLayout()
+        
+        # Graphique (à gauche)
+        chart_group = QGroupBox("📊 Événements par jour")
+        chart_layout = QVBoxLayout(chart_group)
+        
+        self.monthly_figure = Figure(figsize=(10, 6))
+        self.monthly_canvas = FigureCanvas(self.monthly_figure)
+        chart_layout.addWidget(self.monthly_canvas)
+        
+        content_layout.addWidget(chart_group, 2)
+        
+        # Statistiques (à droite)
+        stats_group = QGroupBox("📈 Statistiques mensuelles")
+        stats_layout = QVBoxLayout(stats_group)
+        
+        self.monthly_stats_text = QTextEdit()
+        self.monthly_stats_text.setReadOnly(True)
+        self.monthly_stats_text.setMaximumWidth(400)
+        self.monthly_stats_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #F8F9FA;
+                border: 1px solid #DEE2E6;
+                border-radius: 5px;
+                padding: 15px;
+                font-family: 'Segoe UI', Arial;
+                font-size: 11px;
+                line-height: 1.4;
+            }
+        """)
+        stats_layout.addWidget(self.monthly_stats_text)
+        
+        content_layout.addWidget(stats_group, 1)
+        layout.addLayout(content_layout)
+        
+        # Connexions
+        self.update_monthly_btn.clicked.connect(self.load_monthly_data)
+        self.month_combo.currentIndexChanged.connect(self.load_monthly_data)
+        self.year_spin.valueChanged.connect(self.load_monthly_data)
+        
+        return tab
+    
+    def create_yearly_events_tab(self):
+        """Créer l'onglet des événements de l'année"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Zone de filtres
+        filter_group = QGroupBox("🔍 Filtres")
+        filter_layout = QHBoxLayout(filter_group)
+        
+        filter_layout.addWidget(QLabel("Année:"))
+        self.yearly_year_spin = QSpinBox()
+        self.yearly_year_spin.setRange(2020, 2030)
+        self.yearly_year_spin.setValue(datetime.now().year)
+        
+        self.update_yearly_btn = QPushButton("🔄 Actualiser")
+        self.update_yearly_btn.setStyleSheet(self.get_button_style("#27AE60"))
+        
+        filter_layout.addWidget(self.yearly_year_spin)
+        filter_layout.addWidget(self.update_yearly_btn)
+        filter_layout.addStretch()
+        
+        layout.addWidget(filter_group)
+        
+        # Zone du graphique et statistiques
+        content_layout = QHBoxLayout()
+        
+        # Graphique (à gauche)
+        chart_group = QGroupBox("📊 Événements par mois")
+        chart_layout = QVBoxLayout(chart_group)
+        
+        self.yearly_figure = Figure(figsize=(12, 6))
+        self.yearly_canvas = FigureCanvas(self.yearly_figure)
+        chart_layout.addWidget(self.yearly_canvas)
+        
+        content_layout.addWidget(chart_group, 2)
+        
+        # Statistiques (à droite)
+        stats_group = QGroupBox("📈 Statistiques annuelles")
+        stats_layout = QVBoxLayout(stats_group)
+        
+        self.yearly_stats_text = QTextEdit()
+        self.yearly_stats_text.setReadOnly(True)
+        self.yearly_stats_text.setMaximumWidth(400)
+        self.yearly_stats_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #F8F9FA;
+                border: 1px solid #DEE2E6;
+                border-radius: 5px;
+                padding: 15px;
+                font-family: 'Segoe UI', Arial;
+                font-size: 11px;
+                line-height: 1.4;
+            }
+        """)
+        stats_layout.addWidget(self.yearly_stats_text)
+        
+        content_layout.addWidget(stats_group, 1)
+        layout.addLayout(content_layout)
+        
+        # Connexions
+        self.update_yearly_btn.clicked.connect(self.load_yearly_data)
+        self.yearly_year_spin.valueChanged.connect(self.load_yearly_data)
+        
+        return tab
+    
+    def create_financial_report_tab(self):
+        """Créer l'onglet du rapport financier"""
+        tab = QWidget()
+        layout = QVBoxLayout(tab)
+        
+        # Zone de filtres
+        filter_group = QGroupBox("🔍 Période d'analyse")
+        filter_layout = QHBoxLayout(filter_group)
+        
+        filter_layout.addWidget(QLabel("Du:"))
+        self.start_date_edit = QDateEdit()
+        self.start_date_edit.setDate(QDate.currentDate().addDays(-30))
+        self.start_date_edit.setCalendarPopup(True)
+        
+        filter_layout.addWidget(QLabel("Au:"))
+        self.end_date_edit = QDateEdit()
+        self.end_date_edit.setDate(QDate.currentDate())
+        self.end_date_edit.setCalendarPopup(True)
+        
+        self.update_financial_btn = QPushButton("🔄 Actualiser")
+        self.update_financial_btn.setStyleSheet(self.get_button_style("#E67E22"))
+        
+        filter_layout.addWidget(self.start_date_edit)
+        filter_layout.addWidget(self.end_date_edit)
+        filter_layout.addWidget(self.update_financial_btn)
+        filter_layout.addStretch()
+        
+        layout.addWidget(filter_group)
+        
+        # Zone du graphique et analyses
+        content_layout = QHBoxLayout()
+        
+        # Graphique (à gauche)
+        chart_group = QGroupBox("📈 Évolution Recettes vs Dépenses")
+        chart_layout = QVBoxLayout(chart_group)
+        
+        self.financial_figure = Figure(figsize=(12, 6))
+        self.financial_canvas = FigureCanvas(self.financial_figure)
+        chart_layout.addWidget(self.financial_canvas)
+        
+        content_layout.addWidget(chart_group, 2)
+        
+        # Analyses financières (à droite)
+        analysis_group = QGroupBox("💼 Analyses financières")
+        analysis_layout = QVBoxLayout(analysis_group)
+        
+        self.financial_stats_text = QTextEdit()
+        self.financial_stats_text.setReadOnly(True)
+        self.financial_stats_text.setMaximumWidth(450)
+        self.financial_stats_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #F8F9FA;
+                border: 1px solid #DEE2E6;
+                border-radius: 5px;
+                padding: 15px;
+                font-family: 'Segoe UI', Arial;
+                font-size: 11px;
+                line-height: 1.4;
+            }
+        """)
+        analysis_layout.addWidget(self.financial_stats_text)
+        
+        content_layout.addWidget(analysis_group, 1)
+        layout.addLayout(content_layout)
+        
+        # Connexions
+        self.update_financial_btn.clicked.connect(self.load_financial_data)
+        self.start_date_edit.dateChanged.connect(self.load_financial_data)
+        self.end_date_edit.dateChanged.connect(self.load_financial_data)
+        
+        return tab
+    
+    def load_monthly_data(self):
+        """Charger les données mensuelles"""
+        try:
+            month = self.month_combo.currentIndex() + 1
+            year = self.year_spin.value()
+            
+            # Récupérer les données
+            data = self.rapport_controller.get_monthly_events_data(year, month)
+            comparison = self.rapport_controller.get_comparison_data(year, month)
+            
+            # Mettre à jour le graphique
+            self.update_monthly_chart(data)
+            
+            # Mettre à jour les statistiques
+            self.update_monthly_stats(data, comparison)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des données: {str(e)}")
+    
+    def load_yearly_data(self):
+        """Charger les données annuelles"""
+        try:
+            year = self.yearly_year_spin.value()
+            
+            # Récupérer les données
+            data = self.rapport_controller.get_yearly_events_data(year)
+            prev_year_data = self.rapport_controller.get_yearly_events_data(year - 1)
+            
+            # Calculer les comparaisons
+            comparison = {
+                'revenue_evolution': 0,
+                'net_result_evolution': 0
+            }
+            
+            if prev_year_data['total_revenue'] > 0:
+                comparison['revenue_evolution'] = ((data['total_revenue'] - prev_year_data['total_revenue']) / prev_year_data['total_revenue']) * 100
+            
+            if prev_year_data['net_result'] != 0:
+                comparison['net_result_evolution'] = ((data['net_result'] - prev_year_data['net_result']) / abs(prev_year_data['net_result'])) * 100
+            
+            # Mettre à jour le graphique
+            self.update_yearly_chart(data)
+            
+            # Mettre à jour les statistiques
+            self.update_yearly_stats(data, comparison)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des données: {str(e)}")
+    
+    def load_financial_data(self):
+        """Charger les données financières"""
+        try:
+            # Convertir QDate en date Python
+            start_qdate = self.start_date_edit.date()
+            end_qdate = self.end_date_edit.date()
+            
+            # Méthode compatible PyQt6
+            start_date = date(start_qdate.year(), start_qdate.month(), start_qdate.day())
+            end_date = date(end_qdate.year(), end_qdate.month(), end_qdate.day())
+            
+            # Convertir en datetime
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            
+            # Récupérer les données
+            data = self.rapport_controller.get_financial_report_data(start_datetime, end_datetime)
+            
+            # Mettre à jour le graphique
+            self.update_financial_chart(data)
+            
+            # Mettre à jour les analyses
+            self.update_financial_stats(data)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des données: {str(e)}")
+    
+    def update_monthly_chart(self, data):
+        """Mettre à jour le graphique mensuel"""
+        self.monthly_figure.clear()
+        ax = self.monthly_figure.add_subplot(111)
+        
+        # Données pour le graphique
+        days = list(data['events_by_day'].keys())
+        counts = list(data['events_by_day'].values())
+        
+        # Création du graphique en barres
+        bars = ax.bar(days, counts, color='#3498DB', alpha=0.8, edgecolor='#2980B9', linewidth=1)
+        
+        # Personnalisation
+        ax.set_xlabel('Jour du mois', fontsize=10, fontweight='bold')
+        ax.set_ylabel('Nombre d\'événements', fontsize=10, fontweight='bold')
+        ax.set_title(f'Répartition des événements - {data["period"]}', fontsize=12, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Ajout des valeurs sur les barres
+        for bar, count in zip(bars, counts):
+            if count > 0:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.05,
+                       f'{int(count)}', ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        # Mise en forme
+        ax.set_xlim(0.5, len(days) + 0.5)
+        self.monthly_figure.tight_layout()
+        self.monthly_canvas.draw()
+    
+    def update_yearly_chart(self, data):
+        """Mettre à jour le graphique annuel"""
+        self.yearly_figure.clear()
+        ax = self.yearly_figure.add_subplot(111)
+        
+        # Données pour le graphique
+        months = ['Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Jun',
+                 'Jul', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc']
+        counts = [data['events_by_month'][i] for i in range(1, 13)]
+        
+        # Création du graphique en barres
+        bars = ax.bar(months, counts, color='#27AE60', alpha=0.8, edgecolor='#229954', linewidth=1)
+        
+        # Personnalisation
+        ax.set_xlabel('Mois', fontsize=10, fontweight='bold')
+        ax.set_ylabel('Nombre d\'événements', fontsize=10, fontweight='bold')
+        ax.set_title(f'Répartition des événements - {data["period"]}', fontsize=12, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3, axis='y')
+        
+        # Ajout des valeurs sur les barres
+        for bar, count in zip(bars, counts):
+            if count > 0:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height + 0.05,
+                       f'{int(count)}', ha='center', va='bottom', fontsize=8, fontweight='bold')
+        
+        # Rotation des labels
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        self.yearly_figure.tight_layout()
+        self.yearly_canvas.draw()
+    
+    def update_financial_chart(self, data):
+        """Mettre à jour le graphique financier avec courbes"""
+        self.financial_figure.clear()
+        ax = self.financial_figure.add_subplot(111)
+        
+        # Données pour le graphique
+        daily_data = data['daily_data']
+        dates = [datetime.strptime(d, '%Y-%m-%d') for d in daily_data['dates']]
+        revenues = daily_data['revenues']
+        expenses = daily_data['expenses']
+        
+        # Création des courbes
+        ax.plot(dates, revenues, color='#27AE60', linewidth=2, marker='o', 
+               markersize=4, label='Recettes', alpha=0.8)
+        ax.plot(dates, expenses, color='#E74C3C', linewidth=2, marker='s', 
+               markersize=4, label='Dépenses', alpha=0.8)
+        
+        # Remplissage sous les courbes
+        ax.fill_between(dates, revenues, alpha=0.2, color='#27AE60')
+        ax.fill_between(dates, expenses, alpha=0.2, color='#E74C3C')
+        
+        # Personnalisation
+        ax.set_xlabel('Date', fontsize=10, fontweight='bold')
+        ax.set_ylabel('Montant (€)', fontsize=10, fontweight='bold')
+        ax.set_title(f'Évolution Recettes vs Dépenses - {data["period"]}', fontsize=12, fontweight='bold', pad=20)
+        ax.grid(True, alpha=0.3)
+        ax.legend(loc='upper left', frameon=True, fancybox=True, shadow=True)
+        
+        # Format des dates sur l'axe x
+        import matplotlib.dates as mdates
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%d/%m'))
+        ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
+        plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
+        
+        self.financial_figure.tight_layout()
+        self.financial_canvas.draw()
+    
+    def update_monthly_stats(self, data, comparison):
+        """Mettre à jour les statistiques mensuelles"""
+        # Préparation du texte
+        stats_text = f"""=== RAPPORT DES ÉVÉNEMENTS DU MOIS ===
+Mois: {data['period']}
+
+RÉSUMÉ MENSUEL:
+• Nombre total d'événements: {data['events_count']}
+• Revenus du mois: {data['total_revenue']:.2f} €
+• Total dépenses du mois: {data['total_expenses']:.2f} €
+• Résultat net: {data['net_result']:.2f} €
+• Revenus moyens par événement: {data['average_revenue']:.2f} €
+
+COMPARAISON AVEC LE MOIS PRÉCÉDENT:
+• Évolution des revenus: {comparison['revenue_evolution']:+.1f}%
+• Évolution du résultat net: {comparison['net_result_evolution']:+.1f}%
+
+TOP 5 DES SERVICES:"""
+        
+        for i, service in enumerate(data['top_services'], 1):
+            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} €"
+        
+        if not data['top_services']:
+            stats_text += "\nAucun service utilisé ce mois"
+        
+        self.monthly_stats_text.setPlainText(stats_text)
+    
+    def update_yearly_stats(self, data, comparison):
+        """Mettre à jour les statistiques annuelles"""
+        stats_text = f"""=== RAPPORT DES ÉVÉNEMENTS DE L'ANNÉE ===
+Année: {data['period']}
+
+RÉSUMÉ ANNUEL:
+• Nombre total d'événements: {data['events_count']}
+• Revenus de l'année: {data['total_revenue']:.2f} €
+• Total dépenses de l'année: {data['total_expenses']:.2f} €
+• Résultat net: {data['net_result']:.2f} €
+• Revenus moyens par événement: {data['average_revenue']:.2f} €
+
+COMPARAISON AVEC L'ANNÉE PRÉCÉDENTE:
+• Évolution des revenus: {comparison['revenue_evolution']:+.1f}%
+• Évolution du résultat net: {comparison['net_result_evolution']:+.1f}%
+
+TOP 5 DES SERVICES:"""
+        
+        for i, service in enumerate(data['top_services'], 1):
+            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} €"
+        
+        if not data['top_services']:
+            stats_text += "\nAucun service utilisé cette année"
+        
+        self.yearly_stats_text.setPlainText(stats_text)
+    
+    def update_financial_stats(self, data):
+        """Mettre à jour les analyses financières"""
+        # Calculs pour les analyses
+        total_revenue = data['total_revenue']
+        total_expenses = data['total_expenses']
+        net_result = data['net_result']
+        service_revenue = data['service_revenue']
+        product_revenue = data['product_revenue']
+        
+        # Pourcentages
+        service_percent = (service_revenue / total_revenue * 100) if total_revenue > 0 else 0
+        product_percent = (product_revenue / total_revenue * 100) if total_revenue > 0 else 0
+        margin_percent = (net_result / total_revenue * 100) if total_revenue > 0 else 0
+        
+        # Nombre d'événements pour le panier moyen
+        total_events = len([pm for pm in data['payment_methods']])
+        average_basket = total_revenue / total_events if total_events > 0 else 0
+        
+        stats_text = f"""=== RAPPORT DE REVENUS DÉTAILLÉ ===
+Période d'analyse: {data['period']}
+
+RÉSUMÉ FINANCIER:
+• Total recettes: {total_revenue:.2f} €
+• Total dépenses: {total_expenses:.2f} €
+• Chiffre d'affaires total: {total_revenue:.2f} €
+• Revenus services: {service_revenue:.2f} € ({service_percent:.0f}%)
+• Revenus produits: {product_revenue:.2f} € ({product_percent:.0f}%)
+• Résultat net: {net_result:.2f} €
+• Marge nette: {margin_percent:.1f}%
+
+RÉPARTITION PAR MÉTHODE DE PAIEMENT:
+┌─────────────────┬─────────────┬─────────────┐
+│ Méthode         │ Montant     │ %           │
+├─────────────────┼─────────────┼─────────────┤"""
+        
+        for payment_method in data['payment_methods']:
+            percent = (payment_method.total / total_revenue * 100) if total_revenue > 0 else 0
+            method_name = payment_method.payment_method[:15]
+            stats_text += f"\n│ {method_name:<15} │ {payment_method.total:>9.2f} € │ {percent:>9.0f}% │"
+        
+        stats_text += "\n└─────────────────┴─────────────┴─────────────┘"
+        
+        stats_text += "\n\nREVENUS PAR TYPE D'ÉVÉNEMENT:"
+        for event_type in data['revenue_by_type']:
+            percent = (event_type.total / total_revenue * 100) if total_revenue > 0 else 0
+            stats_text += f"\n• {event_type.event_type}: {event_type.total:.2f} € ({percent:.0f}%)"
+        
+        stats_text += f"""
+
+INDICATEURS CLÉS:
+• Panier moyen: {average_basket:.2f} €
+• Marge nette: {margin_percent:.1f}%"""
+        
+        self.financial_stats_text.setPlainText(stats_text)
+    
+    def on_tab_changed(self, index):
+        """Gérer les changements d'onglets"""
+        if index == 0:  # Événements du mois
+            self.load_monthly_data()
+        elif index == 1:  # Événements de l'année
+            self.load_yearly_data()
+        elif index == 2:  # Rapport financier
+            self.load_financial_data()
     
     def get_button_style(self, color):
-        """Obtenir le style CSS pour les boutons"""
+        """Style pour les boutons"""
         return f"""
             QPushButton {{
                 background-color: {color};
                 color: white;
                 border: none;
-                padding: 15px;
-                border-radius: 8px;
+                padding: 10px 15px;
+                border-radius: 5px;
                 font-weight: bold;
-                font-size: 14px;
-                min-height: 40px;
+                font-size: 11px;
             }}
             QPushButton:hover {{
-                background-color: {color}AA;
-                transform: translateY(-2px);
+                background-color: {color}DD;
+                transform: translateY(-1px);
             }}
             QPushButton:pressed {{
-                background-color: {color}CC;
+                background-color: {color}AA;
             }}
         """
-    
-    def generate_report(self, report_type):
-        """Générer un rapport selon le type demandé"""
-        self.report_date.setText(f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}")
-        
-        if report_type == "daily_events":
-            self.generate_daily_events_report()
-        elif report_type == "weekly_events":
-            self.generate_weekly_events_report()
-        elif report_type == "monthly_events":
-            self.generate_monthly_events_report()
-        elif report_type == "revenue":
-            self.generate_revenue_report()
-        elif report_type == "clients":
-            self.generate_client_report()
-        elif report_type == "products":
-            self.generate_product_report()
-        elif report_type == "services":
-            self.generate_service_report()
-        elif report_type == "financial":
-            self.generate_financial_summary()
-        elif report_type == "custom":
-            self.generate_custom_report()
-    
-    def generate_daily_events_report(self):
-        """Générer le rapport des événements du jour"""
-        self.report_title.setText("📊 Rapport des événements du jour")
-        
-        report_content = f"""
-=== RAPPORT DES ÉVÉNEMENTS DU JOUR ===
-Date: {datetime.now().strftime('%d/%m/%Y')}
-
-RÉSUMÉ:
-• Nombre d'événements: 3
-• Revenus du jour: 2,150.00 €
-• Nouveaux clients: 2
-• Événements confirmés: 2
-• Événements en attente: 1
-
-DÉTAIL DES ÉVÉNEMENTS:
-┌─────────────────────────────────────────────────────────────────┐
-│ 14:00 - Baptême Moreau                                         │
-│ Client: Jean Moreau                                             │
-│ Services: Décoration florale, Buffet (50 pers.)                │
-│ Montant: 1,250.00 €                                           │
-│ Statut: Confirmé ✓                                             │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ 18:00 - Anniversaire Bernard                                   │
-│ Client: Sophie Bernard                                          │
-│ Services: DJ, Animation enfants                                 │
-│ Montant: 600.00 €                                             │
-│ Statut: Confirmé ✓                                             │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ 20:00 - Cocktail Entreprise ABC                                │
-│ Client: Directeur ABC Corp                                      │
-│ Services: Cocktail, Service traiteur                           │
-│ Montant: 300.00 €                                             │
-│ Statut: En attente ⏳                                           │
-└─────────────────────────────────────────────────────────────────┘
-
-SERVICES LES PLUS DEMANDÉS:
-1. Décoration florale (2 fois)
-2. Service traiteur (3 fois)
-3. Animation (1 fois)
-
-RECOMMANDATIONS:
-• Contacter le client ABC Corp pour confirmer la réservation
-• Prévoir stock supplémentaire pour les fleurs (forte demande)
-• Vérifier la disponibilité du matériel de sonorisation
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_weekly_events_report(self):
-        """Générer le rapport des événements de la semaine"""
-        self.report_title.setText("📈 Rapport des événements de la semaine")
-        
-        report_content = f"""
-=== RAPPORT DES ÉVÉNEMENTS DE LA SEMAINE ===
-Période: {(datetime.now() - timedelta(days=7)).strftime('%d/%m/%Y')} - {datetime.now().strftime('%d/%m/%Y')}
-
-RÉSUMÉ HEBDOMADAIRE:
-• Nombre total d'événements: 12
-• Revenus de la semaine: 15,750.00 €
-• Nouveaux clients: 8
-• Taux d'occupation: 85%
-• Événements annulés: 1
-
-RÉPARTITION PAR JOUR:
-┌─────────────┬──────────────┬─────────────┬──────────────┐
-│ Jour        │ Événements   │ Revenus     │ Taux occup.  │
-├─────────────┼──────────────┼─────────────┼──────────────┤
-│ Lundi       │ 1           │ 800.00 €    │ 30%          │
-│ Mardi       │ 2           │ 1,500.00 €  │ 60%          │
-│ Mercredi    │ 1           │ 1,200.00 €  │ 40%          │
-│ Jeudi       │ 2           │ 2,100.00 €  │ 70%          │
-│ Vendredi    │ 3           │ 4,200.00 €  │ 90%          │
-│ Samedi      │ 2           │ 4,800.00 €  │ 100%         │
-│ Dimanche    │ 1           │ 1,150.00 €  │ 50%          │
-└─────────────┴──────────────┴─────────────┴──────────────┘
-
-TYPES D'ÉVÉNEMENTS:
-• Mariages: 4 (33%) - 8,500.00 €
-• Anniversaires: 3 (25%) - 2,800.00 €
-• Baptêmes: 2 (17%) - 2,200.00 €
-• Événements d'entreprise: 2 (17%) - 1,750.00 €
-• Autres: 1 (8%) - 500.00 €
-
-ANALYSE DES TENDANCES:
-• Week-end très demandé (100% d'occupation samedi)
-• Mariages génèrent 54% du chiffre d'affaires
-• Croissance de 15% par rapport à la semaine précédente
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_monthly_events_report(self):
-        """Générer le rapport des événements du mois"""
-        self.report_title.setText("📉 Rapport des événements du mois")
-        
-        report_content = f"""
-=== RAPPORT DES ÉVÉNEMENTS DU MOIS ===
-Mois: Août 2025
-
-RÉSUMÉ MENSUEL:
-• Nombre total d'événements: 48
-• Revenus du mois: 62,300.00 €
-• Revenus moyens par événement: 1,297.92 €
-• Nouveaux clients: 28
-• Clients fidèles: 20
-• Taux de satisfaction: 96%
-
-ÉVOLUTION PAR SEMAINE:
-Semaine 1: 11 événements - 14,200.00 €
-Semaine 2: 13 événements - 16,800.00 €
-Semaine 3: 12 événements - 15,750.00 €
-Semaine 4: 12 événements - 15,550.00 €
-
-TOP 5 DES SERVICES:
-1. Service traiteur: 35 utilisations - 26,250.00 €
-2. Décoration florale: 28 utilisations - 12,600.00 €
-3. DJ et sonorisation: 22 utilisations - 8,800.00 €
-4. Animation enfants: 15 utilisations - 4,500.00 €
-5. Photobooth: 12 utilisations - 2,400.00 €
-
-CLIENTS LES PLUS ACTIFS:
-1. Entreprise XYZ Corp (3 événements)
-2. Famille Martin (2 événements)
-3. Association locale (2 événements)
-
-OBJECTIFS DU MOIS:
-✓ Atteindre 45 événements (48 réalisés)
-✓ Générer 60,000€ de revenus (62,300€ réalisés)
-✓ Maintenir 95% de satisfaction (96% réalisé)
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_revenue_report(self):
-        """Générer le rapport de revenus"""
-        self.report_title.setText("💰 Rapport de revenus")
-        
-        report_content = f"""
-=== RAPPORT DE REVENUS DÉTAILLÉ ===
-Période d'analyse: {datetime.now().strftime('%d/%m/%Y')}
-
-RÉSUMÉ FINANCIER:
-• Chiffre d'affaires total: 62,300.00 €
-• Revenus services: 45,200.00 € (73%)
-• Revenus produits: 17,100.00 € (27%)
-• Marge brute: 38,650.00 € (62%)
-
-RÉPARTITION PAR MÉTHODE DE PAIEMENT:
-┌─────────────────┬─────────────┬─────────────┐
-│ Méthode         │ Montant     │ %           │
-├─────────────────┼─────────────┼─────────────┤
-│ Virement       │ 32,500.00 € │ 52%         │
-│ Carte bancaire  │ 18,200.00 € │ 29%         │
-│ Espèces        │ 8,100.00 €  │ 13%         │
-│ Chèque         │ 3,500.00 €  │ 6%          │
-└─────────────────┴─────────────┴─────────────┘
-
-REVENUS PAR TYPE D'ÉVÉNEMENT:
-• Mariages: 28,500.00 € (46%)
-• Événements d'entreprise: 15,200.00 € (24%)
-• Anniversaires: 12,800.00 € (21%)
-• Baptêmes: 5,800.00 € (9%)
-
-ANALYSE DES COÛTS:
-• Coût des marchandises vendues: 23,650.00 €
-• Charges fixes: 8,500.00 €
-• Charges variables: 6,200.00 €
-• Résultat net: 23,950.00 €
-
-INDICATEURS CLÉS:
-• Panier moyen: 1,297.92 €
-• Marge nette: 38.4%
-• ROI mensuel: 45.2%
-• Croissance vs mois précédent: +12.5%
-
-PRÉVISIONS:
-• Objectif mois prochain: 68,000.00 €
-• Croissance prévue: +9.1%
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_client_report(self):
-        """Générer le rapport clients"""
-        self.report_title.setText("👥 Rapport clients")
-        
-        report_content = f"""
-=== RAPPORT CLIENTS ===
-Date d'analyse: {datetime.now().strftime('%d/%m/%Y')}
-
-STATISTIQUES GÉNÉRALES:
-• Total clients actifs: 142
-• Nouveaux clients ce mois: 28
-• Clients fidèles (2+ événements): 45
-• Taux de rétention: 68%
-• Note de satisfaction moyenne: 4.8/5
-
-TOP 10 CLIENTS (par chiffre d'affaires):
-┌─────────────────────┬──────────────┬─────────────┐
-│ Client              │ Événements  │ CA total    │
-├─────────────────────┼──────────────┼─────────────┤
-│ Entreprise XYZ      │ 5           │ 8,500.00 €  │
-│ Famille Martin      │ 3           │ 6,200.00 €  │
-│ Sophie Dubois       │ 2           │ 4,800.00 €  │
-│ Mairie de Ville     │ 4           │ 4,200.00 €  │
-│ Association Locale  │ 3           │ 3,900.00 €  │
-│ Jean Moreau         │ 2           │ 3,500.00 €  │
-│ Claire Bernard      │ 2           │ 3,200.00 €  │
-│ Pierre Durand       │ 1           │ 2,800.00 €  │
-│ Marie Leroy         │ 1           │ 2,500.00 €  │
-│ Paul Petit          │ 1           │ 2,200.00 €  │
-└─────────────────────┴──────────────┴─────────────┘
-
-SEGMENTATION CLIENTS:
-• Particuliers: 95 clients (67%)
-• Entreprises: 28 clients (20%)
-• Associations: 19 clients (13%)
-
-ANALYSE GÉOGRAPHIQUE:
-• Local (< 20km): 78%
-• Régional (20-50km): 15%
-• National (> 50km): 7%
-
-CANAUX D'ACQUISITION:
-• Bouche à oreille: 45%
-• Site internet: 28%
-• Réseaux sociaux: 15%
-• Publicité locale: 8%
-• Autres: 4%
-
-RECOMMANDATIONS:
-• Programme de fidélité pour clients réguliers
-• Campagne de référencement pour nouveaux clients
-• Enquête de satisfaction trimestrielle
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_product_report(self):
-        """Générer le rapport produits"""
-        self.report_title.setText("📦 Rapport produits")
-        
-        report_content = f"""
-=== RAPPORT PRODUITS ET STOCK ===
-Date d'analyse: {datetime.now().strftime('%d/%m/%Y')}
-
-ÉTAT DU STOCK:
-• Nombre total de produits: 156
-• Valeur totale du stock: 15,680.00 €
-• Produits en rupture: 3
-• Produits en stock faible: 12
-• Rotation moyenne: 2.3 fois/mois
-
-PRODUITS LES PLUS VENDUS:
-┌─────────────────────┬─────────────┬─────────────┬─────────────┐
-│ Produit             │ Qté vendue  │ CA généré   │ Marge       │
-├─────────────────────┼─────────────┼─────────────┼─────────────┤
-│ Champagne Premium   │ 48         │ 2,160.00 €  │ 35%         │
-│ Petits fours        │ 35         │ 420.00 €    │ 60%         │
-│ Nappes blanches     │ 25         │ 375.00 €    │ 45%         │
-│ Assiettes jetables  │ 60         │ 480.00 €    │ 55%         │
-│ Vin rouge Bordeaux  │ 28         │ 700.00 €    │ 40%         │
-└─────────────────────┴─────────────┴─────────────┴─────────────┘
-
-ALERTES STOCK:
-⚠️ RUPTURE DE STOCK:
-• Bouquets de roses (0 unités)
-• Bougies parfumées (0 unités)
-• Centres de table dorés (0 unités)
-
-⚡ STOCK FAIBLE:
-• Petits fours assortis (5/20)
-• Serviettes colorées (8/30)
-• Verres à champagne (15/50)
-
-MOUVEMENTS DU MOIS:
-• Entrées: 245 produits
-• Sorties: 312 produits
-• Pertes/casse: 8 produits
-• Ajustements: +3 produits
-
-ANALYSE DE RENTABILITÉ:
-• Marge brute moyenne: 47%
-• Produits les plus rentables: Petits fours (60%)
-• Produits les moins rentables: Champagne (35%)
-
-RECOMMANDATIONS:
-• Réapprovisionner d'urgence les produits en rupture
-• Négocier meilleurs prix avec fournisseurs champagne
-• Optimiser rotation des produits saisonniers
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_service_report(self):
-        """Générer le rapport services"""
-        self.report_title.setText("🔧 Rapport services")
-        
-        report_content = f"""
-=== RAPPORT SERVICES ===
-Date d'analyse: {datetime.now().strftime('%d/%m/%Y')}
-
-SERVICES DISPONIBLES: 24
-Services actifs: 22
-Services temporairement indisponibles: 2
-
-SERVICES LES PLUS DEMANDÉS:
-┌─────────────────────┬─────────────┬─────────────┬─────────────┐
-│ Service             │ Utilisation │ CA généré   │ Marge       │
-├─────────────────────┼─────────────┼─────────────┼─────────────┤
-│ Service traiteur    │ 35 fois     │ 26,250.00 € │ 45%         │
-│ Décoration florale  │ 28 fois     │ 12,600.00 € │ 55%         │
-│ DJ et sonorisation  │ 22 fois     │ 8,800.00 €  │ 65%         │
-│ Animation enfants   │ 15 fois     │ 4,500.00 €  │ 70%         │
-│ Photobooth         │ 12 fois     │ 2,400.00 €  │ 80%         │
-│ Service nettoyage   │ 48 fois     │ 4,800.00 €  │ 60%         │
-└─────────────────────┴─────────────┴─────────────┴─────────────┘
-
-SERVICES PAR CATÉGORIE:
-• Restauration: 8 services (58% du CA)
-• Décoration: 6 services (22% du CA)
-• Animation: 4 services (12% du CA)
-• Logistique: 6 services (8% du CA)
-
-SATISFACTION CLIENTS:
-• Service traiteur: 4.9/5 ⭐⭐⭐⭐⭐
-• DJ et sonorisation: 4.8/5 ⭐⭐⭐⭐⭐
-• Décoration florale: 4.7/5 ⭐⭐⭐⭐⭐
-• Animation enfants: 4.9/5 ⭐⭐⭐⭐⭐
-
-SERVICES INDISPONIBLES:
-• Photographie (équipement en maintenance)
-• Château gonflable (réparation en cours)
-
-PARTENAIRES EXTERNES:
-• Traiteurs: 3 partenaires actifs
-• Fleuristes: 2 partenaires
-• DJ/Musiciens: 5 prestataires
-• Animateurs: 4 freelances
-
-RECOMMANDATIONS:
-• Développer l'offre de services haut de gamme
-• Former équipe interne pour réduire coûts externes
-• Négocier tarifs préférentiels avec partenaires
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_financial_summary(self):
-        """Générer le résumé financier"""
-        self.report_title.setText("💼 Résumé financier complet")
-        
-        report_content = f"""
-=== RÉSUMÉ FINANCIER COMPLET ===
-Période: Août 2025
-
-💰 CHIFFRE D'AFFAIRES:
-• CA total: 62,300.00 €
-• Objectif mensuel: 60,000.00 €
-• Performance: +3.8% vs objectif
-• Croissance vs mois précédent: +12.5%
-
-📊 RÉPARTITION DES REVENUS:
-• Services: 45,200.00 € (73%)
-• Produits: 17,100.00 € (27%)
-• Location salle: 0.00 € (inclus dans services)
-
-💳 ENCAISSEMENTS:
-• Encaissé ce mois: 58,450.00 €
-• En attente: 3,850.00 €
-• Taux d'encaissement: 93.8%
-
-💸 CHARGES:
-• Coût des marchandises: 23,650.00 €
-• Salaires: 12,500.00 €
-• Charges sociales: 3,750.00 €
-• Fournitures: 2,200.00 €
-• Électricité/Eau: 800.00 €
-• Assurances: 450.00 €
-• Maintenance: 650.00 €
-• Marketing: 300.00 €
-• Autres: 400.00 €
-TOTAL CHARGES: 44,700.00 €
-
-📈 RÉSULTATS:
-• Marge brute: 38,650.00 €
-• Taux de marge brute: 62.0%
-• Résultat d'exploitation: 17,600.00 €
-• Taux de résultat: 28.2%
-
-🎯 INDICATEURS CLÉS:
-• Panier moyen: 1,297.92 €
-• Nombre de clients: 48
-• CA par client: 1,297.92 €
-• ROI mensuel: 28.2%
-
-📅 PRÉVISIONS SEPTEMBRE:
-• CA prévisionnel: 68,000.00 €
-• Croissance attendue: +9.1%
-• Nouveaux événements prévus: 52
-• Investissements prévus: 5,000.00 €
-
-⚠️ POINTS D'ATTENTION:
-• 3,850.00 € en attente d'encaissement
-• Stock faible sur plusieurs produits
-• Besoin de recrutement saisonnier
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())
-    
-    def generate_custom_report(self):
-        """Générer un rapport personnalisé selon les filtres"""
-        self.report_title.setText("🔄 Rapport personnalisé")
-        
-        start_date = self.start_date.date().toString("dd/MM/yyyy")
-        end_date = self.end_date.date().toString("dd/MM/yyyy")
-        
-        report_content = f"""
-=== RAPPORT PERSONNALISÉ ===
-Période sélectionnée: {start_date} - {end_date}
-
-Ce rapport sera généré selon vos critères personnalisés...
-
-[Ici seront affichées les données filtrées selon la période sélectionnée]
-
-FONCTIONNALITÉS À IMPLÉMENTER:
-• Filtrage par date de début/fin
-• Intégration avec la base de données
-• Calculs dynamiques selon la période
-• Export en PDF et Excel
-• Graphiques et visualisations
-
-Pour l'instant, ce rapport utilise des données de démonstration.
-        """
-        
-        self.reports_display.setPlainText(report_content.strip())

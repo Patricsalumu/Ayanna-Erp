@@ -492,7 +492,7 @@ class PaiementController(QObject):
                 if not compte_debit:
                     print("⚠️  Le compte caisse configuré n'existe pas ou n'est pas actif.")
                 else:
-                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_client_id).first()
+                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
                     if not compte_credit:
                         print("⚠️  Le compte client configuré n'existe pas ou n'est pas actif.")
                     else:

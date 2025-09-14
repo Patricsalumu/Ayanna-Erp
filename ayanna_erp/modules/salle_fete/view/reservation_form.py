@@ -98,7 +98,7 @@ class ReservationForm(QDialog):
         
         # Thème et Date (ligne 2)
         self.theme_edit = QLineEdit()
-        self.theme_edit.setPlaceholderText("Thème de l'événement (ex: Mariage de Jean et Marie)")
+        self.theme_edit.setPlaceholderText("Thème de l'événement (ex: Bleu blanc)")
         
         self.event_datetime = QDateTimeEdit()
         self.event_datetime.setDateTime(QDateTime.currentDateTime())
@@ -112,7 +112,7 @@ class ReservationForm(QDialog):
         # Type d'événement et Nombre d'invités (ligne 3)
         self.event_type_combo = QComboBox()
         self.event_type_combo.addItems([
-            "Mariage", "Anniversaire", "Baptême", "Communion", 
+            "Soirée", "Coutumier", "Anniversaire", "Formation", 
             "Réunion d'entreprise", "Cocktail", "Autre"
         ])
         
