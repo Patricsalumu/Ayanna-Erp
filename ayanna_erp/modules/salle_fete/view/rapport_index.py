@@ -21,8 +21,10 @@ import numpy as np
 
 try:
     from ayanna_erp.modules.salle_fete.controller.rapport_controller import RapportController
+    from ayanna_erp.modules.salle_fete.utils.pdf_exporter import PDFExporter
 except ImportError:
     from ..controller.rapport_controller import RapportController
+    from ..utils.pdf_exporter import PDFExporter
 
 
 class RapportIndex(QWidget):
@@ -33,6 +35,7 @@ class RapportIndex(QWidget):
         self.db_manager = db_manager
         self.current_user = current_user
         self.rapport_controller = RapportController()
+        self.pdf_exporter = PDFExporter()
         self.setup_ui()
     
     def setup_ui(self):
@@ -130,9 +133,13 @@ class RapportIndex(QWidget):
         self.update_monthly_btn = QPushButton("🔄 Actualiser")
         self.update_monthly_btn.setStyleSheet(self.get_button_style("#3498DB"))
         
+        self.export_monthly_pdf_btn = QPushButton("📄 Exporter PDF")
+        self.export_monthly_pdf_btn.setStyleSheet(self.get_button_style("#27AE60"))
+        
         filter_layout.addWidget(self.month_combo)
         filter_layout.addWidget(self.year_spin)
         filter_layout.addWidget(self.update_monthly_btn)
+        filter_layout.addWidget(self.export_monthly_pdf_btn)
         filter_layout.addStretch()
         
         layout.addWidget(filter_group)
@@ -175,6 +182,7 @@ class RapportIndex(QWidget):
         
         # Connexions
         self.update_monthly_btn.clicked.connect(self.load_monthly_data)
+        self.export_monthly_pdf_btn.clicked.connect(self.export_monthly_pdf)
         self.month_combo.currentIndexChanged.connect(self.load_monthly_data)
         self.year_spin.valueChanged.connect(self.load_monthly_data)
         
@@ -197,8 +205,12 @@ class RapportIndex(QWidget):
         self.update_yearly_btn = QPushButton("🔄 Actualiser")
         self.update_yearly_btn.setStyleSheet(self.get_button_style("#27AE60"))
         
+        self.export_yearly_pdf_btn = QPushButton("📄 Exporter PDF")
+        self.export_yearly_pdf_btn.setStyleSheet(self.get_button_style("#E74C3C"))
+        
         filter_layout.addWidget(self.yearly_year_spin)
         filter_layout.addWidget(self.update_yearly_btn)
+        filter_layout.addWidget(self.export_yearly_pdf_btn)
         filter_layout.addStretch()
         
         layout.addWidget(filter_group)
@@ -241,6 +253,7 @@ class RapportIndex(QWidget):
         
         # Connexions
         self.update_yearly_btn.clicked.connect(self.load_yearly_data)
+        self.export_yearly_pdf_btn.clicked.connect(self.export_yearly_pdf)
         self.yearly_year_spin.valueChanged.connect(self.load_yearly_data)
         
         return tab
@@ -267,9 +280,13 @@ class RapportIndex(QWidget):
         self.update_financial_btn = QPushButton("🔄 Actualiser")
         self.update_financial_btn.setStyleSheet(self.get_button_style("#E67E22"))
         
+        self.export_financial_pdf_btn = QPushButton("📄 Exporter PDF")
+        self.export_financial_pdf_btn.setStyleSheet(self.get_button_style("#9B59B6"))
+        
         filter_layout.addWidget(self.start_date_edit)
         filter_layout.addWidget(self.end_date_edit)
         filter_layout.addWidget(self.update_financial_btn)
+        filter_layout.addWidget(self.export_financial_pdf_btn)
         filter_layout.addStretch()
         
         layout.addWidget(filter_group)
@@ -312,6 +329,7 @@ class RapportIndex(QWidget):
         
         # Connexions
         self.update_financial_btn.clicked.connect(self.load_financial_data)
+        self.export_financial_pdf_btn.clicked.connect(self.export_financial_pdf)
         self.start_date_edit.dateChanged.connect(self.load_financial_data)
         self.end_date_edit.dateChanged.connect(self.load_financial_data)
         
@@ -418,6 +436,10 @@ class RapportIndex(QWidget):
                 ax.text(bar.get_x() + bar.get_width()/2., height + 0.05,
                        f'{int(count)}', ha='center', va='bottom', fontsize=8, fontweight='bold')
         
+        # Afficher tous les jours du mois sur l'axe X
+        ax.set_xticks(days)
+        ax.set_xticklabels(days, fontsize=8)
+        
         # Mise en forme
         ax.set_xlim(0.5, len(days) + 0.5)
         self.monthly_figure.tight_layout()
@@ -465,11 +487,11 @@ class RapportIndex(QWidget):
         revenues = daily_data['revenues']
         expenses = daily_data['expenses']
         
-        # Création des courbes
-        ax.plot(dates, revenues, color='#27AE60', linewidth=2, marker='o', 
-               markersize=4, label='Recettes', alpha=0.8)
-        ax.plot(dates, expenses, color='#E74C3C', linewidth=2, marker='s', 
-               markersize=4, label='Dépenses', alpha=0.8)
+        # Création des courbes avec références pour les tooltips
+        line_revenues = ax.plot(dates, revenues, color='#27AE60', linewidth=2, marker='o', 
+               markersize=4, label='Recettes', alpha=0.8)[0]
+        line_expenses = ax.plot(dates, expenses, color='#E74C3C', linewidth=2, marker='s', 
+               markersize=4, label='Dépenses', alpha=0.8)[0]
         
         # Remplissage sous les courbes
         ax.fill_between(dates, revenues, alpha=0.2, color='#27AE60')
@@ -488,8 +510,50 @@ class RapportIndex(QWidget):
         ax.xaxis.set_major_locator(mdates.WeekdayLocator(interval=1))
         plt.setp(ax.get_xticklabels(), rotation=45, ha='right')
         
+        # Ajouter les tooltips interactifs
+        self.add_financial_tooltips(ax, dates, revenues, expenses, line_revenues, line_expenses)
+        
         self.financial_figure.tight_layout()
         self.financial_canvas.draw()
+        
+    def add_financial_tooltips(self, ax, dates, revenues, expenses, line_revenues, line_expenses):
+        """Ajouter des tooltips interactifs au graphique financier"""
+        # Créer annotation pour les tooltips
+        self.tooltip_annotation = ax.annotate('', xy=(0,0), xytext=(20,20), 
+                                            textcoords="offset points",
+                                            bbox=dict(boxstyle="round", fc="white", alpha=0.8),
+                                            arrowprops=dict(arrowstyle="->"))
+        self.tooltip_annotation.set_visible(False)
+        
+        def on_hover(event):
+            if event.inaxes == ax:
+                # Vérifier si la souris est sur une des courbes
+                contains_rev, info_rev = line_revenues.contains(event)
+                contains_exp, info_exp = line_expenses.contains(event)
+                
+                if contains_rev or contains_exp:
+                    # Trouver le point le plus proche
+                    if contains_rev:
+                        ind = info_rev['ind'][0]
+                        x, y = dates[ind], revenues[ind]
+                        text = f"Recettes\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} €"
+                    elif contains_exp:
+                        ind = info_exp['ind'][0]
+                        x, y = dates[ind], expenses[ind]
+                        text = f"Dépenses\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} €"
+                    
+                    # Afficher le tooltip
+                    self.tooltip_annotation.xy = (x, y)
+                    self.tooltip_annotation.set_text(text)
+                    self.tooltip_annotation.set_visible(True)
+                    self.financial_canvas.draw_idle()
+                else:
+                    # Cacher le tooltip si la souris n'est pas sur une courbe
+                    self.tooltip_annotation.set_visible(False)
+                    self.financial_canvas.draw_idle()
+        
+        # Connecter l'événement de mouvement de souris
+        self.financial_canvas.mpl_connect('motion_notify_event', on_hover)
     
     def update_monthly_stats(self, data, comparison):
         """Mettre à jour les statistiques mensuelles"""
@@ -628,3 +692,127 @@ INDICATEURS CLÉS:
                 background-color: {color}AA;
             }}
         """
+    
+    def export_monthly_pdf(self):
+        """Exporter le rapport mensuel en PDF"""
+        try:
+            # Récupérer les données actuelles
+            month = self.month_combo.currentIndex() + 1
+            year = self.year_spin.value()
+            
+            # Obtenir les données depuis le contrôleur
+            data = self.rapport_controller.get_monthly_events_data(year, month)
+            comparison = self.rapport_controller.get_comparison_data(year, month)
+            
+            # Préparer les données pour le format attendu par PDFExporter
+            monthly_data = {
+                'period': f"{self.month_combo.currentText()} {year}",
+                'events_count': data['events_count'],
+                'total_revenue': data['total_revenue'],
+                'total_expenses': data['total_expenses'],
+                'net_result': data['net_result'],
+                'average_revenue': data['average_revenue'],
+                'top_services': data['top_services']
+            }
+            
+            comparison_data = {
+                'revenue_evolution': comparison.get('revenue_change', 0),
+                'net_result_evolution': comparison.get('net_result_change', 0)
+            }
+            
+            # Nom du fichier
+            month_name = self.month_combo.currentText()
+            filename = f"data/reports/rapport_mensuel_{month_name}_{year}.pdf"
+            
+            # Exporter
+            filename = self.pdf_exporter.export_monthly_report(monthly_data, comparison_data, self.monthly_figure, filename)
+            
+            QMessageBox.information(self, "Export réussi", 
+                                  f"Rapport exporté avec succès:\n{filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", 
+                               f"Erreur lors de l'export PDF:\n{str(e)}")
+    
+    def export_yearly_pdf(self):
+        """Exporter le rapport annuel en PDF"""
+        try:
+            # Récupérer les données actuelles
+            year = self.yearly_year_spin.value()
+            
+            # Obtenir les données depuis le contrôleur
+            data = self.rapport_controller.get_yearly_events_data(year)
+            comparison = self.rapport_controller.get_comparison_data(year, 1)  # Comparaison avec année précédente
+            
+            # Préparer les données pour le format attendu par PDFExporter
+            yearly_data = {
+                'period': str(year),
+                'events_count': data['events_count'],
+                'total_revenue': data['total_revenue'],
+                'total_expenses': data['total_expenses'],
+                'net_result': data['net_result'],
+                'average_revenue': data['average_revenue'],
+                'top_services': data['top_services']
+            }
+            
+            comparison_data = {
+                'revenue_evolution': comparison.get('revenue_change', 0),
+                'net_result_evolution': comparison.get('net_result_change', 0)
+            }
+            
+            # Nom du fichier
+            filename = f"data/reports/rapport_annuel_{year}.pdf"
+            
+            # Exporter
+            filename = self.pdf_exporter.export_yearly_report(yearly_data, comparison_data, self.yearly_figure, filename)
+            
+            QMessageBox.information(self, "Export réussi", 
+                                  f"Rapport exporté avec succès:\n{filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", 
+                               f"Erreur lors de l'export PDF:\n{str(e)}")
+    
+    def export_financial_pdf(self):
+        """Exporter le rapport financier en PDF"""
+        try:
+            # Récupérer les dates actuelles - Correction pour QDate
+            start_date = self.start_date_edit.date().toPython() if hasattr(self.start_date_edit.date(), 'toPython') else date(
+                self.start_date_edit.date().year(),
+                self.start_date_edit.date().month(),
+                self.start_date_edit.date().day()
+            )
+            end_date = self.end_date_edit.date().toPython() if hasattr(self.end_date_edit.date(), 'toPython') else date(
+                self.end_date_edit.date().year(),
+                self.end_date_edit.date().month(),
+                self.end_date_edit.date().day()
+            )
+            
+            # Convertir en datetime pour le contrôleur
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            end_datetime = datetime.combine(end_date, datetime.max.time())
+            
+            # Obtenir les données depuis le contrôleur
+            data = self.rapport_controller.get_financial_report_data(start_datetime, end_datetime)
+            
+            # Les données sont déjà dans le bon format
+            financial_data = {
+                'period': f"{start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}",
+                'total_revenue': data['total_revenue'],
+                'total_expenses': data['total_expenses'],
+                'net_result': data['net_result'],
+                'service_revenue': data['service_revenue'],
+                'product_revenue': data['product_revenue'],
+                'payment_methods': data['payment_methods'],
+                'revenue_by_type': data['revenue_by_type']
+            }
+            
+            # Nom du fichier
+            filename = f"data/reports/rapport_financier_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.pdf"
+            
+            # Exporter
+            filename = self.pdf_exporter.export_financial_report(financial_data, self.financial_figure, filename)
+            
+            QMessageBox.information(self, "Export réussi", 
+                                  f"Rapport exporté avec succès:\n{filename}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", 
+                               f"Erreur lors de l'export PDF:\n{str(e)}")
