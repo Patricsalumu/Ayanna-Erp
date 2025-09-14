@@ -10,13 +10,19 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                             QGroupBox, QGridLayout, QListWidget, QSplitter,
                             QFrame, QScrollArea, QFormLayout, QCheckBox,
                             QDateTimeEdit, QHeaderView, QDateEdit, QDialog,
-                            QDialogButtonBox, QAbstractItemView)
+                            QDialogButtonBox, QAbstractItemView, QFileDialog)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDateTime, QDate, QAbstractTableModel
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QStandardItemModel, QStandardItem
 from decimal import Decimal
 from datetime import datetime, timedelta
 import sys
 import os
+
+# Import du gestionnaire d'impression
+try:
+    from ayanna_erp.modules.salle_fete.utils.payment_printer import PaymentPrintManager
+except ImportError:
+    from ..utils.payment_printer import PaymentPrintManager
 
 
 class PaymentDialog(QDialog):
@@ -109,6 +115,7 @@ class PaiementIndex(QWidget):
         self.db_manager = db_manager
         self.current_user = current_user
         self.selected_reservation = None
+        self.payment_printer = PaymentPrintManager()
         
         # Initialiser les contrôleurs - Import dynamique pour éviter les problèmes SQLAlchemy
         try:
@@ -301,8 +308,29 @@ class PaiementIndex(QWidget):
         """)
         self.print_receipt_button.setEnabled(False)
         
+        self.print_reservation_button = QPushButton("📄 Imprimer réservation")
+        self.print_reservation_button.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                border: none;
+                padding: 12px 20px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+            QPushButton:disabled {
+                background-color: #BDC3C7;
+            }
+        """)
+        self.print_reservation_button.setEnabled(False)
+        
         buttons_layout.addWidget(self.pay_button)
         buttons_layout.addWidget(self.print_receipt_button)
+        buttons_layout.addWidget(self.print_reservation_button)
         buttons_layout.addStretch()
         
         right_layout.addLayout(buttons_layout)
@@ -330,6 +358,7 @@ class PaiementIndex(QWidget):
         # Boutons d'action
         self.pay_button.clicked.connect(self.open_payment_dialog)
         self.print_receipt_button.clicked.connect(self.print_receipt)
+        self.print_reservation_button.clicked.connect(self.print_reservation)
         
         # Signaux du contrôleur
         if self.paiement_controller:
@@ -459,6 +488,7 @@ class PaiementIndex(QWidget):
                 self.load_reservation_details()
                 self.pay_button.setEnabled(True)
                 self.print_receipt_button.setEnabled(True)
+                self.print_reservation_button.setEnabled(True)
                 
                 # S'assurer que la ligne est sélectionnée visuellement
                 self.reservations_table.selectRow(row)
@@ -467,6 +497,7 @@ class PaiementIndex(QWidget):
                 self.clear_reservation_details()
                 self.pay_button.setEnabled(False)
                 self.print_receipt_button.setEnabled(False)
+                self.print_reservation_button.setEnabled(False)
     
     def load_reservation_details(self):
         """Charger les détails complets de la réservation depuis la BDD"""
@@ -787,3 +818,180 @@ class PaiementIndex(QWidget):
     def on_error_occurred(self, error_message):
         """Callback en cas d'erreur"""
         QMessageBox.warning(self, "Erreur", error_message)
+    
+    def print_reservation(self):
+        """Exporter la réservation complète en PDF (A4)"""
+        if not self.selected_reservation:
+            QMessageBox.warning(self, "Attention", "Veuillez sélectionner une réservation")
+            return
+        
+        try:
+            # Préparer les données de la réservation
+            reservation_data = self.prepare_reservation_data()
+            
+            # Récupérer l'historique des paiements
+            payment_history = self.get_payment_history()
+            
+            # Demander où sauvegarder le fichier
+            reference = self.selected_reservation.get('reference', 'UNKNOWN')
+            default_filename = f"reservation_{reference}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Exporter la réservation",
+                default_filename,
+                "Fichiers PDF (*.pdf)"
+            )
+            
+            if filename:
+                # Générer le PDF
+                result = self.payment_printer.print_reservation_a4(
+                    reservation_data, payment_history, filename
+                )
+                
+                QMessageBox.information(self, "Export réussi", 
+                                      f"Réservation exportée avec succès:\n{filename}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export", 
+                               f"Erreur lors de l'export:\n{str(e)}")
+    
+    def print_receipt(self):
+        """Imprimer directement le reçu de paiement (53mm)"""
+        if not self.selected_reservation:
+            QMessageBox.warning(self, "Attention", "Veuillez sélectionner une réservation")
+            return
+        
+        # Vérifier qu'il y a au moins un paiement
+        if not self.payments_table.rowCount():
+            QMessageBox.warning(self, "Attention", "Aucun paiement à imprimer")
+            return
+        
+        try:
+            # Prendre le dernier paiement pour le reçu
+            last_payment_row = self.payments_table.rowCount() - 1
+            payment_data = self.prepare_payment_data(last_payment_row)
+            
+            # Préparer les données de la réservation
+            reservation_data = self.prepare_reservation_data()
+            
+            # Créer un fichier temporaire pour l'impression
+            import tempfile
+            reference = self.selected_reservation.get('reference', 'UNKNOWN')
+            
+            with tempfile.NamedTemporaryFile(
+                suffix=f'_recu_{reference}.pdf', 
+                delete=False
+            ) as temp_file:
+                temp_filename = temp_file.name
+            
+            # Générer le reçu
+            result = self.payment_printer.print_receipt_53mm(
+                reservation_data, payment_data, 
+                self.current_user.get('username', 'Utilisateur'), temp_filename
+            )
+            
+            # Ouvrir le PDF pour impression directe
+            import subprocess
+            if os.name == 'nt':  # Windows
+                os.startfile(temp_filename, 'print')
+            else:  # Linux/Mac
+                subprocess.call(['lpr', temp_filename])
+            
+            QMessageBox.information(self, "Impression envoyée", 
+                                  "Reçu envoyé à l'imprimante")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'impression", 
+                               f"Erreur lors de l'impression du reçu:\n{str(e)}")
+    
+    def prepare_reservation_data(self):
+        """Préparer les données de la réservation pour l'impression"""
+        if not self.selected_reservation:
+            return {}
+        
+        # Récupérer les services et produits depuis les données de la réservation
+        services = []
+        for service_data in self.selected_reservation.get('services', []):
+            try:
+                service = {
+                    'name': service_data.get('name', ''),
+                    'quantity': float(service_data.get('quantity', 0)),
+                    'unit_price': float(service_data.get('unit_price', 0))
+                }
+                services.append(service)
+            except Exception as e:
+                print(f"Erreur service: {e}")
+                continue
+        
+        products = []
+        for product_data in self.selected_reservation.get('products', []):
+            try:
+                product = {
+                    'name': product_data.get('name', ''),
+                    'quantity': float(product_data.get('quantity', 0)),
+                    'unit_price': float(product_data.get('unit_price', 0))
+                }
+                products.append(product)
+            except Exception as e:
+                print(f"Erreur produit: {e}")
+                continue
+        
+        # Calculer les totaux
+        total_services = sum(s['quantity'] * s['unit_price'] for s in services)
+        total_products = sum(p['quantity'] * p['unit_price'] for p in products)
+        subtotal = total_services + total_products
+        
+        return {
+            'reference': self.selected_reservation.get('reference', 'N/A'),
+            'client_nom': self.selected_reservation.get('client_nom', 'N/A'),
+            'client_telephone': self.selected_reservation.get('client_telephone', 'N/A'),
+            'client_email': self.selected_reservation.get('client_email', 'N/A'),
+            'client_adresse': self.selected_reservation.get('client_adresse', 'N/A'),
+            'event_type': self.selected_reservation.get('event_type', 'N/A'),
+            'event_date': str(self.selected_reservation.get('event_date', 'N/A')),
+            'created_at': str(self.selected_reservation.get('created_at', 'N/A')),
+            'guest_count': self.selected_reservation.get('guest_count', 0),
+            'theme': self.selected_reservation.get('theme', 'N/A'),
+            'notes': self.selected_reservation.get('notes', 'Aucune'),
+            'services': services,
+            'products': products,
+            'total_services': total_services,
+            'total_products': total_products,
+            'subtotal': subtotal,
+            'tax_amount': self.selected_reservation.get('tax_amount', 0),
+            'discount_amount': self.selected_reservation.get('discount_amount', 0),
+            'total_amount': self.selected_reservation.get('total_amount', 0)
+        }
+    
+    def prepare_payment_data(self, row_index):
+        """Préparer les données d'un paiement pour l'impression"""
+        if row_index < 0 or row_index >= self.payments_table.rowCount():
+            return {}
+        
+        # Calculer le total payé jusqu'à ce paiement
+        total_paid = 0
+        for i in range(row_index + 1):
+            amount_text = self.payments_table.item(i, 1).text().replace(' €', '') if self.payments_table.item(i, 1) else '0'
+            total_paid += float(amount_text)
+        
+        return {
+            'payment_date': self.payments_table.item(row_index, 0).text() if self.payments_table.item(row_index, 0) else 'N/A',
+            'amount': float(self.payments_table.item(row_index, 1).text().replace(' €', '')) if self.payments_table.item(row_index, 1) else 0,
+            'payment_method': self.payments_table.item(row_index, 2).text() if self.payments_table.item(row_index, 2) else 'N/A',
+            'total_paid': total_paid
+        }
+    
+    def get_payment_history(self):
+        """Récupérer l'historique complet des paiements"""
+        payments = []
+        for i in range(self.payments_table.rowCount()):
+            payment = {
+                'payment_date': self.payments_table.item(i, 0).text() if self.payments_table.item(i, 0) else 'N/A',
+                'amount': float(self.payments_table.item(i, 1).text().replace(' €', '')) if self.payments_table.item(i, 1) else 0,
+                'payment_method': self.payments_table.item(i, 2).text() if self.payments_table.item(i, 2) else 'N/A',
+                'user_name': self.payments_table.item(i, 3).text() if self.payments_table.item(i, 3) else 'N/A',
+                'status': self.payments_table.item(i, 4).text() if self.payments_table.item(i, 4) else 'N/A'
+            }
+            payments.append(payment)
+        return payments
