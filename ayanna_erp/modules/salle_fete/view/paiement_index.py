@@ -21,8 +21,10 @@ import os
 # Import du gestionnaire d'impression
 try:
     from ayanna_erp.modules.salle_fete.utils.payment_printer import PaymentPrintManager
+    from ayanna_erp.modules.salle_fete.utils.print_settings import PrintSettings, PrintSettingsDialog
 except ImportError:
     from ..utils.payment_printer import PaymentPrintManager
+    from ..utils.print_settings import PrintSettings, PrintSettingsDialog
 
 
 class PaymentDialog(QDialog):
@@ -115,6 +117,11 @@ class PaiementIndex(QWidget):
         self.db_manager = db_manager
         self.current_user = current_user
         self.selected_reservation = None
+        
+        # Initialiser les paramètres d'impression
+        self.print_settings = PrintSettings()
+        
+        # Initialiser le gestionnaire d'impression
         self.payment_printer = PaymentPrintManager()
         
         # Initialiser les contrôleurs - Import dynamique pour éviter les problèmes SQLAlchemy
@@ -328,9 +335,27 @@ class PaiementIndex(QWidget):
         """)
         self.print_reservation_button.setEnabled(False)
         
+        # Bouton de configuration d'impression
+        self.print_settings_button = QPushButton("⚙️ Paramètres impression")
+        self.print_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #7F8C8D;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #566367;
+            }
+        """)
+        
         buttons_layout.addWidget(self.pay_button)
         buttons_layout.addWidget(self.print_receipt_button)
         buttons_layout.addWidget(self.print_reservation_button)
+        buttons_layout.addWidget(self.print_settings_button)
         buttons_layout.addStretch()
         
         right_layout.addLayout(buttons_layout)
@@ -359,6 +384,7 @@ class PaiementIndex(QWidget):
         self.pay_button.clicked.connect(self.open_payment_dialog)
         self.print_receipt_button.clicked.connect(self.print_receipt)
         self.print_reservation_button.clicked.connect(self.print_reservation)
+        self.print_settings_button.clicked.connect(self.open_print_settings)
         
         # Signaux du contrôleur
         if self.paiement_controller:
@@ -832,25 +858,47 @@ class PaiementIndex(QWidget):
             # Récupérer l'historique des paiements
             payment_history = self.get_payment_history()
             
-            # Demander où sauvegarder le fichier
-            reference = self.selected_reservation.get('reference', 'UNKNOWN')
-            default_filename = f"reservation_{reference}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+            # Vérifier le comportement d'impression configuré
+            behavior = self.print_settings.get_setting("reservation_behavior")
             
-            filename, _ = QFileDialog.getSaveFileName(
-                self,
-                "Exporter la réservation",
-                default_filename,
-                "Fichiers PDF (*.pdf)"
-            )
-            
-            if filename:
-                # Générer le PDF
-                result = self.payment_printer.print_reservation_a4(
-                    reservation_data, payment_history, filename
+            if behavior == "save_pdf":
+                # Comportement : Demander où sauvegarder le fichier
+                reference = self.selected_reservation.get('reference', 'UNKNOWN')
+                default_filename = f"reservation_{reference}_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf"
+                
+                filename, _ = QFileDialog.getSaveFileName(
+                    self,
+                    "Exporter la réservation",
+                    default_filename,
+                    "Fichiers PDF (*.pdf)"
                 )
                 
-                QMessageBox.information(self, "Export réussi", 
-                                      f"Réservation exportée avec succès:\n{filename}")
+                if filename:
+                    # Générer le PDF
+                    result = self.payment_printer.print_reservation_a4(
+                        reservation_data, payment_history, filename
+                    )
+                    
+                    QMessageBox.information(self, "Export réussi", 
+                                          f"Réservation exportée avec succès:\n{filename}")
+            else:
+                # Comportement : Impression directe
+                import tempfile
+                reference = self.selected_reservation.get('reference', 'UNKNOWN')
+                
+                with tempfile.NamedTemporaryFile(
+                    suffix=f'_reservation_{reference}.pdf', 
+                    delete=False
+                ) as temp_file:
+                    temp_filename = temp_file.name
+                
+                # Générer le PDF
+                result = self.payment_printer.print_reservation_a4(
+                    reservation_data, payment_history, temp_filename
+                )
+                
+                # Utiliser les paramètres d'impression
+                self.print_with_settings(temp_filename, "reservation")
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur d'export", 
@@ -868,12 +916,11 @@ class PaiementIndex(QWidget):
             return
         
         try:
-            # Prendre le dernier paiement pour le reçu
-            last_payment_row = self.payments_table.rowCount() - 1
-            payment_data = self.prepare_payment_data(last_payment_row)
-            
             # Préparer les données de la réservation
             reservation_data = self.prepare_reservation_data()
+            
+            # Récupérer tous les paiements pour le reçu
+            all_payments = self.get_payment_history()
             
             # Créer un fichier temporaire pour l'impression
             import tempfile
@@ -885,25 +932,71 @@ class PaiementIndex(QWidget):
             ) as temp_file:
                 temp_filename = temp_file.name
             
-            # Générer le reçu
+            # Générer le reçu avec tous les paiements
             result = self.payment_printer.print_receipt_53mm(
-                reservation_data, payment_data, 
-                self.current_user.get('username', 'Utilisateur'), temp_filename
+                reservation_data, all_payments, 
+                self.current_user.name if hasattr(self.current_user, 'name') else 'Utilisateur', 
+                temp_filename
             )
             
-            # Ouvrir le PDF pour impression directe
-            import subprocess
-            if os.name == 'nt':  # Windows
-                os.startfile(temp_filename, 'print')
-            else:  # Linux/Mac
-                subprocess.call(['lpr', temp_filename])
-            
-            QMessageBox.information(self, "Impression envoyée", 
-                                  "Reçu envoyé à l'imprimante")
+            # Utiliser les paramètres d'impression
+            self.print_with_settings(temp_filename, "receipt")
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur d'impression", 
                                f"Erreur lors de l'impression du reçu:\n{str(e)}")
+    
+    def open_print_settings(self):
+        """Ouvrir la fenêtre de configuration des paramètres d'impression"""
+        dialog = PrintSettingsDialog(self.print_settings, self)
+        dialog.exec()
+    
+    def print_with_settings(self, file_path, print_type="receipt"):
+        """Imprimer selon les paramètres configurés"""
+        import subprocess
+        import os
+        
+        # Vérifier le comportement selon le type et les paramètres
+        if print_type == "receipt":
+            behavior = self.print_settings.get_setting("receipt_behavior")
+        else:  # reservation
+            behavior = self.print_settings.get_setting("reservation_behavior")
+        
+        if behavior == "direct_print":
+            try:
+                if os.name == 'nt':  # Windows
+                    # Essayer plusieurs méthodes d'impression directe
+                    try:
+                        subprocess.run(['SumatraPDF.exe', '-print-to-default', file_path], 
+                                     check=True, timeout=10)
+                    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                        try:
+                            subprocess.run(['AcroRd32.exe', '/t', file_path], 
+                                         check=True, timeout=10)
+                        except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                            try:
+                                subprocess.run(['powershell', '-Command', 
+                                              f'Start-Process -FilePath "{file_path}" -Verb Print'], 
+                                             check=True, timeout=10)
+                            except:
+                                os.startfile(file_path)
+                                QMessageBox.information(self, "Impression", 
+                                                       "Le fichier PDF a été ouvert. Veuillez utiliser Ctrl+P pour imprimer.")
+                                return
+                else:  # Linux/Mac
+                    subprocess.call(['lpr', file_path])
+                
+                QMessageBox.information(self, "Impression envoyée", 
+                                      "Document envoyé à l'imprimante par défaut")
+            except Exception as print_error:
+                QMessageBox.warning(self, "Erreur d'impression", 
+                                   f"Impossible d'imprimer automatiquement.\nErreur: {print_error}\n\nLe fichier sera ouvert pour impression manuelle.")
+                os.startfile(file_path)
+        else:
+            # Comportement "save_and_open" - juste ouvrir le fichier
+            os.startfile(file_path)
+            QMessageBox.information(self, "Fichier ouvert", 
+                                  f"Le fichier a été ouvert :\n{file_path}")
     
     def prepare_reservation_data(self):
         """Préparer les données de la réservation pour l'impression"""

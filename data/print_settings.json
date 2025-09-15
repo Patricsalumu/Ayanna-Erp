@@ -1,0 +1,8 @@
+{
+    "receipt_behavior": "save_and_open",
+    "reservation_behavior": "save_pdf",
+    "default_printer": "",
+    "auto_close_after_print": true,
+    "receipt_format": "53mm",
+    "print_copies": 1
+}

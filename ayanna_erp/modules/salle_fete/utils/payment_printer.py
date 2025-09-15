@@ -321,125 +321,201 @@ class PaymentPrintManager:
         
         return filename
     
-    def print_receipt_53mm(self, reservation_data, payment_data, user_name, filename):
-        """Imprimer un reçu de paiement sur format 53mm"""
-        # Taille du ticket 53mm de large
+    def print_receipt_53mm(self, reservation_data, payments_list, user_name, filename):
+        """Imprimer un reçu de paiement sur format 53mm avec détail de tous les paiements"""
+        # Taille du ticket 53mm de large (format imprimante thermique)
         TICKET_WIDTH = 53 * mm
-        TICKET_HEIGHT = 200 * mm  # Hauteur approximative
+        # Estimer la hauteur nécessaire
+        base_height = 80  # En-tête et pied de page
+        payment_height = len(payments_list) * 30 if payments_list else 20  # 30mm par paiement
+        TICKET_HEIGHT = (base_height + payment_height) * mm
         
-        # Créer le canvas
+        # Créer le document PDF
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate
+        doc = SimpleDocTemplate(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT),
+                              rightMargin=2*mm, leftMargin=2*mm, 
+                              topMargin=2*mm, bottomMargin=2*mm)
+        
+        # Créer le canvas pour dessiner
         c = canvas.Canvas(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT))
         
-        y_position = TICKET_HEIGHT - 10
-        line_height = 12
+        y_position = TICKET_HEIGHT - 5*mm  # Commencer en haut
+        line_height = 3*mm  # Espacement entre les lignes
         
-        # Logo et en-tête entreprise (si logo disponible)
+        # Logo et en-tête entreprise (taille réduite pour 53mm)
         if self.company_info['logo_path'] and os.path.exists(self.company_info['logo_path']):
             try:
-                c.drawImage(self.company_info['logo_path'], (TICKET_WIDTH - 30) / 2, y_position - 25, 
-                           width=30, height=20, preserveAspectRatio=True)
-                y_position -= 30
-            except:
+                logo_width = 15*mm
+                logo_height = 10*mm
+                c.drawImage(self.company_info['logo_path'], 
+                           (TICKET_WIDTH - logo_width) / 2, y_position - logo_height, 
+                           width=logo_width, height=logo_height, preserveAspectRatio=True)
+                y_position -= logo_height + 2*mm
+            except Exception as e:
+                print(f"Erreur logo: {e}")
                 pass
         
         # Nom de l'entreprise
-        c.setFont('Helvetica-Bold', 8)
-        text_width = c.stringWidth(self.company_info['name'], 'Helvetica-Bold', 8)
-        c.drawString((TICKET_WIDTH - text_width) / 2, y_position, self.company_info['name'])
+        c.setFont('Helvetica-Bold', 7)
+        text = self.company_info['name'][:30]  # Limiter la longueur
+        text_width = c.stringWidth(text, 'Helvetica-Bold', 7)
+        c.drawString((TICKET_WIDTH - text_width) / 2, y_position, text)
         y_position -= line_height
         
-        # Coordonnées entreprise
-        c.setFont('Helvetica', 6)
-        for info in [self.company_info['phone'], self.company_info['email'], 
-                     self.company_info['rccm'], self.company_info['address']]:
-            text_width = c.stringWidth(info, 'Helvetica', 6)
-            c.drawString((TICKET_WIDTH - text_width) / 2, y_position, info)
-            y_position -= 8
+        # Coordonnées entreprise (police très petite)
+        c.setFont('Helvetica', 5)
+        for info in [self.company_info['phone'], self.company_info['email']]:
+            if info:
+                info_text = info[:35]  # Limiter la longueur
+                text_width = c.stringWidth(info_text, 'Helvetica', 5)
+                c.drawString((TICKET_WIDTH - text_width) / 2, y_position, info_text)
+                y_position -= 2.5*mm
+        
+        # Adresse sur une ligne
+        if self.company_info['address']:
+            address_text = self.company_info['address'][:40]
+            text_width = c.stringWidth(address_text, 'Helvetica', 5)
+            c.drawString((TICKET_WIDTH - text_width) / 2, y_position, address_text)
+            y_position -= 2.5*mm
+        
+        # RCCM
+        if self.company_info['rccm']:
+            rccm_text = self.company_info['rccm'][:30]
+            text_width = c.stringWidth(rccm_text, 'Helvetica', 5)
+            c.drawString((TICKET_WIDTH - text_width) / 2, y_position, rccm_text)
+            y_position -= 2.5*mm
         
         # Ligne de séparation
-        y_position -= 5
-        c.line(2, y_position, TICKET_WIDTH - 2, y_position)
-        y_position -= 10
+        y_position -= 2*mm
+        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        y_position -= 3*mm
         
         # Titre du reçu
         c.setFont('Helvetica-Bold', 8)
-        title = "REÇU DE PAIEMENT"
+        title = "RECU DE PAIEMENT"
         text_width = c.stringWidth(title, 'Helvetica-Bold', 8)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, title)
-        y_position -= line_height + 5
+        y_position -= line_height + 2*mm
         
-        # Utilisateur qui a reçu le paiement
-        c.setFont('Helvetica', 7)
-        user_text = f"Reçu par: {user_name}"
-        c.drawString(2, y_position, user_text)
-        y_position -= line_height
+        # Informations de base de la réservation (format compact)
+        c.setFont('Helvetica', 5)
         
-        # Informations de base de la réservation
-        c.setFont('Helvetica', 6)
+        # Référence
+        ref_text = f"Ref: {reservation_data.get('reference', 'N/A')[:15]}"
+        c.drawString(2*mm, y_position, ref_text)
+        y_position -= 2.5*mm
         
-        reservation_info = [
-            f"Référence: {reservation_data.get('reference', 'N/A')}",
-            f"Client: {reservation_data.get('client_nom', 'N/A')}",
-            f"Téléphone: {reservation_data.get('client_telephone', 'N/A')}",
-            f"Type: {reservation_data.get('event_type', 'N/A')}",
-            f"Date événement: {reservation_data.get('event_date', 'N/A')}"
-        ]
+        # Client (limiter la longueur)
+        client_name = reservation_data.get('client_nom', 'N/A')[:20]
+        client_text = f"Client: {client_name}"
+        c.drawString(2*mm, y_position, client_text)
+        y_position -= 2.5*mm
         
-        for info in reservation_info:
-            c.drawString(2, y_position, info)
-            y_position -= 8
+        # Téléphone
+        phone_text = f"Tel: {reservation_data.get('client_telephone', 'N/A')[:15]}"
+        c.drawString(2*mm, y_position, phone_text)
+        y_position -= 2.5*mm
+        
+        # Type
+        event_type = reservation_data.get('event_type', 'N/A')[:15]
+        type_text = f"Type: {event_type}"
+        c.drawString(2*mm, y_position, type_text)
+        y_position -= 2.5*mm
+        
+        # Date événement
+        event_date = reservation_data.get('event_date', 'N/A')[:12]
+        date_text = f"Date: {event_date}"
+        c.drawString(2*mm, y_position, date_text)
+        y_position -= 2.5*mm
         
         # Ligne de séparation
-        y_position -= 5
-        c.line(2, y_position, TICKET_WIDTH - 2, y_position)
-        y_position -= 10
+        y_position -= 2*mm
+        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        y_position -= 3*mm
         
-        # Résumé des paiements
-        c.setFont('Helvetica-Bold', 7)
-        c.drawString(2, y_position, "RÉSUMÉ PAIEMENTS:")
-        y_position -= line_height
-        
-        c.setFont('Helvetica', 6)
-        
-        # Détails du paiement actuel
-        payment_info = [
-            f"Montant payé: {payment_data.get('amount', 0):.2f} €",
-            f"Méthode: {payment_data.get('payment_method', 'N/A')}",
-            f"Date: {payment_data.get('payment_date', 'N/A')}"
-        ]
-        
-        for info in payment_info:
-            c.drawString(2, y_position, info)
-            y_position -= 8
-        
-        # Total et reste à payer
-        y_position -= 5
+        # Détail de chaque paiement
         c.setFont('Helvetica-Bold', 6)
+        c.drawString(2*mm, y_position, "DETAIL PAIEMENTS:")
+        y_position -= 3*mm
         
+        total_paid = 0
+        
+        if payments_list:
+            for i, payment in enumerate(payments_list, 1):
+                payment_amount = payment.get('amount', 0)
+                total_paid += payment_amount
+                
+                # Numéro et montant sur une ligne
+                c.setFont('Helvetica-Bold', 5)
+                payment_line = f"#{i}: {payment_amount:.2f} EUR"
+                c.drawString(2*mm, y_position, payment_line)
+                y_position -= 2.5*mm
+                
+                # Méthode
+                c.setFont('Helvetica', 4)
+                method_text = payment.get('payment_method', 'N/A')[:20]
+                c.drawString(3*mm, y_position, method_text)
+                y_position -= 2*mm
+                
+                # Date
+                date_text = payment.get('payment_date', 'N/A')[:15]
+                c.drawString(3*mm, y_position, date_text)
+                y_position -= 2*mm
+                
+                # Caissier
+                cashier_name = payment.get('user_name', 'N/A')[:15]
+                cashier_text = f"Par: {cashier_name}"
+                c.drawString(3*mm, y_position, cashier_text)
+                y_position -= 2*mm
+                
+                # Petite ligne de séparation entre paiements
+                if i < len(payments_list):
+                    c.line(3*mm, y_position, TICKET_WIDTH - 3*mm, y_position)
+                    y_position -= 2*mm
+        else:
+            c.setFont('Helvetica', 5)
+            c.drawString(2*mm, y_position, "Aucun paiement")
+            y_position -= 3*mm
+        
+        # Récapitulatif final
+        y_position -= 2*mm
+        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        y_position -= 3*mm
+        
+        c.setFont('Helvetica-Bold', 6)
+        c.drawString(2*mm, y_position, "RECAPITULATIF:")
+        y_position -= 3*mm
+        
+        c.setFont('Helvetica', 5)
         total_amount = reservation_data.get('total_amount', 0)
-        total_paid = payment_data.get('total_paid', 0)
         balance = total_amount - total_paid
         
-        summary_info = [
-            f"Total à payer: {total_amount:.2f} €",
-            f"Total payé: {total_paid:.2f} €",
-            f"Reste à payer: {balance:.2f} €"
-        ]
+        # Total à payer
+        total_text = f"Total: {total_amount:.2f} EUR"
+        c.drawString(2*mm, y_position, total_text)
+        y_position -= 2.5*mm
         
-        for info in summary_info:
-            c.drawString(2, y_position, info)
-            y_position -= 8
+        # Total payé
+        paid_text = f"Paye: {total_paid:.2f} EUR"
+        c.drawString(2*mm, y_position, paid_text)
+        y_position -= 2.5*mm
+        
+        # Reste à payer
+        c.setFont('Helvetica-Bold', 5)
+        balance_text = f"Reste: {balance:.2f} EUR"
+        c.drawString(2*mm, y_position, balance_text)
+        y_position -= 3*mm
         
         # Ligne de séparation finale
-        y_position -= 5
-        c.line(2, y_position, TICKET_WIDTH - 2, y_position)
-        y_position -= 10
+        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        y_position -= 3*mm
         
         # Filigrane Ayanna ERP
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 4)
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
-        filigrane_text = f"Généré par Ayanna ERP © {generation_time}"
-        text_width = c.stringWidth(filigrane_text, 'Helvetica', 5)
+        filigrane_text = f"Ayanna ERP (c) {generation_time}"
+        text_width = c.stringWidth(filigrane_text, 'Helvetica', 4)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
         
         # Sauvegarder le PDF
