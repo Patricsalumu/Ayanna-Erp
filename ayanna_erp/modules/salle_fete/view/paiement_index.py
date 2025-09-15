@@ -555,7 +555,7 @@ class PaiementIndex(QWidget):
                     self.event_type_label.setText(reservation_details.get('event_type', 'N/A'))
                     
                     # Nombre d'invités
-                    guest_count = reservation_details.get('guest_count', 0)
+                    guest_count = reservation_details.get('guests_count', 0)  # Utiliser 'guests_count' avec un 's'
                     self.guest_count_label.setText(str(guest_count) if guest_count else "Non spécifié")
                     
                     # Mettre à jour la réservation sélectionnée avec les détails complets
@@ -1073,7 +1073,7 @@ class PaiementIndex(QWidget):
             'event_type': self.selected_reservation.get('event_type', 'N/A'),
             'event_date': str(self.selected_reservation.get('event_date', 'N/A')),
             'created_at': str(self.selected_reservation.get('created_at', 'N/A')),
-            'guest_count': self.selected_reservation.get('guest_count', 0),
+            'guest_count': self.selected_reservation.get('guests_count', 0),  # Utiliser 'guests_count' avec un 's'
             'theme': self.selected_reservation.get('theme', 'N/A'),
             'notes': self.selected_reservation.get('notes', 'Aucune'),
             'services': services,
