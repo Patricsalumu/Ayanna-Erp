@@ -211,11 +211,13 @@ class PaiementIndex(QWidget):
         self.client_phone_label = QLabel("-")
         self.event_date_label = QLabel("-")
         self.event_type_label = QLabel("-")
+        self.guest_count_label = QLabel("-")
         
         client_info_layout.addRow("Client:", self.client_name_label)
         client_info_layout.addRow("Téléphone:", self.client_phone_label)
         client_info_layout.addRow("Date événement:", self.event_date_label)
         client_info_layout.addRow("Type:", self.event_type_label)
+        client_info_layout.addRow("Nombre d'invités:", self.guest_count_label)
         
         details_layout.addLayout(client_info_layout)
         
@@ -264,8 +266,8 @@ class PaiementIndex(QWidget):
         payments_layout = QVBoxLayout(payments_group)
         
         self.payments_table = QTableWidget()
-        self.payments_table.setColumnCount(5)
-        self.payments_table.setHorizontalHeaderLabels(["Date", "Montant", "Méthode", "Utilisateur", "Notes"])
+        self.payments_table.setColumnCount(4)
+        self.payments_table.setHorizontalHeaderLabels(["Date", "Montant", "Méthode", "Utilisateur"])
         self.payments_table.horizontalHeader().setStretchLastSection(True)
         self.payments_table.setMaximumHeight(150)
         
@@ -552,6 +554,10 @@ class PaiementIndex(QWidget):
                     
                     self.event_type_label.setText(reservation_details.get('event_type', 'N/A'))
                     
+                    # Nombre d'invités
+                    guest_count = reservation_details.get('guest_count', 0)
+                    self.guest_count_label.setText(str(guest_count) if guest_count else "Non spécifié")
+                    
                     # Mettre à jour la réservation sélectionnée avec les détails complets
                     self.selected_reservation = reservation_details
                     
@@ -661,13 +667,35 @@ class PaiementIndex(QWidget):
                 method = payment.get('payment_method', 'N/A')
                 self.payments_table.setItem(row, 2, QTableWidgetItem(method))
                 
-                # Utilisateur
+                # Utilisateur (nettoyer le nom pour enlever les notes automatiques)
                 user_name = payment.get('user_name', f"Utilisateur {payment.get('user_id', 'N/A')}")
-                self.payments_table.setItem(row, 3, QTableWidgetItem(user_name))
+                if user_name and user_name != 'N/A':
+                    # Supprimer les mots-clés indiquant des notes automatiques
+                    keywords_to_remove = [
+                        'acompte automatique pour réservation',
+                        'automatique pour réservation', 
+                        'pour réservation',
+                        'acompte automatique',
+                        'paiement automatique'
+                    ]
+                    
+                    user_name_clean = user_name
+                    for keyword in keywords_to_remove:
+                        # Recherche insensible à la casse
+                        if keyword.lower() in user_name_clean.lower():
+                            # Supprimer le keyword et ce qui suit
+                            index = user_name_clean.lower().find(keyword.lower())
+                            user_name_clean = user_name_clean[:index].strip()
+                            break
+                    
+                    # Si le nom devient vide ou trop court, utiliser une valeur par défaut
+                    if not user_name_clean or len(user_name_clean) < 3:
+                        user_name_clean = "Système"
+                    
+                    # Limiter la longueur pour éviter le débordement
+                    user_name = user_name_clean[:20] if len(user_name_clean) > 20 else user_name_clean
                 
-                # Notes
-                notes = payment.get('notes', '')
-                self.payments_table.setItem(row, 4, QTableWidgetItem(notes))
+                self.payments_table.setItem(row, 3, QTableWidgetItem(user_name))
                 
         except Exception as e:
             print(f"Erreur lors du chargement de l'historique des paiements: {e}")
@@ -678,6 +706,7 @@ class PaiementIndex(QWidget):
         self.client_phone_label.setText("-")
         self.event_date_label.setText("-")
         self.event_type_label.setText("-")
+        self.guest_count_label.setText("-")
         
         self.services_table.setRowCount(0)
         self.payments_table.setRowCount(0)
@@ -1083,8 +1112,7 @@ class PaiementIndex(QWidget):
                 'payment_date': self.payments_table.item(i, 0).text() if self.payments_table.item(i, 0) else 'N/A',
                 'amount': float(self.payments_table.item(i, 1).text().replace(' €', '')) if self.payments_table.item(i, 1) else 0,
                 'payment_method': self.payments_table.item(i, 2).text() if self.payments_table.item(i, 2) else 'N/A',
-                'user_name': self.payments_table.item(i, 3).text() if self.payments_table.item(i, 3) else 'N/A',
-                'status': self.payments_table.item(i, 4).text() if self.payments_table.item(i, 4) else 'N/A'
+                'user_name': self.payments_table.item(i, 3).text() if self.payments_table.item(i, 3) else 'N/A'
             }
             payments.append(payment)
         return payments

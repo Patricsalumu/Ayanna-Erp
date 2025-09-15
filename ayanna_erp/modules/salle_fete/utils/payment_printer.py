@@ -173,8 +173,7 @@ class PaymentPrintManager:
             ['Date de l\'événement:', reservation_data.get('event_date', 'N/A')],
             ['Date de création:', reservation_data.get('created_at', 'N/A')],
             ['Nombre d\'invités:', str(reservation_data.get('guest_count', 0))],
-            ['Thème:', reservation_data.get('theme', 'N/A')],
-            ['Notes:', reservation_data.get('notes', 'Aucune')]
+            ['Thème:', reservation_data.get('theme', 'N/A')]
         ]
         
         event_table = Table(event_data, colWidths=[4*cm, 12*cm])
@@ -284,29 +283,76 @@ class PaymentPrintManager:
         story.append(Paragraph("HISTORIQUE DES PAIEMENTS", self.styles['CustomHeading']))
         
         if payment_history:
-            payment_data = [['Date', 'Montant', 'Méthode', 'Utilisateur', 'Statut']]
+            payment_data = [['Date', 'Montant', 'Méthode', 'Utilisateur']]
             total_paid = 0
             
             for payment in payment_history:
                 total_paid += payment.get('amount', 0)
+                
+                # Formater la date pour enlever les millisecondes et secondes
+                payment_date = payment.get('payment_date', 'N/A')
+                if payment_date != 'N/A' and isinstance(payment_date, str):
+                    try:
+                        # Essayer de parser la date et la reformater
+                        from datetime import datetime
+                        # Gérer plusieurs formats possibles
+                        for fmt in ['%Y-%m-%d %H:%M:%S.%f', '%Y-%m-%d %H:%M:%S', '%d/%m/%Y %H:%M:%S', '%d/%m/%Y %H:%M']:
+                            try:
+                                dt = datetime.strptime(payment_date, fmt)
+                                payment_date = dt.strftime('%d/%m/%Y %H:%M')
+                                break
+                            except ValueError:
+                                continue
+                    except:
+                        # Si le parsing échoue, garder les 16 premiers caractères (sans millisecondes)
+                        payment_date = payment_date[:16] if len(payment_date) > 16 else payment_date
+                
+                # Nettoyer le nom d'utilisateur pour enlever les notes de paiement
+                user_name = payment.get('user_name', 'N/A')
+                if user_name and user_name != 'N/A':
+                    # Supprimer les mots-clés indiquant des notes automatiques
+                    keywords_to_remove = [
+                        'acompte automatique pour réservation',
+                        'automatique pour réservation', 
+                        'pour réservation',
+                        'acompte automatique',
+                        'paiement automatique'
+                    ]
+                    
+                    user_name_clean = user_name
+                    for keyword in keywords_to_remove:
+                        # Recherche insensible à la casse
+                        if keyword.lower() in user_name_clean.lower():
+                            # Supprimer le keyword et ce qui suit
+                            index = user_name_clean.lower().find(keyword.lower())
+                            user_name_clean = user_name_clean[:index].strip()
+                            break
+                    
+                    # Si le nom devient vide ou trop court, utiliser une valeur par défaut
+                    if not user_name_clean or len(user_name_clean) < 3:
+                        user_name_clean = "Système"
+                    
+                    # Limiter la longueur pour éviter le débordement
+                    user_name = user_name_clean[:20] if len(user_name_clean) > 20 else user_name_clean
+                
                 payment_data.append([
-                    payment.get('payment_date', 'N/A'),
+                    payment_date,
                     f"{payment.get('amount', 0):.2f} €",
                     payment.get('payment_method', 'N/A'),
-                    payment.get('user_name', 'N/A'),
-                    payment.get('status', 'N/A')
+                    user_name
                 ])
             
             balance = reservation_data.get('total_amount', 0) - total_paid
-            payment_data.append(['', '', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} €"])
-            payment_data.append(['', '', '', 'RESTE À PAYER:', f"{balance:.2f} €"])
+            payment_data.append(['', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} €"])
+            payment_data.append(['', '', 'RESTE À PAYER:', f"{balance:.2f} €"])
             
-            payment_table = Table(payment_data, colWidths=[3*cm, 3*cm, 3*cm, 4*cm, 3*cm])
+            # Ajuster les largeurs de colonnes pour éviter le débordement (4 colonnes maintenant)
+            payment_table = Table(payment_data, colWidths=[4*cm, 3*cm, 4*cm, 5*cm])
             payment_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), HexColor('#9B59B6')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), white),
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('FONTSIZE', (0, 0), (-1, -1), 8),  # Police plus petite
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('BACKGROUND', (0, -2), (-1, -1), HexColor('#D5DBDB')),
                 ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
@@ -315,6 +361,54 @@ class PaymentPrintManager:
             story.append(payment_table)
         else:
             story.append(Paragraph("Aucun paiement effectué", self.styles['CustomNormal']))
+        
+        story.append(Spacer(1, 20))
+        
+        # Section Notes/Commentaires
+        story.append(Paragraph("NOTES ET COMMENTAIRES", self.styles['CustomHeading']))
+        
+        # Récupérer les vraies notes/commentaires depuis les données de réservation
+        # Essayer plusieurs champs possibles pour les commentaires
+        notes = (reservation_data.get('notes', '') or 
+                reservation_data.get('comments', '') or 
+                reservation_data.get('note', '') or 
+                reservation_data.get('comment', '') or 
+                reservation_data.get('description', ''))
+        
+        # Nettoyer les notes
+        if not notes or notes.strip() == '' or notes.lower() in ['aucune', 'n/a', 'null', 'none']:
+            notes = "Aucune note particulière pour cette réservation."
+        
+        # Créer une zone de texte flexible pour les commentaires
+        # Utiliser un style qui permet le retour à la ligne automatique
+        notes_style = ParagraphStyle(
+            'NotesStyle',
+            parent=self.styles['CustomNormal'],
+            fontSize=10,
+            leading=12,
+            alignment=0,  # Alignement à gauche
+            spaceAfter=6,
+            leftIndent=10,
+            rightIndent=10
+        )
+        
+        notes_paragraph = Paragraph(notes, notes_style)
+        
+        # Créer un tableau simple avec une seule cellule pour les notes
+        notes_data = [[notes_paragraph]]
+        notes_table = Table(notes_data, colWidths=[16*cm])  # Toute la largeur
+        notes_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), HexColor('#FAFBFC')),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7')),
+            ('LEFTPADDING', (0, 0), (-1, -1), 12),
+            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12)
+        ]))
+        story.append(notes_table)
         
         # Construire le PDF
         doc.build(story, onFirstPage=self.create_header_a4, onLaterPages=self.create_header_a4)
