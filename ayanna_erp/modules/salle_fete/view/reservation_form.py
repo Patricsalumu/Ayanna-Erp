@@ -49,6 +49,13 @@ class ReservationForm(QDialog):
         self.product_checkboxes = []
         self.product_quantity_spinboxes = []  # Pour les quantités des produits
         
+        # Attributs pour stocker les valeurs calculées
+        self.current_subtotal_ht = 0.0
+        self.current_tax_amount = 0.0
+        self.current_total_ttc_before_discount = 0.0
+        self.current_discount_amount = 0.0
+        self.current_total_final = 0.0
+        
         self.setWindowTitle("Modifier la réservation" if self.is_edit_mode else "Nouvelle réservation")
         self.setModal(True)
         self.setMinimumSize(900, 700)  # Augmenté pour une meilleure visibilité
@@ -273,6 +280,10 @@ class ReservationForm(QDialog):
         self.discount_spinbox.setSuffix(" %")
         self.discount_spinbox.valueChanged.connect(self.calculate_totals)
         
+        # Nouveau: Label pour afficher le montant de remise en euros
+        self.discount_amount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.discount_amount_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+        
         self.tax_rate_spinbox = QDoubleSpinBox()
         self.tax_rate_spinbox.setRange(0, 30)
         self.tax_rate_spinbox.setValue(20)  # TVA à 20% par défaut
@@ -280,8 +291,12 @@ class ReservationForm(QDialog):
         self.tax_rate_spinbox.valueChanged.connect(self.calculate_totals)
         
         self.tax_amount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        
+        # Nouveau: Label pour le total TTC avant remise
+        self.total_before_discount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        
         self.total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
-        self.total_label.setStyleSheet("font-weight: bold; font-size: 16px; color: #E74C3C;")
+        self.total_label.setStyleSheet("font-weight: bold; font-size: 16px; color: #27AE60;")
         
         # Acompte
         self.deposit_spinbox = QDoubleSpinBox()
@@ -292,25 +307,31 @@ class ReservationForm(QDialog):
         self.remaining_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.remaining_label.setStyleSheet("font-weight: bold; color: #F39C12;")
         
-        # Ligne 1: Sous-total et Remise
-        totals_layout.addWidget(QLabel("Sous-total:"), 0, 0)
+        # Ligne 1: Sous-total HT et TVA
+        totals_layout.addWidget(QLabel("Sous-total HT:"), 0, 0)
         totals_layout.addWidget(self.subtotal_label, 0, 1)
-        totals_layout.addWidget(QLabel("Remise:"), 0, 2)
-        totals_layout.addWidget(self.discount_spinbox, 0, 3)
+        totals_layout.addWidget(QLabel("Taux de TVA:"), 0, 2)
+        totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
         
-        # Ligne 2: TVA et Montant TVA
-        totals_layout.addWidget(QLabel("Taux de TVA:"), 1, 0)
-        totals_layout.addWidget(self.tax_rate_spinbox, 1, 1)
+        # Ligne 2: Total TTC (avant remise) et Montant TVA
+        totals_layout.addWidget(QLabel("Total TTC:"), 1, 0)
+        totals_layout.addWidget(self.total_before_discount_label, 1, 1)
         totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
         totals_layout.addWidget(self.tax_amount_label, 1, 3)
         
-        # Ligne 3: Total, Acompte et Solde
-        totals_layout.addWidget(QLabel("TOTAL TTC:"), 2, 0)
-        totals_layout.addWidget(self.total_label, 2, 1)
-        totals_layout.addWidget(QLabel("Acompte:"), 2, 2)
-        totals_layout.addWidget(self.deposit_spinbox, 2, 3)
+        # Ligne 3: Remise et montant de remise
+        totals_layout.addWidget(QLabel("Remise:"), 2, 0)
+        totals_layout.addWidget(self.discount_spinbox, 2, 1)
+        totals_layout.addWidget(QLabel("Montant remise:"), 2, 2)
+        totals_layout.addWidget(self.discount_amount_label, 2, 3)
         
-        # Ligne 4: Solde restant (centré)
+        # Ligne 4: TOTAL FINAL et Acompte
+        totals_layout.addWidget(QLabel("TOTAL FINAL:"), 3, 0)
+        totals_layout.addWidget(self.total_label, 3, 1)
+        totals_layout.addWidget(QLabel("Acompte:"), 3, 2)
+        totals_layout.addWidget(self.deposit_spinbox, 3, 3)
+        
+        # Ligne 5: Solde restant (centré)
         remaining_layout = QHBoxLayout()
         remaining_layout.addWidget(QLabel("Solde restant:"))
         remaining_layout.addWidget(self.remaining_label)
@@ -664,66 +685,102 @@ class ReservationForm(QDialog):
         self.calculate_totals()
     
     def calculate_totals(self):
-        """Calculer les totaux"""
-        subtotal = 0.0
-        
-        # Calculer le sous-total basé sur les sélections avec quantités
-        for checkbox in self.service_checkboxes:
-            if checkbox.isChecked():
-                service_data = checkbox.service_data
-                
-                # Récupérer la quantité du spinbox
-                quantity = 1
-                if hasattr(checkbox, 'quantity_spinbox'):
-                    quantity = checkbox.quantity_spinbox.value()
-                
-                if hasattr(service_data, 'price'):
-                    line_total = float(service_data.price) * quantity
-                    subtotal += line_total
-                else:
-                    line_total = float(service_data['price']) * quantity
-                    subtotal += line_total
-        
-        for i, checkbox in enumerate(self.product_checkboxes):
-            if checkbox.isChecked():
-                product_data = checkbox.product_data
-                
-                # Récupérer la quantité du spinbox correspondant
-                quantity = 1
-                if i < len(self.product_quantity_spinboxes):
-                    quantity = self.product_quantity_spinboxes[i].value()
-                
-                if hasattr(product_data, 'price_unit'):
-                    line_total = float(product_data.price_unit) * quantity
-                    subtotal += line_total
-                else:
-                    line_total = float(product_data['price']) * quantity
-                    subtotal += line_total
-        
-        # Appliquer la remise
-        discount_percent = self.discount_spinbox.value()
-        discount_amount = subtotal * (discount_percent / 100)
-        subtotal_after_discount = subtotal - discount_amount
-        
-        # Calculer la TVA
-        tax_rate = self.tax_rate_spinbox.value()
-        tax_amount = subtotal_after_discount * (tax_rate / 100)
-        total_ttc = subtotal_after_discount + tax_amount
-        
-        # Calculer le solde restant
-        deposit = self.deposit_spinbox.value()
-        remaining = total_ttc - deposit
-        
-        # Mettre à jour les labels
-        self.subtotal_label.setText(self.format_amount(subtotal))
-        self.tax_amount_label.setText(self.format_amount(tax_amount))
-        self.total_label.setText(self.format_amount(total_ttc))
-        self.remaining_label.setText(self.format_amount(remaining))
-        
-        # Changer la couleur du solde selon le montant
-        if remaining <= 0:
-            self.remaining_label.setStyleSheet("font-weight: bold; color: #27AE60;")
-        elif remaining < total_ttc * 0.5:
+        """
+        Nouvelle logique: La remise est appliquée sur le TTC (Total avec TVA)
+        """
+        try:
+            subtotal_ht = 0.0
+            
+            # Calculer le sous-total HT basé sur les sélections avec quantités
+            for checkbox in self.service_checkboxes:
+                if checkbox.isChecked():
+                    service_data = checkbox.service_data
+                    
+                    # Récupérer la quantité du spinbox
+                    quantity = 1
+                    if hasattr(checkbox, 'quantity_spinbox'):
+                        quantity = checkbox.quantity_spinbox.value()
+                    
+                    if hasattr(service_data, 'price'):
+                        line_total = float(service_data.price) * quantity
+                        subtotal_ht += line_total
+                    else:
+                        line_total = float(service_data['price']) * quantity
+                        subtotal_ht += line_total
+            
+            for i, checkbox in enumerate(self.product_checkboxes):
+                if checkbox.isChecked():
+                    product_data = checkbox.product_data
+                    
+                    # Récupérer la quantité du spinbox correspondant
+                    quantity = 1
+                    if i < len(self.product_quantity_spinboxes):
+                        quantity = self.product_quantity_spinboxes[i].value()
+                    
+                    if hasattr(product_data, 'price_unit'):
+                        line_total = float(product_data.price_unit) * quantity
+                        subtotal_ht += line_total
+                    else:
+                        line_total = float(product_data['price']) * quantity
+                        subtotal_ht += line_total
+            
+            # 1. Calculer la TVA sur le sous-total HT
+            tax_rate = self.tax_rate_spinbox.value() / 100
+            tax_amount = subtotal_ht * tax_rate
+            total_ttc_before_discount = subtotal_ht + tax_amount
+            
+            # 2. Appliquer la remise sur le TTC (nouvelle logique)
+            discount_percent = self.discount_spinbox.value()
+            discount_amount = total_ttc_before_discount * (discount_percent / 100)
+            
+            # 3. Calculer le total final après remise
+            total_final = total_ttc_before_discount - discount_amount
+            
+            # 4. Calculer le solde restant
+            deposit = self.deposit_spinbox.value()
+            remaining = total_final - deposit
+            
+            # 5. Mettre à jour les labels
+            self.subtotal_label.setText(self.format_amount(subtotal_ht))
+            self.tax_amount_label.setText(self.format_amount(tax_amount))
+            self.total_before_discount_label.setText(self.format_amount(total_ttc_before_discount))
+            
+            # Afficher le montant de remise en euros avec couleur
+            if discount_amount > 0:
+                self.discount_amount_label.setText(f"-{self.format_amount(discount_amount)}")
+                self.discount_amount_label.setStyleSheet("color: #E74C3C; font-weight: bold;")
+            else:
+                self.discount_amount_label.setText(self.format_amount(0))
+                self.discount_amount_label.setStyleSheet("color: #7F8C8D;")
+            
+            self.total_label.setText(self.format_amount(total_final))
+            self.remaining_label.setText(self.format_amount(remaining))
+            
+            # 6. Changer la couleur du solde selon le montant
+            if remaining <= 0:
+                self.remaining_label.setStyleSheet("font-weight: bold; color: #27AE60;")
+            elif remaining < total_final * 0.5:
+                self.remaining_label.setStyleSheet("font-weight: bold; color: #F39C12;")
+            else:
+                self.remaining_label.setStyleSheet("font-weight: bold; color: #E74C3C;")
+            
+            # 7. Stocker les valeurs pour l'utilisation ultérieure
+            self.current_subtotal_ht = subtotal_ht
+            self.current_tax_amount = tax_amount
+            self.current_total_ttc_before_discount = total_ttc_before_discount
+            self.current_discount_amount = discount_amount
+            self.current_total_final = total_final
+            
+        except (ValueError, AttributeError) as e:
+            # En cas d'erreur, afficher des zéros
+            self.subtotal_label.setText(self.format_amount(0))
+            self.tax_amount_label.setText(self.format_amount(0))
+            self.total_before_discount_label.setText(self.format_amount(0))
+            self.discount_amount_label.setText(self.format_amount(0))
+            self.total_label.setText(self.format_amount(0))
+            self.remaining_label.setText(self.format_amount(0))
+            
+            print(f"Erreur lors du calcul des totaux: {e}")
             self.remaining_label.setStyleSheet("font-weight: bold; color: #F39C12;")
         else:
             self.remaining_label.setStyleSheet("font-weight: bold; color: #E74C3C;")

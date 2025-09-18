@@ -112,6 +112,7 @@ class ComptaConfig(Base):
     compte_vente_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte vente (classe 7)
     compte_achat_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte achat (classe 6)
     compte_tva_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)      # Compte TVA collectée (classe 4)
+    compte_remise_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte remises accordées (classe 7)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     
@@ -130,6 +131,7 @@ class ComptaConfig(Base):
     compte_vente = relationship("ComptaComptes", foreign_keys=[compte_vente_id])
     compte_achat = relationship("ComptaComptes", foreign_keys=[compte_achat_id])
     compte_tva = relationship("ComptaComptes", foreign_keys=[compte_tva_id])
+    compte_remise = relationship("ComptaComptes", foreign_keys=[compte_remise_id])
     
     def __repr__(self):
         return f"<ComptaConfig(enterprise_id={self.enterprise_id}, pos_id={self.pos_id})>"

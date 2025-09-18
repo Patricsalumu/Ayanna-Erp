@@ -291,7 +291,7 @@ class ComptabiliteController:
 
     def set_compte_config(self, enterprise_id, pos_id, compte_caisse_id=None, compte_banque_id=None, 
                          compte_client_id=None, compte_fournisseur_id=None, 
-                         compte_tva_id=None, compte_achat_id=None):
+                         compte_tva_id=None, compte_achat_id=None, compte_remise_id=None):
         """Crée ou met à jour la configuration des comptes pour une entreprise et un point de vente"""
         config = self.session.query(CompteConfig).filter_by(enterprise_id=enterprise_id, pos_id=pos_id).first()
         if config:
@@ -308,6 +308,8 @@ class ComptabiliteController:
                 config.compte_tva_id = compte_tva_id
             if compte_achat_id is not None:
                 config.compte_achat_id = compte_achat_id
+            if compte_remise_id is not None:
+                config.compte_remise_id = compte_remise_id
         else:
             config = CompteConfig(
                 enterprise_id=enterprise_id,
@@ -317,7 +319,8 @@ class ComptabiliteController:
                 compte_client_id=compte_client_id,
                 compte_fournisseur_id=compte_fournisseur_id,
                 compte_tva_id=compte_tva_id,
-                compte_achat_id=compte_achat_id
+                compte_achat_id=compte_achat_id,
+                compte_remise_id=compte_remise_id
             )
             self.session.add(config)
         self.session.commit()

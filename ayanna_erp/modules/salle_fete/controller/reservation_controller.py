@@ -721,11 +721,10 @@ class ReservationController(QObject):
         """
         Calcule la répartition proportionnelle d'un paiement selon les comptes spécifiques
         
-        NOUVELLE LOGIQUE CORRECTE :
-        1. Calculer le total de chaque service/produit (HT et TTC)
-        2. Calculer le pourcentage de chaque élément par rapport au total TTC
-        3. Répartir le paiement selon ces pourcentages exacts
-        4. La TVA est calculée proportionnellement aussi
+        LOGIQUE CORRECTE : 
+        - Calculer les montants nets (HT après remise) pour chaque service/produit
+        - Diviser par le total TTC final pour obtenir les bonnes proportions
+        - La TVA représente sa proportion du total TTC final
         
         Args:
             reservation: Instance de EventReservation
@@ -747,94 +746,94 @@ class ReservationController(QObject):
                 'total_ht': 0.0
             }
             
-            # Total TTC de la réservation
-            total_ttc = float(reservation.total_amount or 0)
-            taux_tva = float(reservation.tax_rate or 0) / 100
+            # Total TTC final de la réservation
+            total_ttc_final = float(reservation.total_amount or 0)
             
-            if total_ttc <= 0:
+            if total_ttc_final <= 0:
                 print("⚠️  Total de la réservation = 0, aucune répartition possible")
                 return repartition
             
-            print(f"📊 Répartition paiement: {montant_paiement} sur {total_ttc} ({montant_paiement/total_ttc:.2%})")
-            print(f"   Taux TVA: {taux_tva:.1%}")
+            print(f"📊 Répartition paiement: {montant_paiement}€ sur {total_ttc_final}€ ({montant_paiement/total_ttc_final:.2%})")
             
-            # === PHASE 1: CALCULER LES TOTAUX ET PROPORTIONS ===
+            # Récupérer le pourcentage de remise pour calculer les montants nets
+            remise_percent = float(reservation.discount_percent or 0)
             
-            # Calculer les totaux des services
-            services_details = {}  # {account_id: {'total_ht': x, 'total_ttc': y, 'names': []}}
+            # === CALCUL DES MONTANTS NETS (HT APRÈS REMISE) ===
+            
+            # Services : montant net = prix_unitaire * quantité * (1 - remise%)
+            services_details = {}  # {account_id: {'total_net': x, 'names': []}}
             for service_item in reservation.services:
                 service = service_item.service
                 if service and hasattr(service, 'account_id') and service.account_id:
-                    line_total_ttc = float(service_item.line_total or 0)
-                    line_total_ht = line_total_ttc / (1 + taux_tva)
+                    # Montant brut HT
+                    montant_ht_brut = float(service_item.unit_price or 0) * float(service_item.quantity or 1)
+                    # Appliquer la remise
+                    montant_ht_net = montant_ht_brut * (1 - remise_percent / 100)
                     
                     account_id = service.account_id
                     if account_id not in services_details:
-                        services_details[account_id] = {'total_ht': 0, 'total_ttc': 0, 'names': []}
+                        services_details[account_id] = {'total_net': 0, 'names': []}
                     
-                    services_details[account_id]['total_ht'] += line_total_ht
-                    services_details[account_id]['total_ttc'] += line_total_ttc
+                    services_details[account_id]['total_net'] += montant_ht_net
                     services_details[account_id]['names'].append(service.name)
             
-            # Calculer les totaux des produits
-            produits_details = {}  # {account_id: {'total_ht': x, 'total_ttc': y, 'names': []}}
+            # Produits : montant net = prix_unitaire * quantité * (1 - remise%)
+            produits_details = {}  # {account_id: {'total_net': x, 'names': []}}
             for product_item in reservation.products:
                 product = product_item.product
                 if product and hasattr(product, 'account_id') and product.account_id:
-                    line_total_ttc = float(product_item.line_total or 0)
-                    line_total_ht = line_total_ttc / (1 + taux_tva)
+                    # Montant brut HT
+                    montant_ht_brut = float(product_item.unit_price or 0) * float(product_item.quantity or 1)
+                    # Appliquer la remise
+                    montant_ht_net = montant_ht_brut * (1 - remise_percent / 100)
                     
                     account_id = product.account_id
                     if account_id not in produits_details:
-                        produits_details[account_id] = {'total_ht': 0, 'total_ttc': 0, 'names': []}
+                        produits_details[account_id] = {'total_net': 0, 'names': []}
                     
-                    produits_details[account_id]['total_ht'] += line_total_ht
-                    produits_details[account_id]['total_ttc'] += line_total_ttc
+                    produits_details[account_id]['total_net'] += montant_ht_net
                     produits_details[account_id]['names'].append(product.name)
             
-            # === PHASE 2: RÉPARTITION PROPORTIONNELLE ===
+            # === RÉPARTITION PROPORTIONNELLE SELON MONTANT NET / TOTAL TTC ===
             
             # Répartition des services
             for account_id, details in services_details.items():
-                proportion = details['total_ttc'] / total_ttc
+                proportion = details['total_net'] / total_ttc_final
                 montant_service = montant_paiement * proportion
                 repartition['services'][account_id] = montant_service
                 
-                names_str = ', '.join(details['names'][:3])  # Max 3 noms
+                names_str = ', '.join(details['names'][:3])
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  🛎️  Services [{names_str}]: {details['total_ttc']:.2f}€ TTC ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {account_id}")
+                print(f"  🛎️  Services [{names_str}]: {details['total_net']:.2f}€ net ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {account_id}")
             
             # Répartition des produits
             for account_id, details in produits_details.items():
-                proportion = details['total_ttc'] / total_ttc
+                proportion = details['total_net'] / total_ttc_final
                 montant_produit = montant_paiement * proportion
                 repartition['produits'][account_id] = montant_produit
                 
-                names_str = ', '.join(details['names'][:3])  # Max 3 noms
+                names_str = ', '.join(details['names'][:3])
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  📦 Produits [{names_str}]: {details['total_ttc']:.2f}€ TTC ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {account_id}")
+                print(f"  📦 Produits [{names_str}]: {details['total_net']:.2f}€ net ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {account_id}")
             
-            # === PHASE 3: CALCUL DE LA TVA ===
+            # === CALCUL DE LA TVA ===
             
-            # Total HT réparti
-            total_ht_reparti = sum(repartition['services'].values()) + sum(repartition['produits'].values())
-            
-            # TVA proportionnelle
-            if taux_tva > 0:
-                # Calculer la TVA totale de la réservation
-                tva_totale_reservation = total_ttc - (total_ttc / (1 + taux_tva))
-                proportion_tva = tva_totale_reservation / total_ttc
+            # TVA nette de la réservation
+            tva_totale_nette = float(reservation.tax_amount or 0)
+            if tva_totale_nette > 0:
+                proportion_tva = tva_totale_nette / total_ttc_final
                 repartition['tva'] = montant_paiement * proportion_tva
-                
-                print(f"  🧾 TVA: {tva_totale_reservation:.2f}€ sur {total_ttc:.2f}€ ({proportion_tva:.1%}) -> {repartition['tva']:.2f}€")
+                print(f"  🧾 TVA: {tva_totale_nette:.2f}€ nette ({proportion_tva:.1%}) -> {repartition['tva']:.2f}€")
             else:
                 repartition['tva'] = 0.0
-                print(f"  🧾 TVA: 0.00€ (taux 0%)")
+                print(f"  🧾 TVA: 0.00€")
             
+            # Total HT
+            total_ht_reparti = sum(repartition['services'].values()) + sum(repartition['produits'].values())
             repartition['total_ht'] = total_ht_reparti
             
             # === VÉRIFICATION ===
@@ -877,7 +876,7 @@ class ReservationController(QObject):
             list: Liste des écritures créées
         """
         try:
-            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable, ComptaConfig
             
             ecritures = []
             libelle_base = f"Paiement Réservation: {reservation.client_nom} {reservation.client_prenom}"
@@ -897,51 +896,101 @@ class ReservationController(QObject):
             
             ordre = 2
             
-            # === 2. ÉCRITURES DE CRÉDIT POUR LES SERVICES ===
-            for account_id, montant in repartition['services'].items():
-                if montant > 0:
+            # === 2. ÉCRITURES DE CRÉDIT POUR LES SERVICES (PROPORTIONNEL AU MONTANT BRUT) ===
+            # L'utilisateur saisit le montant encaissé, on reconstitue la répartition
+            montant_encaisse = payment.amount
+            facteur_remise = 1 - (reservation.discount_percent / 100) if reservation.discount_percent else 1
+            ttc_brut_reconstitue = montant_encaisse / facteur_remise if facteur_remise > 0 else montant_encaisse
+            
+            for account_id, montant_net in repartition['services'].items():
+                if montant_net > 0:
+                    # Calculer la part de ce compte dans le TTC brut reconstitué
+                    proportion = montant_net / payment.amount  # Proportion du montant encaissé
+                    montant_credit = ttc_brut_reconstitue * proportion
+                    
                     ecriture_service = EcritureComptable(
                         journal_id=journal_id,
                         compte_comptable_id=account_id,
                         debit=0,
-                        credit=montant,
+                        credit=montant_credit,
                         ordre=ordre,
                         libelle=f"{libelle_base} - Services"
                     )
                     session.add(ecriture_service)
                     ecritures.append(ecriture_service)
-                    print(f"  📤 Crédit Services: {montant:.2f} sur compte {account_id}")
+                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {account_id}")
                     ordre += 1
             
-            # === 3. ÉCRITURES DE CRÉDIT POUR LES PRODUITS ===
-            for account_id, montant in repartition['produits'].items():
-                if montant > 0:
+            # === 3. ÉCRITURES DE CRÉDIT POUR LES PRODUITS (PROPORTIONNEL AU MONTANT BRUT) ===
+            for account_id, montant_net in repartition['produits'].items():
+                if montant_net > 0:
+                    # Calculer la part de ce compte dans le TTC brut reconstitué
+                    proportion = montant_net / payment.amount  # Proportion du montant encaissé
+                    montant_credit = ttc_brut_reconstitue * proportion
+                    
                     ecriture_produit = EcritureComptable(
                         journal_id=journal_id,
                         compte_comptable_id=account_id,
                         debit=0,
-                        credit=montant,
+                        credit=montant_credit,
                         ordre=ordre,
                         libelle=f"{libelle_base} - Produits"
                     )
                     session.add(ecriture_produit)
                     ecritures.append(ecriture_produit)
-                    print(f"  📤 Crédit Produits: {montant:.2f} sur compte {account_id}")
+                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {account_id}")
                     ordre += 1
             
-            # === 4. ÉCRITURE DE CRÉDIT POUR LA TVA ===
-            if repartition['tva'] > 0 and compte_tva_id:
+            # === 4. ÉCRITURE DE CRÉDIT POUR LA TVA (PROPORTIONNELLE AU MONTANT BRUT) ===
+            if repartition.get('tva', 0) > 0 and compte_tva_id:
+                montant_tva_net = repartition['tva']
+                
+                # Calculer la part TVA dans le TTC brut reconstitué
+                proportion_tva = montant_tva_net / payment.amount  # Proportion du montant encaissé
+                montant_tva_credit = ttc_brut_reconstitue * proportion_tva
+                
                 ecriture_tva = EcritureComptable(
                     journal_id=journal_id,
                     compte_comptable_id=compte_tva_id,
                     debit=0,
-                    credit=repartition['tva'],
+                    credit=montant_tva_credit,
                     ordre=ordre,
                     libelle=f"{libelle_base} - TVA"
                 )
                 session.add(ecriture_tva)
                 ecritures.append(ecriture_tva)
-                print(f"  📤 Crédit TVA: {repartition['tva']:.2f} sur compte {compte_tva_id}")
+                print(f"  📤 Crédit TVA: {montant_tva_credit:.2f} sur compte {compte_tva_id}")
+                ordre += 1
+            
+            # === 5. ÉCRITURE DE DÉBIT POUR LA REMISE (si applicable) ===
+            # LOGIQUE UTILISATEUR : L'utilisateur saisit le montant encaissé (net)
+            # Le système reconstitue automatiquement le TTC brut et la remise
+            if reservation.discount_percent and reservation.discount_percent > 0:
+                # Récupérer le compte remise depuis la config
+                config = session.query(ComptaConfig).first()
+                if config and config.compte_remise_id:
+                    # Le montant saisi par l'utilisateur est le montant NET encaissé
+                    montant_encaisse = payment.amount
+                    
+                    # Reconstituer le TTC brut avant remise
+                    facteur_remise = 1 - (reservation.discount_percent / 100)
+                    if facteur_remise > 0:
+                        ttc_brut_theorique = montant_encaisse / facteur_remise
+                        remise_paiement = ttc_brut_theorique - montant_encaisse
+                        
+                        if remise_paiement > 0:
+                            ecriture_remise = EcritureComptable(
+                                journal_id=journal_id,
+                                compte_comptable_id=config.compte_remise_id,
+                                debit=remise_paiement,
+                                credit=0,
+                                ordre=ordre,
+                                libelle=f"{libelle_base} - Remise {reservation.discount_percent}%"
+                            )
+                            session.add(ecriture_remise)
+                            ecritures.append(ecriture_remise)
+                            print(f"  💳 Débit Remise: {remise_paiement:.2f} sur compte {config.compte_remise_id}")
+                            print(f"      Encaissé: {montant_encaisse:.2f}€ → TTC brut reconstitué: {ttc_brut_theorique:.2f}€")
             
             return ecritures
             
@@ -949,4 +998,5 @@ class ReservationController(QObject):
             print(f"❌ Erreur lors de la création des écritures: {e}")
             import traceback
             traceback.print_exc()
+            return []
             return []

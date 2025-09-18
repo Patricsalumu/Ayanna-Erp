@@ -39,7 +39,7 @@ class ShopProduct(Base):
     
     # Relations
     pos = relationship("POSPoint")
-    account = relationship("CompteComptable")
+    account = relationship("ComptaComptes")
     category = relationship("ShopProductCategory", back_populates="products")
     sale_lines = relationship("ShopSaleLineProduct", back_populates="product")
 
@@ -59,7 +59,7 @@ class ShopService(Base):
     
     # Relations
     pos = relationship("POSPoint")
-    account = relationship("CompteComptable")
+    account = relationship("ComptaComptes")
     sale_lines = relationship("ShopSaleLineService", back_populates="service")
 
 

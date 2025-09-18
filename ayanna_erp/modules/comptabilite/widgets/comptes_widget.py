@@ -254,6 +254,7 @@ class ComptesWidget(QWidget):
         comptes_client = self.controller.get_comptes_par_classe(self.entreprise_id, '4')  # Classe 4: Clients/Fournisseurs
         comptes_tva = self.controller.get_comptes_par_classe(self.entreprise_id, '44')    # Classe 44: TVA
         comptes_achat = self.controller.get_comptes_par_classe(self.entreprise_id, '6')   # Classe 6: Achats/Charges
+        comptes_vente = self.controller.get_comptes_par_classe(self.entreprise_id, '7')   # Classe 7: Ventes/Produits/Remises
         
         # Créer les ComboBox pour chaque type de compte
         caisse_combo = QComboBox()
@@ -287,6 +288,12 @@ class ComptesWidget(QWidget):
         achat_combo.addItem("-- Sélectionner --", None)
         for c in comptes_achat:
             achat_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+            
+        remise_combo = QComboBox()
+        remise_combo.addItem("-- Sélectionner --", None)
+        for c in comptes_vente:
+            if 'remise' in c.nom.lower() or 'rabais' in c.nom.lower() or str(c.numero).startswith('709'):  # Généralement 709x pour remises
+                remise_combo.addItem(f"{c.numero} - {c.nom}", c.id)
         
         # Ajouter les champs au formulaire
         layout.addRow(QLabel("Compte caisse (classe 5) :"), caisse_combo)
@@ -295,6 +302,7 @@ class ComptesWidget(QWidget):
         layout.addRow(QLabel("Compte fournisseur (classe 4) :"), fournisseur_combo)
         layout.addRow(QLabel("Compte TVA (classe 44) :"), tva_combo)
         layout.addRow(QLabel("Compte achat (classe 6) :"), achat_combo)
+        layout.addRow(QLabel("Compte remise (classe 7) :"), remise_combo)
         
         # Fonction pour charger la configuration d'un POS
         def load_config_for_pos():
@@ -309,9 +317,10 @@ class ComptesWidget(QWidget):
                     self._set_combo_value(fournisseur_combo, config.compte_fournisseur_id)
                     self._set_combo_value(tva_combo, config.compte_tva_id)
                     self._set_combo_value(achat_combo, config.compte_achat_id)
+                    self._set_combo_value(remise_combo, config.compte_remise_id)
                 else:
                     # Remettre à zéro si pas de config
-                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo]:
+                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo, remise_combo]:
                         combo.setCurrentIndex(0)  # "-- Sélectionner --"
         
         # Connecter le changement de POS
@@ -341,7 +350,8 @@ class ComptesWidget(QWidget):
                     compte_client_id=client_combo.currentData(),
                     compte_fournisseur_id=fournisseur_combo.currentData(),
                     compte_tva_id=tva_combo.currentData(),
-                    compte_achat_id=achat_combo.currentData()
+                    compte_achat_id=achat_combo.currentData(),
+                    compte_remise_id=remise_combo.currentData()
                 )
                 QMessageBox.information(self, "Configuration enregistrée", 
                                       f"La configuration des comptes pour le point de vente '{pos_combo.currentText()}' a bien été enregistrée.")
