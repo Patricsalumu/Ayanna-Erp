@@ -5,6 +5,7 @@ Génération de PDF A4 (réservation complète) et tickets 53mm (reçus)
 
 import os
 import io
+import sys
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -14,24 +15,53 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfgen import canvas
 
+# Import du contrôleur d'entreprise
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+try:
+    from ayanna_erp.core.entreprise_controller import EntrepriseController
+except ImportError:
+    EntrepriseController = None
+
 
 class PaymentPrintManager:
     """Gestionnaire d'impression pour les paiements et réservations"""
     
     def __init__(self):
-        self.company_info = {
-            'name': 'AYANNA ERP',
-            'address': '123 Avenue de la République',
-            'city': 'Kinshasa, RDC',
-            'phone': '+243 123 456 789',
-            'email': 'contact@ayanna-erp.com',
-            'rccm': 'CD/KIN/RCCM/23-B-1234',
-            'logo_path': 'assets/logo.png'  # Chemin vers le logo
-        }
+        # Initialiser le contrôleur d'entreprise
+        self.entreprise_controller = EntrepriseController() if EntrepriseController else None
+        
+        # Récupérer les informations de l'entreprise depuis la BDD
+        if self.entreprise_controller:
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf()
+        else:
+            # Fallback aux données statiques
+            self.company_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'city': 'Kinshasa, RDC',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234',
+                'logo_path': 'assets/logo.png'
+            }
         
         # Styles pour les documents
         self.styles = getSampleStyleSheet()
         self.setup_custom_styles()
+    
+    def get_currency_symbol(self):
+        """Récupérer le symbole de devise de l'entreprise"""
+        if self.entreprise_controller:
+            return self.entreprise_controller.get_currency_symbol()
+        else:
+            return "$"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formater un montant avec la devise de l'entreprise"""
+        if self.entreprise_controller:
+            return self.entreprise_controller.format_amount(amount)
+        else:
+            return f"{amount:.2f} €"  # Fallback
     
     def setup_custom_styles(self):
         """Configurer les styles personnalisés"""
@@ -198,14 +228,16 @@ class PaymentPrintManager:
             for service in reservation_data['services']:
                 total_line = service['quantity'] * service['unit_price']
                 total_services += total_line
+                currency_symbol = self.get_currency_symbol()
                 services_data.append([
                     service['name'],
                     str(service['quantity']),
-                    f"{service['unit_price']:.2f} €",
-                    f"{total_line:.2f} €"
+                    f"{service['unit_price']:.2f} {currency_symbol}",
+                    f"{total_line:.2f} {currency_symbol}"
                 ])
             
-            services_data.append(['', '', 'TOTAL SERVICES:', f"{total_services:.2f} €"])
+            currency_symbol = self.get_currency_symbol()
+            services_data.append(['', '', 'TOTAL SERVICES:', f"{total_services:.2f} {currency_symbol}"])
             
             services_table = Table(services_data, colWidths=[8*cm, 2*cm, 3*cm, 3*cm])
             services_table.setStyle(TableStyle([
@@ -231,14 +263,16 @@ class PaymentPrintManager:
             for product in reservation_data['products']:
                 total_line = product['quantity'] * product['unit_price']
                 total_products += total_line
+                currency_symbol = self.get_currency_symbol()
                 products_data.append([
                     product['name'],
                     str(product['quantity']),
-                    f"{product['unit_price']:.2f} €",
-                    f"{total_line:.2f} €"
+                    f"{product['unit_price']:.2f} {currency_symbol}",
+                    f"{total_line:.2f} {currency_symbol}"
                 ])
             
-            products_data.append(['', '', 'TOTAL PRODUITS:', f"{total_products:.2f} €"])
+            currency_symbol = self.get_currency_symbol()
+            products_data.append(['', '', 'TOTAL PRODUITS:', f"{total_products:.2f} {currency_symbol}"])
             
             products_table = Table(products_data, colWidths=[8*cm, 2*cm, 3*cm, 3*cm])
             products_table.setStyle(TableStyle([
@@ -257,13 +291,14 @@ class PaymentPrintManager:
         # Récapitulatif financier
         story.append(Paragraph("RÉCAPITULATIF FINANCIER", self.styles['CustomHeading']))
         
+        currency_symbol = self.get_currency_symbol()
         financial_data = [
-            ['Total Services:', f"{reservation_data.get('total_services', 0):.2f} €"],
-            ['Total Produits:', f"{reservation_data.get('total_products', 0):.2f} €"],
-            ['Sous-total:', f"{reservation_data.get('subtotal', 0):.2f} €"],
-            ['TVA:', f"{reservation_data.get('tax_amount', 0):.2f} €"],
-            ['Remise:', f"{reservation_data.get('discount_amount', 0):.2f} €"],
-            ['TOTAL NET À PAYER:', f"{reservation_data.get('total_amount', 0):.2f} €"]
+            ['Total Services:', f"{reservation_data.get('total_services', 0):.2f} {currency_symbol}"],
+            ['Total Produits:', f"{reservation_data.get('total_products', 0):.2f} {currency_symbol}"],
+            ['Sous-total:', f"{reservation_data.get('subtotal', 0):.2f} {currency_symbol}"],
+            ['TVA:', f"{reservation_data.get('tax_amount', 0):.2f} {currency_symbol}"],
+            ['Remise:', f"{reservation_data.get('discount_amount', 0):.2f} {currency_symbol}"],
+            ['TOTAL NET À PAYER:', f"{reservation_data.get('total_amount', 0):.2f} {currency_symbol}"]
         ]
         
         financial_table = Table(financial_data, colWidths=[12*cm, 4*cm])
@@ -335,16 +370,18 @@ class PaymentPrintManager:
                     # Limiter la longueur pour éviter le débordement
                     user_name = user_name_clean[:20] if len(user_name_clean) > 20 else user_name_clean
                 
+                currency_symbol = self.get_currency_symbol()
                 payment_data.append([
                     payment_date,
-                    f"{payment.get('amount', 0):.2f} €",
+                    f"{payment.get('amount', 0):.2f} {currency_symbol}",
                     payment.get('payment_method', 'N/A'),
                     user_name
                 ])
             
             balance = reservation_data.get('total_amount', 0) - total_paid
-            payment_data.append(['', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} €"])
-            payment_data.append(['', '', 'RESTE À PAYER:', f"{balance:.2f} €"])
+            currency_symbol = self.get_currency_symbol()
+            payment_data.append(['', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} {currency_symbol}"])
+            payment_data.append(['', '', 'RESTE À PAYER:', f"{balance:.2f} {currency_symbol}"])
             
             # Ajuster les largeurs de colonnes pour éviter le débordement (4 colonnes maintenant)
             payment_table = Table(payment_data, colWidths=[4*cm, 3*cm, 4*cm, 5*cm])
@@ -428,8 +465,8 @@ class PaymentPrintManager:
         from reportlab.lib.pagesizes import A4
         from reportlab.platypus import SimpleDocTemplate
         doc = SimpleDocTemplate(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT),
-                              rightMargin=2*mm, leftMargin=2*mm, 
-                              topMargin=2*mm, bottomMargin=2*mm)
+                              rightMargin=1*mm, leftMargin=1*mm, 
+                              topMargin=1*mm, bottomMargin=1*mm)
         
         # Créer le canvas pour dessiner
         c = canvas.Canvas(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT))
@@ -451,32 +488,32 @@ class PaymentPrintManager:
                 pass
         
         # Nom de l'entreprise
-        c.setFont('Helvetica-Bold', 7)
+        c.setFont('Helvetica-Bold', 12)  # Augmenté de 7 à 12
         text = self.company_info['name'][:30]  # Limiter la longueur
-        text_width = c.stringWidth(text, 'Helvetica-Bold', 7)
+        text_width = c.stringWidth(text, 'Helvetica-Bold', 12)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, text)
         y_position -= line_height
         
         # Coordonnées entreprise (police très petite)
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
         for info in [self.company_info['phone'], self.company_info['email']]:
             if info:
                 info_text = info[:35]  # Limiter la longueur
-                text_width = c.stringWidth(info_text, 'Helvetica', 5)
+                text_width = c.stringWidth(info_text, 'Helvetica', 10)
                 c.drawString((TICKET_WIDTH - text_width) / 2, y_position, info_text)
                 y_position -= 2.5*mm
         
         # Adresse sur une ligne
         if self.company_info['address']:
             address_text = self.company_info['address'][:40]
-            text_width = c.stringWidth(address_text, 'Helvetica', 5)
+            text_width = c.stringWidth(address_text, 'Helvetica', 10)
             c.drawString((TICKET_WIDTH - text_width) / 2, y_position, address_text)
             y_position -= 2.5*mm
         
         # RCCM
         if self.company_info['rccm']:
             rccm_text = self.company_info['rccm'][:30]
-            text_width = c.stringWidth(rccm_text, 'Helvetica', 5)
+            text_width = c.stringWidth(rccm_text, 'Helvetica', 10)
             c.drawString((TICKET_WIDTH - text_width) / 2, y_position, rccm_text)
             y_position -= 2.5*mm
         
@@ -486,14 +523,14 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Titre du reçu
-        c.setFont('Helvetica-Bold', 8)
+        c.setFont('Helvetica-Bold', 14)  # Augmenté de 8 à 14
         title = "RECU DE PAIEMENT"
-        text_width = c.stringWidth(title, 'Helvetica-Bold', 8)
+        text_width = c.stringWidth(title, 'Helvetica-Bold', 14)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, title)
         y_position -= line_height + 2*mm
         
         # Informations de base de la réservation (format compact)
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
         
         # Référence
         ref_text = f"Ref: {reservation_data.get('reference', 'N/A')[:15]}"
@@ -529,7 +566,7 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Détail de chaque paiement
-        c.setFont('Helvetica-Bold', 6)
+        c.setFont('Helvetica-Bold', 11)  # Augmenté de 6 à 11
         c.drawString(2*mm, y_position, "DETAIL PAIEMENTS:")
         y_position -= 3*mm
         
@@ -541,13 +578,14 @@ class PaymentPrintManager:
                 total_paid += payment_amount
                 
                 # Numéro et montant sur une ligne
-                c.setFont('Helvetica-Bold', 5)
-                payment_line = f"#{i}: {payment_amount:.2f} EUR"
+                c.setFont('Helvetica-Bold', 10)  # Augmenté de 5 à 10
+                currency_symbol = self.get_currency_symbol()
+                payment_line = f"#{i}: {payment_amount:.2f} {currency_symbol}"
                 c.drawString(2*mm, y_position, payment_line)
                 y_position -= 2.5*mm
                 
                 # Méthode
-                c.setFont('Helvetica', 4)
+                c.setFont('Helvetica', 8)  # Augmenté de 4 à 8
                 method_text = payment.get('payment_method', 'N/A')[:20]
                 c.drawString(3*mm, y_position, method_text)
                 y_position -= 2*mm
@@ -568,7 +606,7 @@ class PaymentPrintManager:
                     c.line(3*mm, y_position, TICKET_WIDTH - 3*mm, y_position)
                     y_position -= 2*mm
         else:
-            c.setFont('Helvetica', 5)
+            c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
             c.drawString(2*mm, y_position, "Aucun paiement")
             y_position -= 3*mm
         
@@ -577,27 +615,28 @@ class PaymentPrintManager:
         c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
         y_position -= 3*mm
         
-        c.setFont('Helvetica-Bold', 6)
+        c.setFont('Helvetica-Bold', 11)  # Augmenté de 6 à 11
         c.drawString(2*mm, y_position, "RECAPITULATIF:")
         y_position -= 3*mm
         
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
         total_amount = reservation_data.get('total_amount', 0)
         balance = total_amount - total_paid
+        currency_symbol = self.get_currency_symbol()
         
         # Total à payer
-        total_text = f"Total: {total_amount:.2f} EUR"
+        total_text = f"Total: {total_amount:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, total_text)
         y_position -= 2.5*mm
         
         # Total payé
-        paid_text = f"Paye: {total_paid:.2f} EUR"
+        paid_text = f"Paye: {total_paid:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, paid_text)
         y_position -= 2.5*mm
         
         # Reste à payer
-        c.setFont('Helvetica-Bold', 5)
-        balance_text = f"Reste: {balance:.2f} EUR"
+        c.setFont('Helvetica-Bold', 10)  # Augmenté de 5 à 10
+        balance_text = f"Reste: {balance:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, balance_text)
         y_position -= 3*mm
         
@@ -606,10 +645,10 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Filigrane Ayanna ERP
-        c.setFont('Helvetica', 4)
+        c.setFont('Helvetica', 8)  # Augmenté de 4 à 8
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
         filigrane_text = f"Ayanna ERP (c) {generation_time}"
-        text_width = c.stringWidth(filigrane_text, 'Helvetica', 4)
+        text_width = c.stringWidth(filigrane_text, 'Helvetica', 8)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
         
         # Sauvegarder le PDF

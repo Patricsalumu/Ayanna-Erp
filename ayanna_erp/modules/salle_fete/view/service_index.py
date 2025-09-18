@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.service_controller import ServiceController
 from .service_form import ServiceForm
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ServiceIndex(QWidget):
@@ -33,6 +34,9 @@ class ServiceIndex(QWidget):
         
         # Initialiser le contrôleur service
         self.service_controller = ServiceController(pos_id=getattr(main_controller, 'pos_id', 1))
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
         
         # Connecter les signaux du contrôleur
         self.service_controller.services_loaded.connect(self.on_services_loaded)
@@ -49,6 +53,20 @@ class ServiceIndex(QWidget):
         
         # Charger les services après initialisation
         QTimer.singleShot(100, self.load_services)
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "$"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} $"  # Fallback
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -143,9 +161,9 @@ class ServiceIndex(QWidget):
         
         # Table des services (côté gauche)
         self.services_table = QTableWidget()
-        self.services_table.setColumnCount(6)
+        self.services_table.setColumnCount(7)
         self.services_table.setHorizontalHeaderLabels([
-            "ID", "Nom du service", "Cout", "Prix ", "Marge", "Statut"
+            "ID", "Nom du service", "Cout", "Prix ", "Marge", "Compte", "Statut"
         ])
         
         # Configuration du tableau
@@ -206,7 +224,7 @@ class ServiceIndex(QWidget):
         usage_stats_layout = QFormLayout(usage_stats_group)
         
         self.times_used_label = QLabel("0")
-        self.total_revenue_label = QLabel("0.00 €")
+        self.total_revenue_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.last_used_label = QLabel("-")
         self.avg_quantity_label = QLabel("-")
         
@@ -272,7 +290,7 @@ class ServiceIndex(QWidget):
             # Mettre à jour les détails du service
             self.service_name_label.setText(service.name)
             self.service_category_label.setText(getattr(service, 'category', 'Non spécifiée'))
-            self.service_price_label.setText(f"{service.price:.2f} €")
+            self.service_price_label.setText(self.format_amount(service.price))
             self.service_unit_label.setText(getattr(service, 'unit', 'Service'))
             self.service_status_label.setText("Actif" if service.is_active else "Inactif")
             self.service_description_label.setText(service.description or "Aucune description")
@@ -292,7 +310,7 @@ class ServiceIndex(QWidget):
             if stats:
                 # Mettre à jour les labels avec les vraies données
                 self.times_used_label.setText(str(stats['total_uses']))
-                self.total_revenue_label.setText(f"{stats['total_revenue']:.2f} €")
+                self.total_revenue_label.setText(self.format_amount(stats['total_revenue']))
                 
                 # Formatage de la dernière utilisation
                 if stats['last_used']:
@@ -312,7 +330,7 @@ class ServiceIndex(QWidget):
             else:
                 # Aucune statistique disponible
                 self.times_used_label.setText("0")
-                self.total_revenue_label.setText("0.00 €")
+                self.total_revenue_label.setText(f"0.00 {self.get_currency_symbol()}")
                 self.last_used_label.setText("Jamais utilisé")
                 self.avg_quantity_label.setText("0")
                 
@@ -347,7 +365,7 @@ class ServiceIndex(QWidget):
                     quantity = usage['quantity']
                     total_line = usage['total_line']
                     
-                    usage_text = f"{date_str} - {client_name} - Qté: {quantity} - {total_line:.2f} €"
+                    usage_text = f"{date_str} - {client_name} - Qté: {quantity} - {self.format_amount(total_line)}"
                     self.recent_usage_list.addItem(usage_text)
             else:
                 # Aucune utilisation trouvée
@@ -443,27 +461,42 @@ class ServiceIndex(QWidget):
             
             # Coût
             cost = float(service.cost or 0)
-            self.services_table.setItem(row, 2, QTableWidgetItem(f"{cost:.2f} €"))
+            self.services_table.setItem(row, 2, QTableWidgetItem(self.format_amount(cost)))
             
             # Prix
             price = float(service.price or 0)
-            self.services_table.setItem(row, 3, QTableWidgetItem(f"{price:.2f} €"))
+            self.services_table.setItem(row, 3, QTableWidgetItem(self.format_amount(price)))
             
             # Marge
             margin = price - cost
-            margin_item = QTableWidgetItem(f"{margin:.2f} €")
+            margin_item = QTableWidgetItem(self.format_amount(margin))
             if margin < 0:
                 margin_item.setBackground(Qt.GlobalColor.red)
             elif margin > 0:
                 margin_item.setBackground(Qt.GlobalColor.green)
             self.services_table.setItem(row, 4, margin_item)
             
+            # Compte comptable
+            account_text = "Non défini"
+            if hasattr(service, 'account_id') and service.account_id:
+                try:
+                    # Importer ici pour éviter les imports circulaires
+                    from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+                    comptabilite_controller = ComptabiliteController()
+                    compte = comptabilite_controller.get_compte_by_id(service.account_id)
+                    if compte:
+                        account_text = f"{compte.numero} - {compte.nom}"
+                except Exception as e:
+                    print(f"Erreur lors de la récupération du compte: {e}")
+                    account_text = "Erreur"
+            self.services_table.setItem(row, 5, QTableWidgetItem(account_text))
+            
             # Statut
             status = "Actif" if service.is_active else "Inactif"
             status_item = QTableWidgetItem(status)
             if not service.is_active:
                 status_item.setBackground(Qt.GlobalColor.lightGray)
-            self.services_table.setItem(row, 5, status_item)
+            self.services_table.setItem(row, 6, status_item)
         
         # Cacher la colonne ID
         self.services_table.hideColumn(0)
@@ -551,5 +584,5 @@ class ServiceIndex(QWidget):
         if hasattr(self, 'stats_label'):
             self.stats_label.setText(
                 f"Services: {active_services}/{total_services} actifs | "
-                f"Marge totale: {total_margin:.2f} €"
+                f"Marge totale: {self.format_amount(total_margin)}"
             )

@@ -13,17 +13,17 @@ class CompteResultatWidget(QWidget):
         self.controller = controller
         self.session = getattr(controller, 'session', None)
         self.entreprise_id = getattr(parent, 'entreprise_id', None) if parent is not None else None
-        # Pré-charger la devise de l'entreprise
+        # Pré-charger la devise de l'entreprise via le parent
         self.devise = ""
-        if self.session and self.entreprise_id:
+        if parent and hasattr(parent, 'get_currency_symbol'):
             try:
-                from core.controllers.ecole_controller import EcoleController
-                ecole_ctrl = EcoleController(self.session)
-                entreprise = ecole_ctrl.get_school_by_id(self.entreprise_id)
-                if entreprise:
-                    self.devise = getattr(entreprise, 'devise', '') or ''
-            except Exception:
-                self.devise = ''
+                self.devise = parent.get_currency_symbol()
+            except Exception as e:
+                print(f"[DEBUG] CompteResultatWidget: Erreur lors de l'obtention de la devise: {e}")
+                self.devise = "€"  # Fallback
+        else:
+            print(f"[DEBUG] CompteResultatWidget: parent sans get_currency_symbol(), devise par défaut")
+            self.devise = "€"  # Fallback
         self.layout = QVBoxLayout(self)
         # Filtres date
         filter_layout = QHBoxLayout()

@@ -1,6 +1,18 @@
 """
 GrandLivreWidget - Onglet Grand Livre Comptable
-Affiche tous les comptes avec totaux débit, crédit, solde. Double-clic = détail écritures.
+Affiche tous les comptes ave        # Largeurs par défaut
+        self.table.setColumnWidth(0, 120)
+        self.table.setColumnWidth(1, 200)
+        self.table.setColumnWidth(2, 120)
+        self.table.setColumnWidth(3, 120)
+        
+        # Configuration finale des colonnes maintenant qu'elles existent
+        header = self.table.horizontalHeader()
+        from PyQt6.QtWidgets import QHeaderView
+        col_count = self.model.columnCount()
+        if col_count > 0:
+            # Appliquer Stretch sur la dernière colonne
+            header.setSectionResizeMode(col_count-1, QHeaderView.ResizeMode.Stretch)aux débit, crédit, solde. Double-clic = détail écritures.
 """
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QDialog
 from PyQt6.QtGui import QStandardItemModel
@@ -10,21 +22,17 @@ class GrandLivreWidget(QWidget):
         self.controller = controller
         self.session = getattr(controller, 'session', None)
         self.entreprise_id = getattr(parent, 'entreprise_id', None) if parent is not None else None
-        # Pré-charger la devise de l'entreprise
+        # Pré-charger la devise de l'entreprise via le parent
         self.devise = ""
-        if self.session and self.entreprise_id:
+        if parent and hasattr(parent, 'get_currency_symbol'):
             try:
-                from core.controllers.ecole_controller import EcoleController
-                ecole_ctrl = EcoleController(self.session)
-                entreprise = ecole_ctrl.get_school_by_id(self.entreprise_id)
-                if entreprise:
-                    self.devise = getattr(entreprise, 'devise', '') or ''
-                else:
-                    print("[DEBUG] GrandLivreWidget: entreprise is None")
+                self.devise = parent.get_currency_symbol()
             except Exception as e:
-                self.devise = ''
+                print(f"[DEBUG] GrandLivreWidget: Erreur lors de l'obtention de la devise: {e}")
+                self.devise = "€"  # Fallback
         else:
-            print(f"[DEBUG] GrandLivreWidget: session or entreprise_id missing: session={self.session}, entreprise_id={self.entreprise_id}")
+            print(f"[DEBUG] GrandLivreWidget: parent sans get_currency_symbol(), devise par défaut")
+            self.devise = "€"  # Fallback
         try:
             self.layout = QVBoxLayout(self)
             self.table = QTableView()
@@ -33,15 +41,9 @@ class GrandLivreWidget(QWidget):
             # Style uniforme
             self.table.setSelectionBehavior(self.table.SelectionBehavior.SelectRows)
             self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
-            self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
             header = self.table.horizontalHeader()
             from PyQt6.QtWidgets import QHeaderView
-            col_count = self.table.model().columnCount()
-            if col_count > 0:
-                # Appliquer Stretch sur la dernière colonne
-                header.setSectionResizeMode(col_count-1, QHeaderView.ResizeMode.Stretch)
-            else:
-                print("[DEBUG] GrandLivreWidget: aucune colonne, setSectionResizeMode Stretch ignoré")
+            # Configuration des colonnes sera faite après le chargement des données
             header.setSectionResizeMode(header.ResizeMode.Interactive)
             header.setStretchLastSection(True)
             self.table.setStyleSheet('''
@@ -126,7 +128,7 @@ class GrandLivreWidget(QWidget):
         model.setHorizontalHeaderLabels(headers)
         export_data = []
         # Import du modèle JournalComptable
-        from core.models.comptabilite import JournalComptable
+        from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaJournaux as JournalComptable
         total_debit = 0
         total_credit = 0
         for e in ecritures:

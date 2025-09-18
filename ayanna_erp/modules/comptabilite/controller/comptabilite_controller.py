@@ -10,6 +10,7 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.comptabilite.model.comptabilite import (
     ComptaClasses, ComptaComptes, ComptaJournaux, ComptaEcritures, ComptaConfig
 )
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 # Alias pour compatibilité avec l'ancien code
 CompteComptable = ComptaComptes
@@ -26,7 +27,52 @@ class ComptabiliteController:
     def __init__(self):
         self.db_manager = DatabaseManager()
         self.session = self.db_manager.get_session()
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
     
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
+    
+    def get_comptes_vente(self, entreprise_id=None):
+        """
+        Récupère la liste des comptes comptables de vente (classe 7)
+        pour utilisation dans les formulaires de services et produits
+        """
+        try:
+            # Récupérer les comptes de classe 7 (Produits/Ventes)
+            comptes = self.session.query(ComptaComptes).filter(
+                ComptaComptes.numero.like('7%')  # Comptes de classe 7
+            ).order_by(ComptaComptes.numero).all()
+            
+            return comptes
+        except Exception as e:
+            print(f"Erreur lors de la récupération des comptes de vente: {e}")
+            return []
+
+    def get_compte_by_id(self, compte_id):
+        """
+        Récupère un compte comptable par son ID
+        """
+        try:
+            compte = self.session.query(ComptaComptes).filter(
+                ComptaComptes.id == compte_id
+            ).first()
+            return compte
+        except Exception as e:
+            print(f"Erreur lors de la récupération du compte ID {compte_id}: {e}")
+            return None
+
     def get_bilan_comptable(self, entreprise_id, date_debut, date_fin):
         """
         Retourne un bilan comptable structuré pour une entreprise donnée.
@@ -245,7 +291,7 @@ class ComptabiliteController:
 
     def set_compte_config(self, enterprise_id, pos_id, compte_caisse_id=None, compte_banque_id=None, 
                          compte_client_id=None, compte_fournisseur_id=None, 
-                         compte_vente_id=None, compte_achat_id=None):
+                         compte_tva_id=None, compte_achat_id=None):
         """Crée ou met à jour la configuration des comptes pour une entreprise et un point de vente"""
         config = self.session.query(CompteConfig).filter_by(enterprise_id=enterprise_id, pos_id=pos_id).first()
         if config:
@@ -258,8 +304,8 @@ class ComptabiliteController:
                 config.compte_client_id = compte_client_id
             if compte_fournisseur_id is not None:
                 config.compte_fournisseur_id = compte_fournisseur_id
-            if compte_vente_id is not None:
-                config.compte_vente_id = compte_vente_id
+            if compte_tva_id is not None:
+                config.compte_tva_id = compte_tva_id
             if compte_achat_id is not None:
                 config.compte_achat_id = compte_achat_id
         else:
@@ -270,7 +316,7 @@ class ComptabiliteController:
                 compte_banque_id=compte_banque_id,
                 compte_client_id=compte_client_id,
                 compte_fournisseur_id=compte_fournisseur_id,
-                compte_vente_id=compte_vente_id,
+                compte_tva_id=compte_tva_id,
                 compte_achat_id=compte_achat_id
             )
             self.session.add(config)
@@ -370,9 +416,6 @@ class ComptabiliteController:
             self.session.rollback()
             return False, f"Erreur lors du transfert : {e}"
 
-
-    def __init__(self, session):
-        self.session = session
     # À compléter : méthodes pour journal, grand livre, balance, bilan, etc.
 
     def get_journaux_comptables(self, entreprise_id):
@@ -514,7 +557,11 @@ class ComptabiliteController:
     
 
     def _format_pdf_currency(self, value):
-        return f"{value:,.2f} Fcfa".replace(",", " ").replace(".00", "")
+        try:
+            currency_symbol = self.get_currency_symbol()
+            return f"{value:,.2f} {currency_symbol}".replace(",", " ").replace(".00", "")
+        except:
+            return f"{value:,.2f} €".replace(",", " ").replace(".00", "")
 
 
 

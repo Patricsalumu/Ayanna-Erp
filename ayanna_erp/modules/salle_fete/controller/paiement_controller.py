@@ -492,32 +492,59 @@ class PaiementController(QObject):
                 if not compte_debit:
                     print("⚠️  Le compte caisse configuré n'existe pas ou n'est pas actif.")
                 else:
-                    compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
-                    if not compte_credit:
-                        print("⚠️  Le compte client configuré n'existe pas ou n'est pas actif.")
+                    # Vérifier si le compte TVA est configuré
+                    compte_tva_id = config.compte_tva_id if hasattr(config, 'compte_tva_id') else None
+                    if compte_tva_id:
+                        compte_tva = session.query(CompteComptable).filter(CompteComptable.id == compte_tva_id).first()
+                        if not compte_tva:
+                            print("⚠️  Compte TVA configuré mais inexistant, TVA sera ignorée")
+                            compte_tva_id = None
+
+                    # NOUVELLE LOGIQUE : Calculer la répartition du paiement selon les comptes spécifiques
+                    repartition = self.calculer_repartition_paiement(reservation, payment_data['amount'])
+                    
+                    # Créer les écritures comptables réparties
+                    ecritures = self.creer_ecritures_comptables_reparties(
+                        session=session,
+                        reservation=reservation,
+                        payment=payment,
+                        repartition=repartition,
+                        compte_debit_id=compte_debit.id,
+                        compte_tva_id=compte_tva_id,
+                        journal_id=journal.id
+                    )
+                    
+                    if ecritures:
+                        print(f"📊 {len(ecritures)} écritures comptables créées avec répartition")
                     else:
-                        # Créer l'écriture comptable de débit (caisse augmente)
-                        ecriture_debit = EcritureComptable(
-                            journal_id=journal.id,
-                            compte_comptable_id=compte_debit.id,
-                            debit=payment_data['amount'],
-                            credit=0,
-                            ordre=1,
-                            libelle=f"Encaissement - {reservation.get_client_name()}"
-                        )
-                        session.add(ecriture_debit)
-                        
-                        # Créer l'écriture comptable de crédit (client diminue - paiement reçu)
-                        ecriture_credit = EcritureComptable(
-                            journal_id=journal.id,
-                            compte_comptable_id=compte_credit.id,
-                            debit=0,
-                            credit=payment_data['amount'],
-                            ordre=2,
-                            libelle=f"Paiement reçu - {reservation.get_client_name()}"
-                        )
-                        session.add(ecriture_credit)
-                        print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
+                        # Fallback à l'ancienne méthode si problème
+                        print("⚠️  Fallback: création d'écriture simple")
+                        compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
+                        if not compte_credit:
+                            print("⚠️  Le compte vente configuré n'existe pas ou n'est pas actif.")
+                        else:
+                            # Créer l'écriture comptable de débit (caisse augmente)
+                            ecriture_debit = EcritureComptable(
+                                journal_id=journal.id,
+                                compte_comptable_id=compte_debit.id,
+                                debit=payment_data['amount'],
+                                credit=0,
+                                ordre=1,
+                                libelle=f"Encaissement - {reservation.get_client_name()}"
+                            )
+                            session.add(ecriture_debit)
+                            
+                            # Créer l'écriture comptable de crédit (client diminue - paiement reçu)
+                            ecriture_credit = EcritureComptable(
+                                journal_id=journal.id,
+                                compte_comptable_id=compte_credit.id,
+                                debit=0,
+                                credit=payment_data['amount'],
+                                ordre=2,
+                                libelle=f"Paiement reçu - {reservation.get_client_name()}"
+                            )
+                            session.add(ecriture_credit)
+                            print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
             
             session.commit()
             
@@ -767,4 +794,238 @@ class PaiementController(QObject):
         except Exception as e:
             print(f"Erreur lors de la récupération des paiements par date et POS: {str(e)}")
             self.error_occurred.emit(f"Erreur lors de la récupération des paiements: {str(e)}")
+            return []
+
+    def calculer_repartition_paiement(self, reservation, montant_paiement):
+        """
+        Calcule la répartition proportionnelle d'un paiement selon les comptes spécifiques
+        
+        NOUVELLE LOGIQUE CORRECTE :
+        1. Calculer le total de chaque service/produit (HT et TTC)
+        2. Calculer le pourcentage de chaque élément par rapport au total TTC
+        3. Répartir le paiement selon ces pourcentages exacts
+        4. La TVA est calculée proportionnellement aussi
+        
+        Args:
+            reservation: Instance de EventReservation
+            montant_paiement: Montant du paiement à répartir
+            
+        Returns:
+            dict: {
+                'services': {account_id: montant},
+                'produits': {account_id: montant},
+                'tva': montant_tva,
+                'total_ht': montant_ht
+            }
+        """
+        try:
+            repartition = {
+                'services': {},
+                'produits': {},
+                'tva': 0.0,
+                'total_ht': 0.0
+            }
+            
+            # Total TTC de la réservation
+            total_ttc = float(reservation.total_amount or 0)
+            taux_tva = float(reservation.tax_rate or 0) / 100
+            
+            if total_ttc <= 0:
+                print("⚠️  Total de la réservation = 0, aucune répartition possible")
+                return repartition
+            
+            print(f"📊 Répartition paiement: {montant_paiement} sur {total_ttc} ({montant_paiement/total_ttc:.2%})")
+            print(f"   Taux TVA: {taux_tva:.1%}")
+            
+            # === PHASE 1: CALCULER LES TOTAUX ET PROPORTIONS ===
+            
+            # Calculer les totaux des services
+            services_details = {}  # {account_id: {'total_ht': x, 'total_ttc': y, 'names': []}}
+            for service_item in reservation.services:
+                service = service_item.service
+                if service and hasattr(service, 'account_id') and service.account_id:
+                    line_total_ttc = float(service_item.line_total or 0)
+                    line_total_ht = line_total_ttc / (1 + taux_tva)
+                    
+                    account_id = service.account_id
+                    if account_id not in services_details:
+                        services_details[account_id] = {'total_ht': 0, 'total_ttc': 0, 'names': []}
+                    
+                    services_details[account_id]['total_ht'] += line_total_ht
+                    services_details[account_id]['total_ttc'] += line_total_ttc
+                    services_details[account_id]['names'].append(service.name)
+            
+            # Calculer les totaux des produits
+            produits_details = {}  # {account_id: {'total_ht': x, 'total_ttc': y, 'names': []}}
+            for product_item in reservation.products:
+                product = product_item.product
+                if product and hasattr(product, 'account_id') and product.account_id:
+                    line_total_ttc = float(product_item.line_total or 0)
+                    line_total_ht = line_total_ttc / (1 + taux_tva)
+                    
+                    account_id = product.account_id
+                    if account_id not in produits_details:
+                        produits_details[account_id] = {'total_ht': 0, 'total_ttc': 0, 'names': []}
+                    
+                    produits_details[account_id]['total_ht'] += line_total_ht
+                    produits_details[account_id]['total_ttc'] += line_total_ttc
+                    produits_details[account_id]['names'].append(product.name)
+            
+            # === PHASE 2: RÉPARTITION PROPORTIONNELLE ===
+            
+            # Répartition des services
+            for account_id, details in services_details.items():
+                proportion = details['total_ttc'] / total_ttc
+                montant_service = montant_paiement * proportion
+                repartition['services'][account_id] = montant_service
+                
+                names_str = ', '.join(details['names'][:3])  # Max 3 noms
+                if len(details['names']) > 3:
+                    names_str += f" (+{len(details['names'])-3} autres)"
+                
+                print(f"  🛎️  Services [{names_str}]: {details['total_ttc']:.2f}€ TTC ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {account_id}")
+            
+            # Répartition des produits
+            for account_id, details in produits_details.items():
+                proportion = details['total_ttc'] / total_ttc
+                montant_produit = montant_paiement * proportion
+                repartition['produits'][account_id] = montant_produit
+                
+                names_str = ', '.join(details['names'][:3])  # Max 3 noms
+                if len(details['names']) > 3:
+                    names_str += f" (+{len(details['names'])-3} autres)"
+                
+                print(f"  📦 Produits [{names_str}]: {details['total_ttc']:.2f}€ TTC ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {account_id}")
+            
+            # === PHASE 3: CALCUL DE LA TVA ===
+            
+            # Total HT réparti
+            total_ht_reparti = sum(repartition['services'].values()) + sum(repartition['produits'].values())
+            
+            # TVA proportionnelle
+            if taux_tva > 0:
+                # Calculer la TVA totale de la réservation
+                tva_totale_reservation = total_ttc - (total_ttc / (1 + taux_tva))
+                proportion_tva = tva_totale_reservation / total_ttc
+                repartition['tva'] = montant_paiement * proportion_tva
+                
+                print(f"  🧾 TVA: {tva_totale_reservation:.2f}€ sur {total_ttc:.2f}€ ({proportion_tva:.1%}) -> {repartition['tva']:.2f}€")
+            else:
+                repartition['tva'] = 0.0
+                print(f"  🧾 TVA: 0.00€ (taux 0%)")
+            
+            repartition['total_ht'] = total_ht_reparti
+            
+            # === VÉRIFICATION ===
+            total_reparti = total_ht_reparti + repartition['tva']
+            ecart = abs(total_reparti - montant_paiement)
+            
+            print(f"  💰 Total HT: {total_ht_reparti:.2f}€")
+            print(f"  📊 Total réparti: {total_reparti:.2f}€ (écart: {ecart:.2f}€)")
+            
+            if ecart > 0.01:  # Plus de 1 centime d'écart
+                print(f"  ⚠️  Écart de répartition détecté: {ecart:.2f}€")
+            
+            return repartition
+            
+        except Exception as e:
+            print(f"❌ Erreur lors du calcul de répartition: {e}")
+            import traceback
+            traceback.print_exc()
+            return {
+                'services': {},
+                'produits': {},
+                'tva': 0.0,
+                'total_ht': 0.0
+            }
+
+    def creer_ecritures_comptables_reparties(self, session, reservation, payment, repartition, compte_debit_id, compte_tva_id, journal_id):
+        """
+        Crée les écritures comptables réparties selon les comptes spécifiques
+        
+        Args:
+            session: Session de base de données
+            reservation: Instance de EventReservation  
+            payment: Instance de EventPayment
+            repartition: Résultat de calculer_repartition_paiement
+            compte_debit_id: Compte caisse/banque (débit)
+            compte_tva_id: Compte TVA collectée
+            journal_id: Journal comptable
+            
+        Returns:
+            list: Liste des écritures créées
+        """
+        try:
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable
+            
+            ecritures = []
+            libelle_base = f"Paiement Réservation: {reservation.get_client_name()}"
+            
+            # === 1. ÉCRITURE DE DÉBIT (Caisse/Banque) ===
+            ecriture_debit = EcritureComptable(
+                journal_id=journal_id,
+                compte_comptable_id=compte_debit_id,
+                debit=payment.amount,
+                credit=0,
+                ordre=1,
+                libelle=libelle_base
+            )
+            session.add(ecriture_debit)
+            ecritures.append(ecriture_debit)
+            print(f"  📥 Débit: {payment.amount:.2f} sur compte {compte_debit_id}")
+            
+            ordre = 2
+            
+            # === 2. ÉCRITURES DE CRÉDIT POUR LES SERVICES ===
+            for account_id, montant in repartition['services'].items():
+                if montant > 0:
+                    ecriture_service = EcritureComptable(
+                        journal_id=journal_id,
+                        compte_comptable_id=account_id,
+                        debit=0,
+                        credit=montant,
+                        ordre=ordre,
+                        libelle=f"{libelle_base} - Services"
+                    )
+                    session.add(ecriture_service)
+                    ecritures.append(ecriture_service)
+                    print(f"  📤 Crédit Services: {montant:.2f} sur compte {account_id}")
+                    ordre += 1
+            
+            # === 3. ÉCRITURES DE CRÉDIT POUR LES PRODUITS ===
+            for account_id, montant in repartition['produits'].items():
+                if montant > 0:
+                    ecriture_produit = EcritureComptable(
+                        journal_id=journal_id,
+                        compte_comptable_id=account_id,
+                        debit=0,
+                        credit=montant,
+                        ordre=ordre,
+                        libelle=f"{libelle_base} - Produits"
+                    )
+                    session.add(ecriture_produit)
+                    ecritures.append(ecriture_produit)
+                    print(f"  📤 Crédit Produits: {montant:.2f} sur compte {account_id}")
+                    ordre += 1
+            
+            # === 4. ÉCRITURE DE CRÉDIT POUR LA TVA ===
+            if repartition['tva'] > 0 and compte_tva_id:
+                ecriture_tva = EcritureComptable(
+                    journal_id=journal_id,
+                    compte_comptable_id=compte_tva_id,
+                    debit=0,
+                    credit=repartition['tva'],
+                    ordre=ordre,
+                    libelle=f"{libelle_base} - TVA"
+                )
+                session.add(ecriture_tva)
+                ecritures.append(ecriture_tva)
+                print(f"  📤 Crédit TVA: {repartition['tva']:.2f} sur compte {compte_tva_id}")
+            
+            return ecritures
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la création des écritures: {e}")
+            import traceback
+            traceback.print_exc()
             return []

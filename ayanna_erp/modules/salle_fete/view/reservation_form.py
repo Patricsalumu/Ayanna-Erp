@@ -20,6 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.service_controller import ServiceController
 from controller.produit_controller import ProduitController
 from controller.reservation_controller import ReservationController
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ReservationForm(QDialog):
@@ -39,6 +40,9 @@ class ReservationForm(QDialog):
         self.service_controller = ServiceController(pos_id=pos_id)
         self.produit_controller = ProduitController(pos_id=pos_id)
         self.reservation_controller = ReservationController(pos_id=pos_id)
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
         
         # Lists pour stocker les cases à cocher
         self.service_checkboxes = []
@@ -62,6 +66,45 @@ class ReservationForm(QDialog):
             # Utiliser un timer pour retarder le chargement
             from PyQt6.QtCore import QTimer
             QTimer.singleShot(100, self.load_reservation_data)
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
+    
+    def parse_amount_from_text(self, text):
+        """Extrait un montant numérique depuis un texte formaté avec devise"""
+        try:
+            # Obtenir le symbole de devise actuel depuis EntrepriseController
+            from ayanna_erp.core.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            currency_symbol = entreprise_controller.get_currency_symbol()
+            
+            # Supprimer le symbole de devise et les espaces
+            clean_text = text.replace(f" {currency_symbol}", "").replace(currency_symbol, "").strip()
+            
+            # Remplacer les virgules par des points pour la conversion décimale
+            clean_text = clean_text.replace(",", ".")
+            
+            # Convertir en float
+            return float(clean_text)
+        except Exception as e:
+            print(f"Erreur lors du parsing du montant '{text}': {e}")
+            # Essayer avec les anciens symboles en fallback
+            try:
+                fallback_text = text.replace(" €", "").replace(" $", "").replace(" FC", "").replace("€", "").replace("$", "").replace("FC", "").replace(",", ".").strip()
+                return float(fallback_text)
+            except:
+                return 0.0
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -224,7 +267,7 @@ class ReservationForm(QDialog):
         totals_group = QGroupBox("Résumé financier")
         totals_layout = QGridLayout(totals_group)
         
-        self.subtotal_label = QLabel("0.00 €")
+        self.subtotal_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.discount_spinbox = QDoubleSpinBox()
         self.discount_spinbox.setRange(0, 100)
         self.discount_spinbox.setSuffix(" %")
@@ -236,17 +279,17 @@ class ReservationForm(QDialog):
         self.tax_rate_spinbox.setSuffix(" %")
         self.tax_rate_spinbox.valueChanged.connect(self.calculate_totals)
         
-        self.tax_amount_label = QLabel("0.00 €")
-        self.total_label = QLabel("0.00 €")
+        self.tax_amount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.total_label.setStyleSheet("font-weight: bold; font-size: 16px; color: #E74C3C;")
         
         # Acompte
         self.deposit_spinbox = QDoubleSpinBox()
         self.deposit_spinbox.setRange(0, 999999)
-        self.deposit_spinbox.setSuffix(" €")
+        self.deposit_spinbox.setSuffix(f" {self.get_currency_symbol()}")
         self.deposit_spinbox.valueChanged.connect(self.calculate_totals)
         
-        self.remaining_label = QLabel("0.00 €")
+        self.remaining_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.remaining_label.setStyleSheet("font-weight: bold; color: #F39C12;")
         
         # Ligne 1: Sous-total et Remise
@@ -672,10 +715,10 @@ class ReservationForm(QDialog):
         remaining = total_ttc - deposit
         
         # Mettre à jour les labels
-        self.subtotal_label.setText(f"{subtotal:.2f} €")
-        self.tax_amount_label.setText(f"{tax_amount:.2f} €")
-        self.total_label.setText(f"{total_ttc:.2f} €")
-        self.remaining_label.setText(f"{remaining:.2f} €")
+        self.subtotal_label.setText(self.format_amount(subtotal))
+        self.tax_amount_label.setText(self.format_amount(tax_amount))
+        self.total_label.setText(self.format_amount(total_ttc))
+        self.remaining_label.setText(self.format_amount(remaining))
         
         # Changer la couleur du solde selon le montant
         if remaining <= 0:
@@ -837,13 +880,13 @@ class ReservationForm(QDialog):
             'event_type': self.event_type_combo.currentText(),
             'guests': self.guests_spinbox.value(),
             'notes': self.notes_edit.toPlainText().strip(),
-            'subtotal': float(self.subtotal_label.text().replace(" €", "").replace(",", ".")),
+            'subtotal': self.parse_amount_from_text(self.subtotal_label.text()),
             'discount': self.discount_spinbox.value(),
             'tax_rate': self.tax_rate_spinbox.value(),
-            'tax_amount': float(self.tax_amount_label.text().replace(" €", "").replace(",", ".")),
-            'total': float(self.total_label.text().replace(" €", "").replace(",", ".")),
+            'tax_amount': self.parse_amount_from_text(self.tax_amount_label.text()),
+            'total': self.parse_amount_from_text(self.total_label.text()),
             'deposit': self.deposit_spinbox.value(),
-            'remaining': float(self.remaining_label.text().replace(" €", "").replace(",", ".")),
+            'remaining': self.parse_amount_from_text(self.remaining_label.text()),
             'status': self.status_combo.currentText() if self.is_edit_mode else 'En attente',
             'items': []
         }

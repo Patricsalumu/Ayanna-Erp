@@ -22,7 +22,7 @@ from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtCore import Qt, QDate
 import datetime
 
-from comptabilite.controller.comptabilite_controller import ComptabiliteController
+from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
 class JournalWidget(QWidget):
 
     def __init__(self, controller, parent=None):
@@ -32,8 +32,16 @@ class JournalWidget(QWidget):
         self.session = getattr(controller, 'session', None)
         # On tente de récupérer entreprise_id depuis le parent si possible
         self.entreprise_id = getattr(parent, 'entreprise_id', None) if parent is not None else None
-        # Pré-charger la devise de l'entreprise (utilise une valeur par défaut pour l'instant)
-        self.devise = "CDF"  # Devise par défaut
+        # Pré-charger la devise de l'entreprise via le parent
+        if parent and hasattr(parent, 'get_currency_symbol'):
+            try:
+                self.devise = parent.get_currency_symbol()
+            except Exception as e:
+                print(f"[DEBUG] JournalWidget: Erreur lors de l'obtention de la devise: {e}")
+                self.devise = "€"  # Fallback
+        else:
+            print(f"[DEBUG] JournalWidget: parent sans get_currency_symbol(), devise par défaut")
+            self.devise = "€"  # Fallback
 
         self.layout = QVBoxLayout(self)
 

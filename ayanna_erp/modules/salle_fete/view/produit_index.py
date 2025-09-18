@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.produit_controller import ProduitController
 from .produit_form import ProduitForm
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ProduitIndex(QWidget):
@@ -33,6 +34,9 @@ class ProduitIndex(QWidget):
         
         # Initialiser le contrôleur produit
         self.produit_controller = ProduitController(pos_id=getattr(main_controller, 'pos_id', 1))
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
         
         # Connecter les signaux du contrôleur
         self.produit_controller.products_loaded.connect(self.on_products_loaded)
@@ -49,6 +53,20 @@ class ProduitIndex(QWidget):
         
         # Charger les produits après initialisation
         QTimer.singleShot(100, self.load_products)
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -174,9 +192,9 @@ class ProduitIndex(QWidget):
         
         # Table des produits (côté gauche)
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(9)
+        self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels([
-            "ID", "Nom du produit", "Catégorie", "Cout", "Prix unitaire", "Seuil min.", "Unité", "Stock", "Statut"
+            "ID", "Nom du produit", "Catégorie", "Cout", "Prix unitaire", "Seuil min.", "Unité", "Stock", "Compte", "Statut"
         ])
         
         # Configuration du tableau
@@ -267,7 +285,7 @@ class ProduitIndex(QWidget):
         
         self.times_sold_label = QLabel("0")
         self.total_sold_label = QLabel("0")
-        self.total_revenue_label = QLabel("0.00 €")
+        self.total_revenue_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.last_sold_label = QLabel("-")
         self.avg_quantity_label = QLabel("-")
         
@@ -306,12 +324,12 @@ class ProduitIndex(QWidget):
         # TODO: Implémenter le chargement depuis la base de données
         # Pour l'instant, on utilise des données de test
         sample_data = [
-            ["001", "Champagne Moët & Chandon", "Boissons", "45.00 €", "25", "10", "bouteille", "En stock"],
-            ["002", "Petits fours assortis", "Alimentaire", "12.00 €", "5", "20", "plateau", "Stock faible"],
-            ["003", "Nappe blanche 3m", "Matériel", "15.00 €", "30", "5", "pièce", "En stock"],
-            ["004", "Bouquet de roses", "Décoration", "35.00 €", "0", "5", "bouquet", "Rupture"],
-            ["005", "Assiettes jetables", "Matériel", "8.00 €", "100", "50", "lot de 20", "En stock"],
-            ["006", "Vin rouge Bordeaux", "Boissons", "25.00 €", "15", "10", "bouteille", "En stock"],
+            ["001", "Champagne Moët & Chandon", "Boissons", "45.00 $", "25", "10", "bouteille", "En stock"],
+            ["002", "Petits fours assortis", "Alimentaire", "12.00 $", "5", "20", "plateau", "Stock faible"],
+            ["003", "Nappe blanche 3m", "Matériel", "15.00 $", "30", "5", "pièce", "En stock"],
+            ["004", "Bouquet de roses", "Décoration", "35.00 $", "0", "5", "bouquet", "Rupture"],
+            ["005", "Assiettes jetables", "Matériel", "8.00 $", "100", "50", "lot de 20", "En stock"],
+            ["006", "Vin rouge Bordeaux", "Boissons", "25.00 $", "15", "10", "bouteille", "En stock"],
         ]
         
         self.products_table.setRowCount(len(sample_data))
@@ -358,7 +376,7 @@ class ProduitIndex(QWidget):
             # Mettre à jour les détails du produit
             self.product_name_label.setText(product.name)
             self.product_category_label.setText(product.category or "Non spécifiée")
-            self.product_price_label.setText(f"{product.price_unit:.2f} €")
+            self.product_price_label.setText(self.format_amount(product.price_unit))
             self.product_stock_label.setText(f"{product.stock_quantity} {product.unit}")
             self.product_min_threshold_label.setText(f"{product.stock_min} {product.unit}")
             self.product_unit_label.setText(product.unit or "Unité")
@@ -381,7 +399,7 @@ class ProduitIndex(QWidget):
                 # Mettre à jour les labels avec les vraies données
                 self.times_sold_label.setText(str(stats['total_sales']))
                 self.total_sold_label.setText(str(stats['total_sold']))
-                self.total_revenue_label.setText(f"{stats['total_revenue']:.2f} €")
+                self.total_revenue_label.setText(self.format_amount(stats['total_revenue']))
                 
                 # Formatage de la dernière vente
                 if stats['last_sale']:
@@ -402,7 +420,7 @@ class ProduitIndex(QWidget):
                 # Aucune statistique disponible
                 self.times_sold_label.setText("0")
                 self.total_sold_label.setText("0")
-                self.total_revenue_label.setText("0.00 €")
+                self.total_revenue_label.setText(f"0.00 {self.get_currency_symbol()}")
                 self.last_sold_label.setText("Jamais vendu")
                 self.avg_quantity_label.setText("0")
                 
@@ -448,7 +466,7 @@ class ProduitIndex(QWidget):
                         movement_text = f"{date_str} - {movement_type}: {quantity} ({reason})"
                     
                     if movement['total_line'] > 0:
-                        movement_text += f" - {movement['total_line']:.2f} €"
+                        movement_text += f" - {self.format_amount(movement['total_line'])}"
                     
                     self.stock_movements_list.addItem(movement_text)
             else:
@@ -561,11 +579,11 @@ class ProduitIndex(QWidget):
             
             # Coût
             cost = float(product.cost or 0)
-            self.products_table.setItem(row, 3, QTableWidgetItem(f"{cost:.2f} €"))
+            self.products_table.setItem(row, 3, QTableWidgetItem(self.format_amount(cost)))
             
             # Prix
             price = float(product.price_unit or 0)
-            self.products_table.setItem(row, 4, QTableWidgetItem(f"{price:.2f} €"))
+            self.products_table.setItem(row, 4, QTableWidgetItem(self.format_amount(price)))
             
             # Seuil minimum
             stock_min = float(product.stock_min or 0)
@@ -579,7 +597,20 @@ class ProduitIndex(QWidget):
             stock = float(product.stock_quantity or 0)
             self.products_table.setItem(row, 7, QTableWidgetItem(f"{stock:.0f}"))
 
-            
+            # Compte comptable
+            account_text = "Non défini"
+            if hasattr(product, 'account_id') and product.account_id:
+                try:
+                    # Importer ici pour éviter les imports circulaires
+                    from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+                    comptabilite_controller = ComptabiliteController()
+                    compte = comptabilite_controller.get_compte_by_id(product.account_id)
+                    if compte:
+                        account_text = f"{compte.numero} - {compte.nom}"
+                except Exception as e:
+                    print(f"Erreur lors de la récupération du compte: {e}")
+                    account_text = "Erreur"
+            self.products_table.setItem(row, 8, QTableWidgetItem(account_text))
             
             # Statut stock
             if stock == 0:
@@ -594,7 +625,7 @@ class ProduitIndex(QWidget):
             
             status_item = QTableWidgetItem(status)
             status_item.setBackground(status_color)
-            self.products_table.setItem(row, 8, status_item)
+            self.products_table.setItem(row, 9, status_item)
             
         
         # Cacher la colonne ID
@@ -695,6 +726,6 @@ class ProduitIndex(QWidget):
         if hasattr(self, 'stats_label'):
             self.stats_label.setText(
                 f"Produits: {active_products}/{total_products} actifs | "
-                f"Valeur stock: {total_stock_value:.2f} € | "
+                f"Valeur stock: {self.format_amount(total_stock_value)} | "
                 f"Alertes: {low_stock_count} faibles, {out_of_stock_count} ruptures"
             )

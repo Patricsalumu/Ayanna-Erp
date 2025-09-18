@@ -31,14 +31,18 @@ class ComptabiliteWindow(QMainWindow):
         
         # Initialiser la session et l'entreprise depuis l'utilisateur
         from ayanna_erp.database.database_manager import DatabaseManager
+        from ayanna_erp.core.entreprise_controller import EntrepriseController
         self.db_manager = DatabaseManager()
         self.session = self.db_manager.get_session()
         self.entreprise_id = self.current_user.enterprise_id
         
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
         # Import du controller corrigé
         try:
             from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
-            self.controller = ComptabiliteController(self.session)
+            self.controller = ComptabiliteController()
         except ImportError:
             # Fallback si le controller n'existe pas encore
             self.controller = None
@@ -47,12 +51,25 @@ class ComptabiliteWindow(QMainWindow):
         self._load_tabs()
         layout.addWidget(self.tabs)
 
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
+
     def _load_tabs(self):
         """Charge les onglets un par un avec gestion d'erreur"""
         tabs_config = [
             ("Journal comptable", self._create_journal_tab),
             ("Grand livre", self._create_grand_livre_tab),
-            ("Balance comptable", self._create_balance_tab),
             ("Compte de résultat", self._create_compte_resultat_tab),
             ("Bilan", self._create_bilan_tab),
             ("Comptes comptables", self._create_comptes_tab),

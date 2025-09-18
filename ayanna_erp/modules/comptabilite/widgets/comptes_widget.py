@@ -11,8 +11,16 @@ class ComptesWidget(QWidget):
         self.controller = controller
         self.session = getattr(controller, 'session', None)
         self.entreprise_id = getattr(parent, 'entreprise_id', None) if parent is not None else None
-        # Pré-charger la devise de l'entreprise (utilise une valeur par défaut pour l'instant)
-        self.devise = "CDF"  # Devise par défaut
+        # Pré-charger la devise de l'entreprise via le parent
+        if parent and hasattr(parent, 'get_currency_symbol'):
+            try:
+                self.devise = parent.get_currency_symbol()
+            except Exception as e:
+                print(f"[DEBUG] ComptesWidget: Erreur lors de l'obtention de la devise: {e}")
+                self.devise = "€"  # Fallback
+        else:
+            print(f"[DEBUG] ComptesWidget: parent sans get_currency_symbol(), devise par défaut")
+            self.devise = "€"  # Fallback
         self.layout = QVBoxLayout(self)
         self.table = QTableView()
         self.model = QStandardItemModel()
@@ -244,7 +252,7 @@ class ComptesWidget(QWidget):
         # Préparer les comptes par classe using controller methods
         comptes_caisse = self.controller.get_comptes_par_classe(self.entreprise_id, '5')  # Classe 5: Caisse/Banque
         comptes_client = self.controller.get_comptes_par_classe(self.entreprise_id, '4')  # Classe 4: Clients/Fournisseurs
-        comptes_vente = self.controller.get_comptes_par_classe(self.entreprise_id, '7')   # Classe 7: Ventes/Produits
+        comptes_tva = self.controller.get_comptes_par_classe(self.entreprise_id, '44')    # Classe 44: TVA
         comptes_achat = self.controller.get_comptes_par_classe(self.entreprise_id, '6')   # Classe 6: Achats/Charges
         
         # Créer les ComboBox pour chaque type de compte
@@ -270,10 +278,10 @@ class ComptesWidget(QWidget):
             if str(c.numero).startswith('40'):  # Fournisseurs généralement 401
                 fournisseur_combo.addItem(f"{c.numero} - {c.nom}", c.id)
                 
-        vente_combo = QComboBox()
-        vente_combo.addItem("-- Sélectionner --", None)
-        for c in comptes_vente:
-            vente_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+        tva_combo = QComboBox()
+        tva_combo.addItem("-- Sélectionner --", None)
+        for c in comptes_tva:
+            tva_combo.addItem(f"{c.numero} - {c.nom}", c.id)
             
         achat_combo = QComboBox()
         achat_combo.addItem("-- Sélectionner --", None)
@@ -285,7 +293,7 @@ class ComptesWidget(QWidget):
         layout.addRow(QLabel("Compte banque (classe 5) :"), banque_combo)
         layout.addRow(QLabel("Compte client (classe 4) :"), client_combo)
         layout.addRow(QLabel("Compte fournisseur (classe 4) :"), fournisseur_combo)
-        layout.addRow(QLabel("Compte vente (classe 7) :"), vente_combo)
+        layout.addRow(QLabel("Compte TVA (classe 44) :"), tva_combo)
         layout.addRow(QLabel("Compte achat (classe 6) :"), achat_combo)
         
         # Fonction pour charger la configuration d'un POS
@@ -299,11 +307,11 @@ class ComptesWidget(QWidget):
                     self._set_combo_value(banque_combo, config.compte_banque_id)
                     self._set_combo_value(client_combo, config.compte_client_id)
                     self._set_combo_value(fournisseur_combo, config.compte_fournisseur_id)
-                    self._set_combo_value(vente_combo, config.compte_vente_id)
+                    self._set_combo_value(tva_combo, config.compte_tva_id)
                     self._set_combo_value(achat_combo, config.compte_achat_id)
                 else:
                     # Remettre à zéro si pas de config
-                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, vente_combo, achat_combo]:
+                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo]:
                         combo.setCurrentIndex(0)  # "-- Sélectionner --"
         
         # Connecter le changement de POS
@@ -332,7 +340,7 @@ class ComptesWidget(QWidget):
                     compte_banque_id=banque_combo.currentData(),
                     compte_client_id=client_combo.currentData(),
                     compte_fournisseur_id=fournisseur_combo.currentData(),
-                    compte_vente_id=vente_combo.currentData(),
+                    compte_tva_id=tva_combo.currentData(),
                     compte_achat_id=achat_combo.currentData()
                 )
                 QMessageBox.information(self, "Configuration enregistrée", 

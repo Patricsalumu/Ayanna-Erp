@@ -22,15 +22,30 @@ class PDFExporter:
     """Classe pour l'export des rapports en PDF format A4"""
     
     def __init__(self):
-        self.company_info = {
-            'name': 'Ayanna Salle de Fête',
-            'address': '123 Avenue de la République',
-            'city': 'Kinshasa, RDC',
-            'phone': '+243 99 123 4567',
-            'email': 'contact@ayanna-sallefete.cd',
-            'rccm': 'RCCM/KIN/2023/A/001234',
-            'logo_path': None  # Chemin vers le logo (optionnel)
-        }
+        self.currency_symbol = "$"  # Fallback par défaut
+        try:
+            from ayanna_erp.core.entreprise_controller import EntrepriseController
+            self.controller = EntrepriseController()
+            self.currency_symbol = self.controller.get_currency_symbol()
+        except:
+            pass
+         # Initialiser le contrôleur d'entreprise
+        self.entreprise_controller = EntrepriseController() if EntrepriseController else None
+        
+        # Récupérer les informations de l'entreprise depuis la BDD
+        if self.entreprise_controller:
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf()
+        else:
+            # Fallback aux données statiques
+            self.company_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'city': 'Kinshasa, RDC',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234',
+                'logo_path': 'assets/logo.png'
+            }
         
         # Configuration des styles
         self.styles = getSampleStyleSheet()
@@ -202,10 +217,10 @@ class PDFExporter:
         
         stats_text = f"""
         • Nombre total d'événements: <b>{data['events_count']}</b><br/>
-        • Revenus du mois: <b>{data['total_revenue']:.2f} €</b><br/>
-        • Total dépenses du mois: <b>{data['total_expenses']:.2f} €</b><br/>
-        • Résultat net: <b>{data['net_result']:.2f} €</b><br/>
-        • Revenus moyens par événement: <b>{data['average_revenue']:.2f} €</b>
+        • Revenus du mois: <b>{data['total_revenue']:.2f} {self.currency_symbol} </b><br/>
+        • Total dépenses du mois: <b>{data['total_expenses']:.2f} {self.currency_symbol}</b><br/>
+        • Résultat net: <b>{data['net_result']:.2f} {self.currency_symbol}</b><br/>
+        • Revenus moyens par événement: <b>{data['average_revenue']:.2f} {self.currency_symbol}</b>
         """
         
         story.append(Paragraph(stats_text, self.styles['CustomNormal']))
@@ -232,7 +247,7 @@ class PDFExporter:
                     str(i),
                     service.name,
                     str(service.count),
-                    f"{service.total:.2f} €"
+                    f"{service.total:.2f} {self.currency_symbol}"
                 ])
             
             services_table = Table(services_data, colWidths=[1*cm, 8*cm, 3*cm, 3*cm])
@@ -277,10 +292,10 @@ class PDFExporter:
         
         stats_text = f"""
         • Nombre total d'événements: <b>{data['events_count']}</b><br/>
-        • Revenus de l'année: <b>{data['total_revenue']:.2f} €</b><br/>
-        • Total dépenses de l'année: <b>{data['total_expenses']:.2f} €</b><br/>
-        • Résultat net: <b>{data['net_result']:.2f} €</b><br/>
-        • Revenus moyens par événement: <b>{data['average_revenue']:.2f} €</b>
+        • Revenus de l'année: <b>{data['total_revenue']:.2f} {self.currency_symbol}</b><br/>
+        • Total dépenses de l'année: <b>{data['total_expenses']:.2f} {self.currency_symbol}</b><br/>
+        • Résultat net: <b>{data['net_result']:.2f} {self.currency_symbol}</b><br/>
+        • Revenus moyens par événement: <b>{data['average_revenue']:.2f} {self.currency_symbol}</b>
         """
         
         story.append(Paragraph(stats_text, self.styles['CustomNormal']))
@@ -307,7 +322,7 @@ class PDFExporter:
                     str(i),
                     service.name,
                     str(service.count),
-                    f"{service.total:.2f} €"
+                    f"{service.total:.2f} {self.currency_symbol}"
                 ])
             
             services_table = Table(services_data, colWidths=[1*cm, 8*cm, 3*cm, 3*cm])
@@ -361,12 +376,12 @@ class PDFExporter:
         margin_percent = (net_result / total_revenue * 100) if total_revenue > 0 else 0
         
         financial_text = f"""
-        • Total recettes: <b>{total_revenue:.2f} €</b><br/>
-        • Total dépenses: <b>{total_expenses:.2f} €</b><br/>
-        • Chiffre d'affaires total: <b>{total_revenue:.2f} €</b><br/>
-        • Revenus services: <b>{service_revenue:.2f} € ({service_percent:.0f}%)</b><br/>
-        • Revenus produits: <b>{product_revenue:.2f} € ({product_percent:.0f}%)</b><br/>
-        • Résultat net: <b>{net_result:.2f} €</b><br/>
+        • Total recettes: <b>{total_revenue:.2f} {self.currency_symbol}</b><br/>
+        • Total dépenses: <b>{total_expenses:.2f} {self.currency_symbol}</b><br/>
+        • Chiffre d'affaires total: <b>{total_revenue:.2f} {self.currency_symbol}</b><br/>
+        • Revenus services: <b>{service_revenue:.2f} {self.currency_symbol} ({service_percent:.0f}%)</b><br/>
+        • Revenus produits: <b>{product_revenue:.2f} {self.currency_symbol} ({product_percent:.0f}%)</b><br/>
+        • Résultat net: <b>{net_result:.2f} {self.currency_symbol}</b><br/>
         • Marge nette: <b>{margin_percent:.1f}%</b>
         """
         
@@ -382,7 +397,7 @@ class PDFExporter:
                 percent = (payment_method.total / total_revenue * 100) if total_revenue > 0 else 0
                 payment_data.append([
                     payment_method.payment_method,
-                    f"{payment_method.total:.2f} €",
+                    f"{payment_method.total:.2f} {self.currency_symbol}",
                     f"{percent:.0f}%"
                 ])
             
@@ -412,7 +427,7 @@ class PDFExporter:
                 percent = (event_type.total / total_revenue * 100) if total_revenue > 0 else 0
                 event_data.append([
                     event_type.event_type,
-                    f"{event_type.total:.2f} €",
+                    f"{event_type.total:.2f} {self.currency_symbol}",
                     f"{percent:.0f}%"
                 ])
             

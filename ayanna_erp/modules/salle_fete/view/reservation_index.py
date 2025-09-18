@@ -22,6 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.reservation_controller import ReservationController
 from .reservation_form import ReservationForm
 from ....database.database_manager import get_database_manager
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ReservationIndex(QWidget):
@@ -34,6 +35,9 @@ class ReservationIndex(QWidget):
         
         # Initialiser le contrôleur réservation
         self.reservation_controller = ReservationController(pos_id=getattr(main_controller, 'pos_id', 1))
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
         
         # Connecter les signaux du contrôleur
         self.reservation_controller.reservations_loaded.connect(self.on_reservations_loaded)
@@ -50,6 +54,20 @@ class ReservationIndex(QWidget):
         
         # Charger les réservations après initialisation
         QTimer.singleShot(100, self.load_reservations)
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "$"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} $"  # Fallback
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -236,7 +254,7 @@ class ReservationIndex(QWidget):
                 services_html = ""
                 if reservation_details['services']:
                     services_html = "<br>".join([
-                        f"• {service['name']} - Qté: {service['quantity']} - Prix: {service['unit_price']:.2f}€ - Total: {service['line_total']:.2f}€"
+                        f"• {service['name']} - Qté: {service['quantity']} - Prix: {self.format_amount(service['unit_price'])} - Total: {self.format_amount(service['line_total'])}"
                         for service in reservation_details['services']
                     ])
                 else:
@@ -246,7 +264,7 @@ class ReservationIndex(QWidget):
                 products_html = ""
                 if reservation_details['products']:
                     products_html = "<br>".join([
-                        f"• {product['name']} - Qté: {product['quantity']} - Prix: {product['unit_price']:.2f}€ - Total: {product['line_total']:.2f}€"
+                        f"• {product['name']} - Qté: {product['quantity']} - Prix: {self.format_amount(product['unit_price'])} - Total: {self.format_amount(product['line_total'])}"
                         for product in reservation_details['products']
                     ])
                 else:
@@ -313,19 +331,19 @@ class ReservationIndex(QWidget):
                     <h4 style="margin: 5px 0; color: #E74C3C;">💰 Résumé financier:</h4>
                     <table width="100%" cellpadding="2" cellspacing="0">
                         <tr>
-                            <td><b>Total services:</b> {reservation_details['total_services']:.2f} €</td>
-                            <td><b>Total produits:</b> {reservation_details['total_products']:.2f} €</td>
+                            <td><b>Total services:</b> {self.format_amount(reservation_details['total_services'])}</td>
+                            <td><b>Total produits:</b> {self.format_amount(reservation_details['total_products'])}</td>
                         </tr>
                         <tr>
                             <td><b>Remise:</b> {reservation_details['discount_percent']:.1f}%</td>
-                            <td><b>TVA ({reservation_details['tax_rate']:.1f}%):</b> {reservation_details['tax_amount']:.2f} €</td>
+                            <td><b>TVA ({reservation_details['tax_rate']:.1f}%):</b> {self.format_amount(reservation_details['tax_amount'])}</td>
                         </tr>
                         <tr style="background-color: #F8F9FA;">
-                            <td><b>TOTAL TTC:</b> <span style="color: #E74C3C; font-size: 13px;">{reservation_details['total_amount']:.2f} €</span></td>
-                            <td><b>Payé:</b> {reservation_details['total_paid']:.2f} €</td>
+                            <td><b>TOTAL TTC:</b> <span style="color: #E74C3C; font-size: 13px;">{self.format_amount(reservation_details['total_amount'])}</span></td>
+                            <td><b>Payé:</b> {self.format_amount(reservation_details['total_paid'])}</td>
                         </tr>
                         <tr>
-                            <td colspan="2"><b>Solde restant:</b> <span style="color: {remaining_color}; font-weight: bold; font-size: 13px;">{remaining:.2f} €</span></td>
+                            <td colspan="2"><b>Solde restant:</b> <span style="color: {remaining_color}; font-weight: bold; font-size: 13px;">{self.format_amount(remaining)}</span></td>
                         </tr>
                     </table>
                     
@@ -482,13 +500,13 @@ class ReservationIndex(QWidget):
             
             # Montant total
             total_amount = reservation.total_amount or 0
-            self.reservations_table.setItem(row, 5, QTableWidgetItem(f"{total_amount:.2f} €"))
+            self.reservations_table.setItem(row, 5, QTableWidgetItem(self.format_amount(total_amount)))
             
             # Acompte (calculé à partir des paiements)
             paid_amount = 0
             if hasattr(reservation, 'payments') and reservation.payments:
                 paid_amount = sum(payment.amount for payment in reservation.payments)
-            self.reservations_table.setItem(row, 6, QTableWidgetItem(f"{paid_amount:.2f} €"))
+            self.reservations_table.setItem(row, 6, QTableWidgetItem(self.format_amount(paid_amount)))
             
             # Date de création
             created_at = ""

@@ -22,9 +22,14 @@ import os
 try:
     from ayanna_erp.modules.salle_fete.utils.payment_printer import PaymentPrintManager
     from ayanna_erp.modules.salle_fete.utils.print_settings import PrintSettings, PrintSettingsDialog
+    from ayanna_erp.core.entreprise_controller import EntrepriseController
 except ImportError:
     from ..utils.payment_printer import PaymentPrintManager
     from ..utils.print_settings import PrintSettings, PrintSettingsDialog
+    try:
+        from ayanna_erp.core.entreprise_controller import EntrepriseController
+    except ImportError:
+        EntrepriseController = None
 
 
 class PaymentDialog(QDialog):
@@ -50,8 +55,16 @@ class PaymentDialog(QDialog):
         if self.reservation_data:
             info_layout.addRow("Référence:", QLabel(self.reservation_data.get('reference', 'N/A')))
             info_layout.addRow("Client:", QLabel(self.reservation_data.get('client_nom', 'N/A')))
-            info_layout.addRow("Total à payer:", QLabel(f"{self.reservation_data.get('total_amount', 0):.2f} €"))
-            info_layout.addRow("Solde restant:", QLabel(f"{self.balance:.2f} €"))
+            # Récupérer le symbole de devise depuis l'entreprise
+            currency_symbol = "$"  # Fallback par défaut
+            try:
+                from ayanna_erp.core.entreprise_controller import EntrepriseController
+                controller = EntrepriseController()
+                currency_symbol = controller.get_currency_symbol()
+            except:
+                pass
+            info_layout.addRow("Total à payer:", QLabel(f"{self.reservation_data.get('total_amount', 0):.2f} {currency_symbol}"))
+            info_layout.addRow("Solde restant:", QLabel(f"{self.balance:.2f} {currency_symbol}"))
         
         layout.addWidget(info_group)
         
@@ -63,7 +76,7 @@ class PaymentDialog(QDialog):
         self.amount_input = QDoubleSpinBox()
         self.amount_input.setMaximum(99999.99)
         self.amount_input.setValue(self.balance)
-        self.amount_input.setSuffix(" €")
+        self.amount_input.setSuffix(f" {currency_symbol}")
         payment_layout.addRow("Montant:", self.amount_input)
         
         # Méthode de paiement
@@ -118,6 +131,9 @@ class PaiementIndex(QWidget):
         self.current_user = current_user
         self.selected_reservation = None
         
+        # Initialiser le contrôleur d'entreprise pour les devises
+        self.entreprise_controller = EntrepriseController() if EntrepriseController else None
+        
         # Initialiser les paramètres d'impression
         self.print_settings = PrintSettings()
         
@@ -140,6 +156,20 @@ class PaiementIndex(QWidget):
         self.setup_ui()
         self.connect_signals()
         self.load_reservations()
+    
+    def format_amount(self, amount):
+        """Formater un montant avec la devise de l'entreprise"""
+        if self.entreprise_controller:
+            return self.entreprise_controller.format_amount(amount)
+        else:
+            return f"{amount:.2f} €"  # Fallback
+    
+    def get_currency_symbol(self):
+        """Récupérer le symbole de devise"""
+        if self.entreprise_controller:
+            return self.entreprise_controller.get_currency_symbol()
+        else:
+            return "€"  # Fallback
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -238,12 +268,12 @@ class PaiementIndex(QWidget):
         financial_group = QGroupBox("💰 Résumé financier")
         financial_layout = QFormLayout(financial_group)
         
-        self.subtotal_label = QLabel("0.00 €")
-        self.discount_label = QLabel("0.00 €")
-        self.tax_label = QLabel("0.00 €")
-        self.total_label = QLabel("0.00 €")
-        self.paid_label = QLabel("0.00 €")
-        self.balance_label = QLabel("0.00 €")
+        self.subtotal_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.discount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.tax_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.paid_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.balance_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         
         # Style pour les labels financiers
         financial_style = "font-weight: bold; font-size: 12px;"
@@ -430,10 +460,10 @@ class PaiementIndex(QWidget):
             
             # Total et solde
             total = reservation.get('total_amount', 0)
-            self.reservations_table.setItem(row, 3, QTableWidgetItem(f"{total:.2f} €"))
+            self.reservations_table.setItem(row, 3, QTableWidgetItem(self.format_amount(total)))
             
             # Colorer le solde selon le statut
-            balance_item = QTableWidgetItem(f"{balance:.2f} €")
+            balance_item = QTableWidgetItem(self.format_amount(balance))
             if balance > 0:
                 balance_item.setBackground(Qt.GlobalColor.red)
                 balance_item.setForeground(Qt.GlobalColor.white)
@@ -596,7 +626,7 @@ class PaiementIndex(QWidget):
                 self.services_table.setItem(row, 0, QTableWidgetItem("Service"))
                 self.services_table.setItem(row, 1, QTableWidgetItem(service.get('name', 'N/A')))
                 self.services_table.setItem(row, 2, QTableWidgetItem(str(service.get('quantity', 1))))
-                self.services_table.setItem(row, 3, QTableWidgetItem(f"{service.get('line_total', 0):.2f} €"))
+                self.services_table.setItem(row, 3, QTableWidgetItem(self.format_amount(service.get('line_total', 0))))
                 row += 1
             
             # Ajouter les produits
@@ -604,7 +634,7 @@ class PaiementIndex(QWidget):
                 self.services_table.setItem(row, 0, QTableWidgetItem("Produit"))
                 self.services_table.setItem(row, 1, QTableWidgetItem(product.get('name', 'N/A')))
                 self.services_table.setItem(row, 2, QTableWidgetItem(str(product.get('quantity', 1))))
-                self.services_table.setItem(row, 3, QTableWidgetItem(f"{product.get('line_total', 0):.2f} €"))
+                self.services_table.setItem(row, 3, QTableWidgetItem(self.format_amount(product.get('line_total', 0))))
                 row += 1
                 
         except Exception as e:
@@ -626,12 +656,12 @@ class PaiementIndex(QWidget):
             balance = self.selected_reservation.get('balance', 0) or 0
             
             # Mettre à jour les labels
-            self.subtotal_label.setText(f"{subtotal:.2f} €")
-            self.discount_label.setText(f"{discount:.2f} €")
-            self.tax_label.setText(f"{tax:.2f} €")
-            self.total_label.setText(f"{total:.2f} €")
-            self.paid_label.setText(f"{paid:.2f} €")
-            self.balance_label.setText(f"{balance:.2f} €")
+            self.subtotal_label.setText(self.format_amount(subtotal))
+            self.discount_label.setText(self.format_amount(discount))
+            self.tax_label.setText(self.format_amount(tax))
+            self.total_label.setText(self.format_amount(total))
+            self.paid_label.setText(self.format_amount(paid))
+            self.balance_label.setText(self.format_amount(balance))
             
         except Exception as e:
             print(f"Erreur lors du chargement du résumé financier: {e}")
@@ -661,7 +691,7 @@ class PaiementIndex(QWidget):
                 
                 # Montant
                 amount = payment.get('amount', 0)
-                self.payments_table.setItem(row, 1, QTableWidgetItem(f"{amount:.2f} €"))
+                self.payments_table.setItem(row, 1, QTableWidgetItem(self.format_amount(amount)))
                 
                 # Méthode
                 method = payment.get('payment_method', 'N/A')
@@ -711,12 +741,12 @@ class PaiementIndex(QWidget):
         self.services_table.setRowCount(0)
         self.payments_table.setRowCount(0)
         
-        self.subtotal_label.setText("0.00 €")
-        self.discount_label.setText("0.00 €")
-        self.tax_label.setText("0.00 €")
-        self.total_label.setText("0.00 €")
-        self.paid_label.setText("0.00 €")
-        self.balance_label.setText("0.00 €")
+        self.subtotal_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.discount_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.tax_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.total_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.paid_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.balance_label.setText(f"0.00 {self.get_currency_symbol()}")
     
     def open_payment_dialog(self):
         """Ouvrir la fenêtre de paiement et créer le paiement en BDD"""
@@ -821,12 +851,12 @@ class PaiementIndex(QWidget):
             <div class="section">
                 <h3>Résumé financier</h3>
                 <table>
-                    <tr><td>Sous-total</td><td>{self.selected_reservation.get('subtotal', 0):.2f} €</td></tr>
-                    <tr><td>Remise</td><td>{self.selected_reservation.get('discount', 0):.2f} €</td></tr>
-                    <tr><td>TVA</td><td>{self.selected_reservation.get('tax_amount', 0):.2f} €</td></tr>
-                    <tr class="total"><td>Total</td><td>{self.selected_reservation.get('total_amount', 0):.2f} €</td></tr>
-                    <tr><td>Total payé</td><td>{balance_info.get('total_paid', 0):.2f} €</td></tr>
-                    <tr class="total"><td>Solde restant</td><td>{balance_info.get('balance', 0):.2f} €</td></tr>
+                    <tr><td>Sous-total</td><td>{self.format_amount(self.selected_reservation.get('subtotal', 0))}</td></tr>
+                    <tr><td>Remise</td><td>{self.format_amount(self.selected_reservation.get('discount', 0))}</td></tr>
+                    <tr><td>TVA</td><td>{self.format_amount(self.selected_reservation.get('tax_amount', 0))}</td></tr>
+                    <tr class="total"><td>Total</td><td>{self.format_amount(self.selected_reservation.get('total_amount', 0))}</td></tr>
+                    <tr><td>Total payé</td><td>{self.format_amount(balance_info.get('total_paid', 0))}</td></tr>
+                    <tr class="total"><td>Solde restant</td><td>{self.format_amount(balance_info.get('balance', 0))}</td></tr>
                 </table>
             </div>
             
@@ -842,7 +872,7 @@ class PaiementIndex(QWidget):
             html += f"""
                     <tr>
                         <td>{date_str}</td>
-                        <td>{payment.amount:.2f} €</td>
+                        <td>{self.format_amount(payment.amount)}</td>
                         <td>{payment.payment_method or 'N/A'}</td>
                         <td>{user_name}</td>
                         <td>{payment.notes or ''}</td>
@@ -1094,12 +1124,12 @@ class PaiementIndex(QWidget):
         # Calculer le total payé jusqu'à ce paiement
         total_paid = 0
         for i in range(row_index + 1):
-            amount_text = self.payments_table.item(i, 1).text().replace(' €', '') if self.payments_table.item(i, 1) else '0'
+            amount_text = self.payments_table.item(i, 1).text().replace(f' {self.get_currency_symbol()}', '') if self.payments_table.item(i, 1) else '0'
             total_paid += float(amount_text)
         
         return {
             'payment_date': self.payments_table.item(row_index, 0).text() if self.payments_table.item(row_index, 0) else 'N/A',
-            'amount': float(self.payments_table.item(row_index, 1).text().replace(' €', '')) if self.payments_table.item(row_index, 1) else 0,
+            'amount': float(self.payments_table.item(row_index, 1).text().replace(f' {self.get_currency_symbol()}', '')) if self.payments_table.item(row_index, 1) else 0,
             'payment_method': self.payments_table.item(row_index, 2).text() if self.payments_table.item(row_index, 2) else 'N/A',
             'total_paid': total_paid
         }
@@ -1110,7 +1140,7 @@ class PaiementIndex(QWidget):
         for i in range(self.payments_table.rowCount()):
             payment = {
                 'payment_date': self.payments_table.item(i, 0).text() if self.payments_table.item(i, 0) else 'N/A',
-                'amount': float(self.payments_table.item(i, 1).text().replace(' €', '')) if self.payments_table.item(i, 1) else 0,
+                'amount': float(self.payments_table.item(i, 1).text().replace(f' {self.get_currency_symbol()}', '')) if self.payments_table.item(i, 1) else 0,
                 'payment_method': self.payments_table.item(i, 2).text() if self.payments_table.item(i, 2) else 'N/A',
                 'user_name': self.payments_table.item(i, 3).text() if self.payments_table.item(i, 3) else 'N/A'
             }

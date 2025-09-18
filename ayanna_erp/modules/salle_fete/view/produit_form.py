@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from decimal import Decimal
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ProduitForm(QDialog):
@@ -26,11 +27,28 @@ class ProduitForm(QDialog):
         self.controller = controller
         self.is_edit_mode = produit_data is not None
         
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
         self.setup_ui()
         self.setup_style()
         
         if self.is_edit_mode:
             self.load_produit_data()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
     
     def setup_ui(self):
         """Initialiser l'interface utilisateur"""
@@ -99,7 +117,7 @@ class ProduitForm(QDialog):
         self.cost_spinbox = QDoubleSpinBox()
         self.cost_spinbox.setRange(0.0, 999999.99)
         self.cost_spinbox.setDecimals(2)
-        self.cost_spinbox.setSuffix(" €")
+        self.cost_spinbox.setSuffix(f" {self.get_currency_symbol()}")
         self.cost_spinbox.setSpecialValueText("Gratuit")
         pricing_layout.addRow("Coût d'achat:", self.cost_spinbox)
         
@@ -107,12 +125,12 @@ class ProduitForm(QDialog):
         self.price_spinbox = QDoubleSpinBox()
         self.price_spinbox.setRange(0.0, 999999.99)
         self.price_spinbox.setDecimals(2)
-        self.price_spinbox.setSuffix(" €")
+        self.price_spinbox.setSuffix(f" {self.get_currency_symbol()}")
         self.price_spinbox.setSpecialValueText("Gratuit")
         pricing_layout.addRow("Prix de vente *:", self.price_spinbox)
         
         # Marge automatique
-        self.margin_label = QLabel("Marge: 0.00 €")
+        self.margin_label = QLabel(f"Marge: 0.00 {self.get_currency_symbol()}")
         pricing_layout.addRow("", self.margin_label)
         
         layout.addWidget(pricing_group)
@@ -140,6 +158,19 @@ class ProduitForm(QDialog):
         stock_layout.addRow("", self.stock_alert_label)
         
         layout.addWidget(stock_group)
+        
+        # === COMPTABILITÉ ===
+        accounting_group = QGroupBox("Comptabilité")
+        accounting_layout = QFormLayout(accounting_group)
+        
+        # Compte comptable de vente
+        self.account_combo = QComboBox()
+        self.account_combo.setMinimumWidth(250)
+        self.account_combo.setToolTip("Sélectionnez le compte comptable de vente pour ce produit")
+        self.load_sales_accounts()
+        accounting_layout.addRow("Compte de vente:", self.account_combo)
+        
+        layout.addWidget(accounting_group)
         
         # === OPTIONS ===
         options_group = QGroupBox("Options")
@@ -236,7 +267,7 @@ class ProduitForm(QDialog):
         price = self.price_spinbox.value()
         margin = price - cost
         
-        self.margin_label.setText(f"Marge: {margin:.2f} €")
+        self.margin_label.setText(f"Marge: {self.format_amount(margin)}")
         
         if margin < 0:
             self.margin_label.setStyleSheet("color: #dc3545; font-weight: bold;")
@@ -244,6 +275,25 @@ class ProduitForm(QDialog):
             self.margin_label.setStyleSheet("color: #6c757d;")
         else:
             self.margin_label.setStyleSheet("color: #28a745; font-weight: bold;")
+    
+    def load_sales_accounts(self):
+        """Charger les comptes de vente dans le combo box"""
+        try:
+            # Importer ici pour éviter les imports circulaires
+            from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+            
+            comptabilite_controller = ComptabiliteController()
+            comptes = comptabilite_controller.get_comptes_vente()
+            
+            self.account_combo.clear()
+            self.account_combo.addItem("-- Sélectionner un compte --", None)
+            
+            for compte in comptes:
+                self.account_combo.addItem(f"{compte.numero} - {compte.nom}", compte.id)
+                
+        except Exception as e:
+            print(f"Erreur lors du chargement des comptes: {e}")
+            self.account_combo.addItem("Erreur - Comptes indisponibles", None)
     
     def check_stock_alert(self):
         """Vérifier et afficher les alertes de stock"""
@@ -293,6 +343,13 @@ class ProduitForm(QDialog):
             self.stock_spinbox.setValue(float(self.produit_data.stock_quantity or 0))
             self.stock_min_spinbox.setValue(float(self.produit_data.stock_min or 0))
             self.active_checkbox.setChecked(bool(self.produit_data.is_active))
+            
+            # Sélectionner le compte comptable
+            if hasattr(self.produit_data, 'account_id') and self.produit_data.account_id:
+                for i in range(self.account_combo.count()):
+                    if self.account_combo.itemData(i) == self.produit_data.account_id:
+                        self.account_combo.setCurrentIndex(i)
+                        break
         else:
             # Dictionnaire (rétrocompatibilité)
             self.name_edit.setText(self.produit_data.get('name', ''))
@@ -320,6 +377,14 @@ class ProduitForm(QDialog):
             self.stock_spinbox.setValue(float(self.produit_data.get('stock_quantity', 0)))
             self.stock_min_spinbox.setValue(float(self.produit_data.get('stock_min', 0)))
             self.active_checkbox.setChecked(bool(self.produit_data.get('is_active', True)))
+            
+            # Sélectionner le compte comptable
+            account_id = self.produit_data.get('account_id')
+            if account_id:
+                for i in range(self.account_combo.count()):
+                    if self.account_combo.itemData(i) == account_id:
+                        self.account_combo.setCurrentIndex(i)
+                        break
         
         # Mettre à jour les calculs
         self.update_margin()
@@ -350,7 +415,8 @@ class ProduitForm(QDialog):
             'price_unit': round(self.price_spinbox.value(), 2),
             'stock_quantity': round(self.stock_spinbox.value(), 2),
             'stock_min': round(self.stock_min_spinbox.value(), 2),
-            'is_active': self.active_checkbox.isChecked()
+            'is_active': self.active_checkbox.isChecked(),
+            'account_id': self.account_combo.currentData()  # ID du compte comptable sélectionné
         }
     
     def save_produit(self):

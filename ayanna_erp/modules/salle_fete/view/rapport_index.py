@@ -36,6 +36,13 @@ class RapportIndex(QWidget):
         self.current_user = current_user
         self.rapport_controller = RapportController()
         self.pdf_exporter = PDFExporter()
+        self.currency_symbol = "$"  # Fallback par défaut
+        try:
+            from ayanna_erp.core.entreprise_controller import EntrepriseController
+            self.controller = EntrepriseController()
+            self.currency_symbol = self.controller.get_currency_symbol()
+        except:
+            pass
         self.setup_ui()
     
     def setup_ui(self):
@@ -499,7 +506,7 @@ class RapportIndex(QWidget):
         
         # Personnalisation
         ax.set_xlabel('Date', fontsize=10, fontweight='bold')
-        ax.set_ylabel('Montant (€)', fontsize=10, fontweight='bold')
+        ax.set_ylabel("Montant ($)", fontsize=10, fontweight='bold')
         ax.set_title(f'Évolution Recettes vs Dépenses - {data["period"]}', fontsize=12, fontweight='bold', pad=20)
         ax.grid(True, alpha=0.3)
         ax.legend(loc='upper left', frameon=True, fancybox=True, shadow=True)
@@ -536,11 +543,11 @@ class RapportIndex(QWidget):
                     if contains_rev:
                         ind = info_rev['ind'][0]
                         x, y = dates[ind], revenues[ind]
-                        text = f"Recettes\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} €"
+                        text = f"Recettes\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} {self.currency_symbol}"
                     elif contains_exp:
                         ind = info_exp['ind'][0]
                         x, y = dates[ind], expenses[ind]
-                        text = f"Dépenses\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} €"
+                        text = f"Dépenses\n{dates[ind].strftime('%d/%m/%Y')}\n{y:.2f} {self.currency_symbol}"
                     
                     # Déterminer la position du tooltip selon la position de la souris
                     fig_width, fig_height = self.financial_figure.get_size_inches()
@@ -589,10 +596,10 @@ Mois: {data['period']}
 
 RÉSUMÉ MENSUEL:
 • Nombre total d'événements: {data['events_count']}
-• Revenus du mois: {data['total_revenue']:.2f} €
-• Total dépenses du mois: {data['total_expenses']:.2f} €
-• Résultat net: {data['net_result']:.2f} €
-• Revenus moyens par événement: {data['average_revenue']:.2f} €
+• Revenus du mois: {data['total_revenue']:.2f} {self.currency_symbol}
+• Total dépenses du mois: {data['total_expenses']:.2f} {self.currency_symbol}
+• Résultat net: {data['net_result']:.2f} {self.currency_symbol}
+• Revenus moyens par événement: {data['average_revenue']:.2f} {self.currency_symbol}
 
 COMPARAISON AVEC LE MOIS PRÉCÉDENT:
 • Évolution des revenus: {comparison['revenue_evolution']:+.1f}%
@@ -601,7 +608,7 @@ COMPARAISON AVEC LE MOIS PRÉCÉDENT:
 TOP 5 DES SERVICES:"""
         
         for i, service in enumerate(data['top_services'], 1):
-            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} €"
+            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} {self.currency_symbol}"
         
         if not data['top_services']:
             stats_text += "\nAucun service utilisé ce mois"
@@ -615,10 +622,10 @@ Année: {data['period']}
 
 RÉSUMÉ ANNUEL:
 • Nombre total d'événements: {data['events_count']}
-• Revenus de l'année: {data['total_revenue']:.2f} €
-• Total dépenses de l'année: {data['total_expenses']:.2f} €
-• Résultat net: {data['net_result']:.2f} €
-• Revenus moyens par événement: {data['average_revenue']:.2f} €
+• Revenus de l'année: {data['total_revenue']:.2f} {self.currency_symbol}
+• Total dépenses de l'année: {data['total_expenses']:.2f} {self.currency_symbol}
+• Résultat net: {data['net_result']:.2f} {self.currency_symbol}
+• Revenus moyens par événement: {data['average_revenue']:.2f} {self.currency_symbol}
 
 COMPARAISON AVEC L'ANNÉE PRÉCÉDENTE:
 • Évolution des revenus: {comparison['revenue_evolution']:+.1f}%
@@ -627,7 +634,7 @@ COMPARAISON AVEC L'ANNÉE PRÉCÉDENTE:
 TOP 5 DES SERVICES:"""
         
         for i, service in enumerate(data['top_services'], 1):
-            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} €"
+            stats_text += f"\n{i}. {service.name}: {service.count} utilisations - {service.total:.2f} {self.currency_symbol}"
         
         if not data['top_services']:
             stats_text += "\nAucun service utilisé cette année"
@@ -656,12 +663,12 @@ TOP 5 DES SERVICES:"""
 Période d'analyse: {data['period']}
 
 RÉSUMÉ FINANCIER:
-• Total recettes: {total_revenue:.2f} €
-• Total dépenses: {total_expenses:.2f} €
-• Chiffre d'affaires total: {total_revenue:.2f} €
-• Revenus services: {service_revenue:.2f} € ({service_percent:.0f}%)
-• Revenus produits: {product_revenue:.2f} € ({product_percent:.0f}%)
-• Résultat net: {net_result:.2f} €
+• Total recettes: {total_revenue:.2f} {self.currency_symbol}
+• Total dépenses: {total_expenses:.2f} {self.currency_symbol}
+• Chiffre d'affaires total: {total_revenue:.2f} {self.currency_symbol}
+• Revenus services: {service_revenue:.2f} {self.currency_symbol} ({service_percent:.0f}%)
+• Revenus produits: {product_revenue:.2f} {self.currency_symbol} ({product_percent:.0f}%)
+• Résultat net: {net_result:.2f} {self.currency_symbol}
 • Marge nette: {margin_percent:.1f}%
 
 RÉPARTITION PAR MÉTHODE DE PAIEMENT:
@@ -672,19 +679,19 @@ RÉPARTITION PAR MÉTHODE DE PAIEMENT:
         for payment_method in data['payment_methods']:
             percent = (payment_method.total / total_revenue * 100) if total_revenue > 0 else 0
             method_name = payment_method.payment_method[:15]
-            stats_text += f"\n│ {method_name:<15} │ {payment_method.total:>9.2f} € │ {percent:>9.0f}% │"
+            stats_text += f"\n│ {method_name:<15} │ {payment_method.total:>9.2f} {self.currency_symbol} │ {percent:>9.0f}% │"
         
         stats_text += "\n└─────────────────┴─────────────┴─────────────┘"
         
         stats_text += "\n\nREVENUS PAR TYPE D'ÉVÉNEMENT:"
         for event_type in data['revenue_by_type']:
             percent = (event_type.total / total_revenue * 100) if total_revenue > 0 else 0
-            stats_text += f"\n• {event_type.event_type}: {event_type.total:.2f} € ({percent:.0f}%)"
+            stats_text += f"\n• {event_type.event_type}: {event_type.total:.2f} {self.currency_symbol} ({percent:.0f}%)"
         
         stats_text += f"""
 
 INDICATEURS CLÉS:
-• Panier moyen: {average_basket:.2f} €
+• Panier moyen: {average_basket:.2f} {self.currency_symbol}
 • Marge nette: {margin_percent:.1f}%"""
         
         self.financial_stats_text.setPlainText(stats_text)
