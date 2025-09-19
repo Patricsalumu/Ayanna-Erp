@@ -331,15 +331,15 @@ class ReservationIndex(QWidget):
                     <h4 style="margin: 5px 0; color: #E74C3C;">💰 Résumé financier:</h4>
                     <table width="100%" cellpadding="2" cellspacing="0">
                         <tr>
-                            <td><b>Total services:</b> {self.format_amount(reservation_details['total_services'])}</td>
-                            <td><b>Total produits:</b> {self.format_amount(reservation_details['total_products'])}</td>
-                        </tr>
-                        <tr>
-                            <td><b>Remise:</b> {reservation_details['discount_percent']:.1f}%</td>
+                            <td><b>Sous-total HT:</b> {self.format_amount(reservation_details['total_services'] + reservation_details['total_products'])}</td>
                             <td><b>TVA ({reservation_details['tax_rate']:.1f}%):</b> {self.format_amount(reservation_details['tax_amount'])}</td>
                         </tr>
+                        <tr style="background-color: #F0F7FF;">
+                            <td><b>Total TTC:</b> <span style="color: #2980B9; font-size: 13px;">{self.format_amount(reservation_details['total_amount'])}</span></td>
+                            <td><b>Remise ({reservation_details['discount_percent']:.1f}%):</b> <span style="color: #E74C3C;">-{self.format_amount(reservation_details['total_amount'] * reservation_details['discount_percent'] / 100)}</span></td>
+                        </tr>
                         <tr style="background-color: #F8F9FA;">
-                            <td><b>TOTAL TTC:</b> <span style="color: #E74C3C; font-size: 13px;">{self.format_amount(reservation_details['total_amount'])}</span></td>
+                            <td><b>TOTAL NET:</b> <span style="color: #E74C3C; font-size: 14px; font-weight: bold;">{self.format_amount(reservation_details['total_amount'] * (1 - reservation_details['discount_percent'] / 100))}</span></td>
                             <td><b>Payé:</b> {self.format_amount(reservation_details['total_paid'])}</td>
                         </tr>
                         <tr>

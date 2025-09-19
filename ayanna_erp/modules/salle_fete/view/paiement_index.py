@@ -269,22 +269,26 @@ class PaiementIndex(QWidget):
         financial_layout = QFormLayout(financial_group)
         
         self.subtotal_label = QLabel(f"0.00 {self.get_currency_symbol()}")
-        self.discount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.tax_label = QLabel(f"0.00 {self.get_currency_symbol()}")
-        self.total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.total_ttc_label = QLabel(f"0.00 {self.get_currency_symbol()}")  # Nouveau
+        self.discount_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.total_net_label = QLabel(f"0.00 {self.get_currency_symbol()}")  # Renommé
         self.paid_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.balance_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         
         # Style pour les labels financiers
         financial_style = "font-weight: bold; font-size: 12px;"
-        self.total_label.setStyleSheet(financial_style + "color: #2E86AB;")
+        self.total_ttc_label.setStyleSheet(financial_style + "color: #2980B9;")  # Bleu pour TTC
+        self.total_net_label.setStyleSheet(financial_style + "color: #E74C3C;")  # Rouge pour net final
         self.paid_label.setStyleSheet(financial_style + "color: #27AE60;")
         self.balance_label.setStyleSheet(financial_style + "color: #E74C3C;")
+        self.discount_label.setStyleSheet("color: #E74C3C;")  # Rouge pour remise
         
-        financial_layout.addRow("Sous-total:", self.subtotal_label)
-        financial_layout.addRow("Remise:", self.discount_label)
+        financial_layout.addRow("Sous-total HT:", self.subtotal_label)
         financial_layout.addRow("TVA:", self.tax_label)
-        financial_layout.addRow("Total:", self.total_label)
+        financial_layout.addRow("Total TTC:", self.total_ttc_label)
+        financial_layout.addRow("Remise:", self.discount_label)
+        financial_layout.addRow("Total NET:", self.total_net_label)
         financial_layout.addRow("Payé:", self.paid_label)
         financial_layout.addRow("Solde:", self.balance_label)
         
@@ -642,26 +646,44 @@ class PaiementIndex(QWidget):
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des détails: {str(e)}")
     
     def load_financial_summary(self):
-        """Charger le résumé financier depuis les détails BDD"""
+        """Charger le résumé financier depuis les détails BDD - Nouvelle logique"""
         if not self.selected_reservation:
             return
         
         try:
-            # Utiliser les données déjà chargées depuis la BDD
-            subtotal = self.selected_reservation.get('total_services', 0) + self.selected_reservation.get('total_products', 0)
-            discount = (self.selected_reservation.get('discount_percent', 0) / 100) * subtotal if subtotal > 0 else 0
-            tax = self.selected_reservation.get('tax_amount', 0) or 0
-            total = self.selected_reservation.get('total_amount', 0) or 0
-            paid = self.selected_reservation.get('total_paid', 0) or 0
-            balance = self.selected_reservation.get('balance', 0) or 0
+            # Nouvelle logique : Sous-total HT + TVA = Total TTC, puis remise sur TTC
+            subtotal_ht = self.selected_reservation.get('total_services', 0) + self.selected_reservation.get('total_products', 0)
+            tax_amount = self.selected_reservation.get('tax_amount', 0) or 0
+            total_ttc = self.selected_reservation.get('total_amount', 0) or 0  # TTC sans remise (stocké en BDD)
+            discount_percent = self.selected_reservation.get('discount_percent', 0) or 0
             
-            # Mettre à jour les labels
-            self.subtotal_label.setText(self.format_amount(subtotal))
-            self.discount_label.setText(self.format_amount(discount))
-            self.tax_label.setText(self.format_amount(tax))
-            self.total_label.setText(self.format_amount(total))
+            # Calcul de la remise sur le TTC 
+            discount_amount = total_ttc * (discount_percent / 100) if total_ttc > 0 else 0
+            
+            # Total net = TTC - remise
+            total_net = total_ttc - discount_amount
+            
+            # Montants payés et solde
+            paid = self.selected_reservation.get('total_paid', 0) or 0
+            balance = total_net - paid  # Solde calculé sur le total net
+            
+            # Mettre à jour les labels avec la nouvelle structure
+            self.subtotal_label.setText(self.format_amount(subtotal_ht))
+            self.tax_label.setText(self.format_amount(tax_amount))
+            self.total_ttc_label.setText(self.format_amount(total_ttc))
+            
+            # Affichage de la remise avec pourcentage et montant
+            if discount_percent > 0:
+                self.discount_label.setText(f"{discount_percent:.1f}% (-{self.format_amount(discount_amount)})")
+            else:
+                self.discount_label.setText("0%")
+            
+            self.total_net_label.setText(self.format_amount(total_net))
             self.paid_label.setText(self.format_amount(paid))
             self.balance_label.setText(self.format_amount(balance))
+            
+            # Mettre à jour le solde dans selected_reservation pour cohérence
+            self.selected_reservation['balance'] = balance
             
         except Exception as e:
             print(f"Erreur lors du chargement du résumé financier: {e}")
@@ -742,9 +764,10 @@ class PaiementIndex(QWidget):
         self.payments_table.setRowCount(0)
         
         self.subtotal_label.setText(f"0.00 {self.get_currency_symbol()}")
-        self.discount_label.setText(f"0.00 {self.get_currency_symbol()}")
         self.tax_label.setText(f"0.00 {self.get_currency_symbol()}")
-        self.total_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.total_ttc_label.setText(f"0.00 {self.get_currency_symbol()}")
+        self.discount_label.setText("0%")
+        self.total_net_label.setText(f"0.00 {self.get_currency_symbol()}")
         self.paid_label.setText(f"0.00 {self.get_currency_symbol()}")
         self.balance_label.setText(f"0.00 {self.get_currency_symbol()}")
     
@@ -851,12 +874,13 @@ class PaiementIndex(QWidget):
             <div class="section">
                 <h3>Résumé financier</h3>
                 <table>
-                    <tr><td>Sous-total</td><td>{self.format_amount(self.selected_reservation.get('subtotal', 0))}</td></tr>
-                    <tr><td>Remise</td><td>{self.format_amount(self.selected_reservation.get('discount', 0))}</td></tr>
-                    <tr><td>TVA</td><td>{self.format_amount(self.selected_reservation.get('tax_amount', 0))}</td></tr>
-                    <tr class="total"><td>Total</td><td>{self.format_amount(self.selected_reservation.get('total_amount', 0))}</td></tr>
-                    <tr><td>Total payé</td><td>{self.format_amount(balance_info.get('total_paid', 0))}</td></tr>
-                    <tr class="total"><td>Solde restant</td><td>{self.format_amount(balance_info.get('balance', 0))}</td></tr>
+                    <tr><td>Sous-total HT</td><td>{self.format_amount(self.selected_reservation.get('total_services', 0) + self.selected_reservation.get('total_products', 0))}</td></tr>
+                    <tr><td>TVA ({self.selected_reservation.get('tax_rate', 0):.1f}%)</td><td>{self.format_amount(self.selected_reservation.get('tax_amount', 0))}</td></tr>
+                    <tr style="background-color: #f0f7ff;"><td><strong>Total TTC</strong></td><td><strong>{self.format_amount(self.selected_reservation.get('total_amount', 0))}</strong></td></tr>
+                    <tr><td>Remise ({self.selected_reservation.get('discount_percent', 0):.1f}%)</td><td style="color: red;">-{self.format_amount(self.selected_reservation.get('total_amount', 0) * self.selected_reservation.get('discount_percent', 0) / 100)}</td></tr>
+                    <tr class="total"><td><strong>Total NET</strong></td><td><strong>{self.format_amount(self.selected_reservation.get('total_amount', 0) * (1 - self.selected_reservation.get('discount_percent', 0) / 100))}</strong></td></tr>
+                    <tr><td>Total payé</td><td style="color: green;">{self.format_amount(balance_info.get('total_paid', 0))}</td></tr>
+                    <tr class="total"><td><strong>Solde restant</strong></td><td style="color: red;"><strong>{self.format_amount(balance_info.get('balance', 0))}</strong></td></tr>
                 </table>
             </div>
             
@@ -1089,10 +1113,19 @@ class PaiementIndex(QWidget):
                 print(f"Erreur produit: {e}")
                 continue
         
-        # Calculer les totaux
+        # Calculer les totaux selon la nouvelle logique
         total_services = sum(s['quantity'] * s['unit_price'] for s in services)
         total_products = sum(p['quantity'] * p['unit_price'] for p in products)
-        subtotal = total_services + total_products
+        subtotal_ht = total_services + total_products
+        
+        # Récupérer les valeurs depuis la BDD
+        tax_amount = self.selected_reservation.get('tax_amount', 0)
+        total_ttc = self.selected_reservation.get('total_amount', 0)  # TTC sans remise (stocké en BDD)
+        discount_percent = self.selected_reservation.get('discount_percent', 0)
+        
+        # Calculer remise et total net
+        discount_amount = total_ttc * (discount_percent / 100) if total_ttc > 0 else 0
+        total_net = total_ttc - discount_amount
         
         return {
             'reference': self.selected_reservation.get('reference', 'N/A'),
@@ -1110,10 +1143,14 @@ class PaiementIndex(QWidget):
             'products': products,
             'total_services': total_services,
             'total_products': total_products,
-            'subtotal': subtotal,
-            'tax_amount': self.selected_reservation.get('tax_amount', 0),
-            'discount_amount': self.selected_reservation.get('discount_amount', 0),
-            'total_amount': self.selected_reservation.get('total_amount', 0)
+            'subtotal_ht': subtotal_ht,
+            'tax_amount': tax_amount,
+            'tax_rate': self.selected_reservation.get('tax_rate', 0),
+            'total_ttc': total_ttc,
+            'discount_percent': discount_percent,
+            'discount_amount': discount_amount,
+            'total_net': total_net,
+            'total_amount': total_ttc  # Pour compatibilité
         }
     
     def prepare_payment_data(self, row_index):

@@ -902,6 +902,18 @@ class ReservationForm(QDialog):
             QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un type d'événement.")
             return
         
+        # VALIDATION ACCOMPTE : Obligatoire pour créer une réservation
+        deposit_amount = self.deposit_spinbox.value()
+        if not self.is_edit_mode and deposit_amount <= 0:
+            QMessageBox.warning(
+                self, 
+                "Acompte requis", 
+                "Un acompte supérieur à 0 est obligatoire pour créer une réservation.\n\n"
+                "Veuillez saisir un montant d'acompte pour valider la réservation."
+            )
+            self.deposit_spinbox.setFocus()  # Mettre le focus sur le champ acompte
+            return
+        
         # Récupération des données
         # Gestion du client (pré-enregistré ou nouveau)
         client_id = None
