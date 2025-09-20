@@ -2,7 +2,7 @@
 Modèles de comptabilité conforme au système SYSCOHADA
 Adapté pour Ayanna ERP
 """
-from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, ForeignKey, Boolean, func, Index
+from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, ForeignKey, Boolean, func, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from ayanna_erp.database.database_manager import Base
 from datetime import datetime
@@ -13,7 +13,7 @@ class ComptaClasses(Base):
     __tablename__ = 'compta_classes'
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    code = Column(String(10), nullable=False, unique=True)
+    code = Column(String(10), nullable=False)  # Suppression de unique=True
     nom = Column(String(100), nullable=False)  # Nom court de la classe
     libelle = Column(String(255), nullable=False)  # Libellé complet
     type = Column(String(20), nullable=False)  # actif, passif, charge, produit
@@ -22,6 +22,11 @@ class ComptaClasses(Base):
     actif = Column(Boolean, default=True)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    
+    # Contrainte d'unicité composite : un code de classe unique par entreprise
+    __table_args__ = (
+        UniqueConstraint('code', 'enterprise_id', name='uq_classe_code_enterprise'),
+    )
     
     # Relations
     comptes = relationship("ComptaComptes", back_populates="classe_comptable")

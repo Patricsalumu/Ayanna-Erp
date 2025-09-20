@@ -12,7 +12,7 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon
 
 # Import du contrôleur principal
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from controller.mainWindow_controller import MainWindowController
+from ..controller.mainWindow_controller import MainWindowController
 
 # Import des différents onglets
 from .calendrier_index import CalendrierIndex

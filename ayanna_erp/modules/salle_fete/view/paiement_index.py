@@ -125,9 +125,9 @@ class PaymentDialog(QDialog):
 class PaiementIndex(QWidget):
     """Onglet pour la gestion des paiements"""
     
-    def __init__(self, db_manager, current_user):
+    def __init__(self, main_controller, current_user):
         super().__init__()
-        self.db_manager = db_manager
+        self.main_controller = main_controller
         self.current_user = current_user
         self.selected_reservation = None
         
@@ -146,8 +146,9 @@ class PaiementIndex(QWidget):
             from ayanna_erp.modules.salle_fete.controller.paiement_controller import PaiementController
             from ayanna_erp.modules.salle_fete.controller.reservation_controller import ReservationController
             
-            self.paiement_controller = PaiementController(pos_id=1)
-            self.reservation_controller = ReservationController(pos_id=1)
+            pos_id = getattr(main_controller, 'pos_id', 1)
+            self.paiement_controller = PaiementController(pos_id=pos_id)
+            self.reservation_controller = ReservationController(pos_id=pos_id)
         except Exception as e:
             print(f"Erreur lors de l'import des contrôleurs: {e}")
             self.paiement_controller = None

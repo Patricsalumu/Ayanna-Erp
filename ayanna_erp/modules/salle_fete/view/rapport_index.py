@@ -30,11 +30,13 @@ except ImportError:
 class RapportIndex(QWidget):
     """Onglet pour la génération et visualisation des rapports avec dashboards intuitifs"""
     
-    def __init__(self, db_manager, current_user):
+    def __init__(self, main_controller, current_user):
         super().__init__()
-        self.db_manager = db_manager
+        self.main_controller = main_controller
         self.current_user = current_user
-        self.rapport_controller = RapportController()
+        # Utiliser le pos_id du contrôleur principal
+        pos_id = getattr(main_controller, 'pos_id', 1)
+        self.rapport_controller = RapportController(pos_id=pos_id)
         self.pdf_exporter = PDFExporter()
         self.currency_symbol = "$"  # Fallback par défaut
         try:

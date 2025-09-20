@@ -21,13 +21,16 @@ from ayanna_erp.modules.salle_fete.model.salle_fete import (
 class RapportController:
     """Contrôleur pour la génération des rapports"""
     
-    def __init__(self):
+    def __init__(self, pos_id=1):
         self.db_manager = DatabaseManager()
+        self.pos_id = pos_id
         
-    def get_monthly_events_data(self, year: int, month: int, pos_id: int = 1):
+    def get_monthly_events_data(self, year: int, month: int, pos_id: int = None):
         """
         Récupérer les données des événements pour un mois donné
         """
+        if pos_id is None:
+            pos_id = self.pos_id
         session = self.db_manager.get_session()
         try:
             # Date de début et fin du mois
@@ -106,10 +109,12 @@ class RapportController:
         finally:
             session.close()
     
-    def get_yearly_events_data(self, year: int, pos_id: int = 1):
+    def get_yearly_events_data(self, year: int, pos_id: int = None):
         """
         Récupérer les données des événements pour une année donnée
         """
+        if pos_id is None:
+            pos_id = self.pos_id
         session = self.db_manager.get_session()
         try:
             # Date de début et fin de l'année
@@ -186,10 +191,12 @@ class RapportController:
         finally:
             session.close()
     
-    def get_financial_report_data(self, start_date: datetime, end_date: datetime, pos_id: int = 1):
+    def get_financial_report_data(self, start_date: datetime, end_date: datetime, pos_id: int = None):
         """
         Récupérer les données financières pour une période donnée
         """
+        if pos_id is None:
+            pos_id = self.pos_id
         session = self.db_manager.get_session()
         try:
             # Revenus par méthode de paiement
@@ -328,10 +335,12 @@ class RapportController:
             'expenses': list(daily_expenses.values())
         }
     
-    def get_comparison_data(self, current_year: int, current_month: int, pos_id: int = 1):
+    def get_comparison_data(self, current_year: int, current_month: int, pos_id: int = None):
         """
         Récupérer les données de comparaison avec la période précédente
         """
+        if pos_id is None:
+            pos_id = self.pos_id
         session = self.db_manager.get_session()
         try:
             # Mois précédent

@@ -369,7 +369,15 @@ class MainWindow(QMainWindow):
             # Importer et ouvrir le module approprié
             if module_name == "SalleFete":
                 from ..modules.salle_fete.view.salle_fete_window import SalleFeteWindow
-                window = SalleFeteWindow(self.current_user)
+                # Récupérer le pos_id correct pour cette entreprise et ce module
+                pos_id = self.db_manager.get_pos_id_for_enterprise_module(
+                    self.current_user.enterprise_id, 
+                    "SalleFete"
+                )
+                if pos_id is None:
+                    QMessageBox.warning(self, "Erreur", "Aucun point de vente configuré pour ce module.")
+                    return
+                window = SalleFeteWindow(self.current_user, pos_id=pos_id)
             elif module_name == "Boutique":
                 from ayanna_erp.modules.boutique.boutique_window import BoutiqueWindow
                 window = BoutiqueWindow(self.current_user)

@@ -31,39 +31,31 @@ class MainWindowController(QObject):
         """Récupérer l'ID du POS Salle de Fête pour l'entreprise de l'utilisateur"""
         try:
             db_manager = get_database_manager()
-            session = db_manager.get_session()
             
             # Importer les modèles nécessaires
-            from ayanna_erp.database.database_manager import POSPoint, User
+            from ayanna_erp.database.database_manager import User
             
+            session = db_manager.get_session()
             # Récupérer l'utilisateur
             user = session.query(User).filter_by(id=self.user_id).first()
+            session.close()
+            
             if not user:
                 print(f"❌ Utilisateur avec ID {self.user_id} non trouvé")
-                db_manager.close_session()
                 return 1  # Valeur par défaut
             
-            # Chercher le POS du module Salle de Fête (module_id=1) pour cette entreprise
-            pos = session.query(POSPoint).filter_by(
-                enterprise_id=user.enterprise_id,
-                module_id=1  # Module Salle de Fête
-            ).first()
+            # Utiliser la nouvelle méthode pour récupérer le pos_id
+            pos_id = db_manager.get_pos_id_for_enterprise_module(user.enterprise_id, "SalleFete")
             
-            if pos:
-                print(f"✅ POS trouvé pour l'entreprise: {pos.name} (ID: {pos.id})")
-                db_manager.close_session()
-                return pos.id
+            if pos_id:
+                print(f"✅ POS trouvé pour l'entreprise: POS ID {pos_id}")
+                return pos_id
             else:
                 print(f"❌ Aucun POS Salle de Fête trouvé pour l'entreprise {user.enterprise_id}")
-                db_manager.close_session()
                 return 1  # Valeur par défaut
                 
         except Exception as e:
             print(f"❌ Erreur lors de la recherche du POS: {e}")
-            try:
-                db_manager.close_session()
-            except:
-                pass
             return 1  # Valeur par défaut
         
     def set_pos_id(self, pos_id):
@@ -88,12 +80,17 @@ class MainWindowController(QObject):
             existing_services = session.query(EventService).filter(EventService.pos_id == self.pos_id).first()
             db_manager.close_session()
             
-            # Si les données existent déjà, pas besoin d'afficher la popup
-            is_first_time = existing_services is None
+            # Si les données existent déjà, ne pas réinitialiser
+            if existing_services is not None:
+                print("✅ Module Salle de Fête déjà initialisé")
+                self.is_initialized = True
+                self.initialization_completed.emit(True)
+                self.database_ready.emit()
+                return True
             
-            print("🎪 Initialisation du module Salle de Fête...")
+            print("🎪 Première initialisation du module Salle de Fête...")
             
-            # Initialiser les tables et données
+            # Initialiser les tables et données seulement si ce n'est pas encore fait
             success = initialize_salle_fete_module(self.pos_id)
             
             if success:
@@ -102,8 +99,8 @@ class MainWindowController(QObject):
                 self.initialization_completed.emit(True)
                 self.database_ready.emit()
                 
-                # Afficher un message de confirmation SEULEMENT si c'est la première fois
-                if is_first_time and self.parent_window:
+                # Afficher un message de confirmation seulement pour la première initialisation
+                if self.parent_window:
                     QMessageBox.information(
                         self.parent_window,
                         "Initialisation réussie",

@@ -343,7 +343,12 @@ class ProduitForm(QDialog):
             from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
             
             comptabilite_controller = ComptabiliteController()
-            comptes = comptabilite_controller.get_comptes_vente()
+            
+            # Récupérer l'entreprise depuis le contrôleur produit
+            entreprise_id = self.get_enterprise_id()
+            
+            # Filtrer les comptes par entreprise
+            comptes = comptabilite_controller.get_comptes_vente(entreprise_id=entreprise_id)
             
             self.account_combo.clear()
             self.account_combo.addItem("-- Sélectionner un compte --", None)
@@ -354,6 +359,35 @@ class ProduitForm(QDialog):
         except Exception as e:
             print(f"Erreur lors du chargement des comptes: {e}")
             self.account_combo.addItem("Erreur - Comptes indisponibles", None)
+    
+    def get_enterprise_id(self):
+        """Récupérer l'ID de l'entreprise depuis le contrôleur produit"""
+        try:
+            if self.controller and hasattr(self.controller, 'pos_id'):
+                # Récupérer l'entreprise depuis le pos_id
+                from ayanna_erp.database.database_manager import get_database_manager
+                
+                db_manager = get_database_manager()
+                session = db_manager.get_session()
+                
+                try:
+                    # Récupérer le POS et son entreprise
+                    from ayanna_erp.database.database_manager import POSPoint
+                    pos = session.query(POSPoint).filter_by(id=self.controller.pos_id).first()
+                    
+                    if pos:
+                        return pos.enterprise_id
+                    else:
+                        print(f"⚠️  POS avec ID {self.controller.pos_id} non trouvé")
+                        return None
+                finally:
+                    session.close()
+            else:
+                print("⚠️  Contrôleur ou pos_id non disponible")
+                return None
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération de l'entreprise: {e}")
+            return None
     
     def check_stock_alert(self):
         """Vérifier et afficher les alertes de stock"""

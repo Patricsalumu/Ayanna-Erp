@@ -190,7 +190,8 @@ class EntreeSortieIndex(QWidget):
         
         # Initialiser le contrôleur des dépenses
         from ayanna_erp.modules.salle_fete.controller.entre_sortie_controller import EntreSortieController
-        self.expense_controller = EntreSortieController(pos_id=1)  # TODO: Récupérer le vrai pos_id
+        pos_id = getattr(main_controller, 'pos_id', 1)
+        self.expense_controller = EntreSortieController(pos_id=pos_id)
         
         self.setup_ui()
         self.load_journal_data()
@@ -448,10 +449,11 @@ class EntreeSortieIndex(QWidget):
             
             # Charger les sorties (dépenses) depuis event_expenses
             try:
-                entre_sortie_controller = EntreSortieController()
+                pos_id = getattr(self.main_controller, 'pos_id', 1)
+                entre_sortie_controller = EntreSortieController(pos_id=pos_id)
                 expenses = entre_sortie_controller.get_expenses_by_date_and_pos(
                     selected_date, 
-                    self.current_pos_id if hasattr(self, 'current_pos_id') else 1
+                    pos_id
                 )
                 
                 for expense in expenses:
@@ -473,10 +475,11 @@ class EntreeSortieIndex(QWidget):
             
             # Charger les entrées (paiements) depuis event_payments
             try:
-                paiement_controller = PaiementController()
+                pos_id = getattr(self.main_controller, 'pos_id', 1)
+                paiement_controller = PaiementController(pos_id=pos_id)
                 payments = paiement_controller.get_payments_by_date_and_pos(
                     selected_date,
-                    self.current_pos_id if hasattr(self, 'current_pos_id') else 1
+                    pos_id
                 )
                 
                 for payment in payments:

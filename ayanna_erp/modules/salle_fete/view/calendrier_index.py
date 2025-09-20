@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDateTime, QDate
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QTextCharFormat, QColor
 from decimal import Decimal
 from datetime import datetime, timedelta
-from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.database.database_manager import DatabaseManager, get_database_manager
 from ayanna_erp.modules.salle_fete.controller.calendrier_controller import CalendrierController
 
 
@@ -24,9 +24,9 @@ class EventCalendarWidget(QWidget):
     event_selected = pyqtSignal(int)  # Signal émis quand un événement est sélectionné
     reservation_requested = pyqtSignal(object)  # Signal pour demander création réservation
     
-    def __init__(self):
+    def __init__(self, pos_id=1):
         super().__init__()
-        self.calendrier_controller = CalendrierController()
+        self.calendrier_controller = CalendrierController(pos_id=pos_id)
         self.events_by_date = {}  # Cache des événements par date
         self.setup_ui()
         self.connect_signals()
@@ -226,11 +226,13 @@ class EventCalendarWidget(QWidget):
 class CalendrierIndex(QWidget):
     """Onglet principal pour la vue calendrier"""
     
-    def __init__(self, db_manager, current_user):
+    def __init__(self, main_controller, current_user):
         super().__init__()
-        self.db_manager = db_manager
+        self.main_controller = main_controller
         self.current_user = current_user
-        self.calendrier_controller = CalendrierController()
+        # Utiliser le pos_id du contrôleur principal
+        pos_id = getattr(main_controller, 'pos_id', 1)
+        self.calendrier_controller = CalendrierController(pos_id=pos_id)
         self.setup_ui()
         self.connect_signals()
         self.load_upcoming_events()
@@ -243,7 +245,8 @@ class CalendrierIndex(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         
         # Calendrier à gauche
-        self.event_calendar = EventCalendarWidget()
+        pos_id = getattr(self.main_controller, 'pos_id', 1)
+        self.event_calendar = EventCalendarWidget(pos_id=pos_id)
         
         # Informations à droite
         right_widget = QWidget()
@@ -415,12 +418,18 @@ class CalendrierIndex(QWidget):
             from ayanna_erp.modules.salle_fete.view.reservation_form import ReservationForm
             from PyQt6.QtCore import QDateTime, QDate, QTime
             
+            # Obtenir le gestionnaire de base de données
+            db_manager = get_database_manager()
+            
+            # Obtenir le pos_id du contrôleur principal
+            pos_id = getattr(self.main_controller, 'pos_id', 1)
+            
             # Créer la fenêtre de réservation avec les paramètres corrects
             reservation_form = ReservationForm(
                 parent=self,
                 reservation_data=None,  # Nouvelle réservation
-                db_manager=self.db_manager,
-                pos_id=1  # ID du point de vente par défaut
+                db_manager=db_manager,
+                pos_id=pos_id
             )
             
             # Pré-remplir la date/heure avec la date sélectionnée à 18h00

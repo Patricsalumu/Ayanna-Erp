@@ -297,6 +297,43 @@ class DatabaseManager:
             return False
         finally:
             session.close()
+    
+    def get_pos_id_for_enterprise_module(self, enterprise_id, module_name):
+        """
+        Récupérer le pos_id pour une entreprise et un module spécifique
+        
+        Args:
+            enterprise_id (int): ID de l'entreprise
+            module_name (str): Nom du module (ex: 'SalleFete', 'Boutique', etc.)
+            
+        Returns:
+            int: ID du POS pour ce module et cette entreprise, ou None si non trouvé
+        """
+        session = self.get_session()
+        try:
+            # Trouver le module par son nom
+            module = session.query(Module).filter_by(name=module_name).first()
+            if not module:
+                print(f"⚠️  Module '{module_name}' non trouvé")
+                return None
+            
+            # Trouver le POS pour cette entreprise et ce module
+            pos = session.query(POSPoint).filter_by(
+                enterprise_id=enterprise_id,
+                module_id=module.id
+            ).first()
+            
+            if pos:
+                return pos.id
+            else:
+                print(f"⚠️  Aucun POS trouvé pour l'entreprise {enterprise_id} et le module {module_name}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Erreur lors de la récupération du pos_id: {e}")
+            return None
+        finally:
+            session.close()
 
 
 # ====================================================

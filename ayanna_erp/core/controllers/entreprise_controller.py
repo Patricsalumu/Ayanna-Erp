@@ -300,6 +300,13 @@ class EntrepriseController(QObject):
             session.add(enterprise)
             session.commit()
             
+            # Créer automatiquement les POS pour tous les modules
+            pos_created = self.db_manager.create_pos_for_new_enterprise(enterprise.id)
+            if not pos_created:
+                print("⚠️ Erreur lors de la création des POS pour l'entreprise")
+            else:
+                print(f"✅ POS créés automatiquement pour l'entreprise {enterprise.name}")
+            
             # Créer automatiquement un utilisateur admin associé à cette entreprise
             admin_user = User(
                 name='Administrateur Système',
@@ -331,7 +338,8 @@ class EntrepriseController(QObject):
                     'name': 'Administrateur Système',
                     'email': admin_user.email,
                     'password': 'admin123'
-                }
+                },
+                'pos_created': pos_created
             }
             
             session.close()

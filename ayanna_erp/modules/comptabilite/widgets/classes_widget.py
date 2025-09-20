@@ -1,9 +1,11 @@
 """
 ClassesWidget - Onglet Classes Comptables
 Lecture seule des classes, export PDF.
+Les classes comptables sont protégées et ne peuvent être modifiées pour maintenir l'harmonie du système comptable OHADA.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLabel
 from PyQt6.QtGui import QStandardItemModel
+from PyQt6.QtCore import Qt
 
 class ClassesWidget(QWidget):
     def __init__(self, controller, parent=None):
@@ -46,6 +48,23 @@ class ClassesWidget(QWidget):
             }
         ''')
         self.layout.addWidget(self.table)
+        
+        # Message informatif pour les classes protégées
+        info_label = QLabel("📋 Classes comptables OHADA (1-8 + 44 taxes) - Lecture seule (protection du système comptable)")
+        info_label.setStyleSheet("""
+            QLabel {
+                background-color: #e3f2fd;
+                color: #1976d2;
+                padding: 8px;
+                border-radius: 4px;
+                border-left: 4px solid #1976d2;
+                font-weight: bold;
+                margin: 4px 0;
+            }
+        """)
+        info_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.layout.addWidget(info_label)
+        
         btn_layout = QHBoxLayout()
         self.export_btn = QPushButton("Exporter PDF")
         btn_layout.addWidget(self.export_btn)

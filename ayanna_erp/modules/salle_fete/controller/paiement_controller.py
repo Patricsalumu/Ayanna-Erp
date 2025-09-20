@@ -762,10 +762,12 @@ class PaiementController(QObject):
             start_datetime = datetime.combine(target_date, datetime.min.time())
             end_datetime = datetime.combine(target_date, datetime.max.time())
             
-            # Requête pour récupérer les paiements de la date (EventPayment est toujours pour POS 1 - salle de fête)
+            # Requête pour récupérer les paiements de la date filtrés par pos_id
             payments = session.query(EventPayment)\
+                .join(EventReservation)\
                 .filter(
-                    EventPayment.payment_date.between(start_datetime, end_datetime)
+                    EventPayment.payment_date.between(start_datetime, end_datetime),
+                    EventReservation.pos_id == pos_id
                 )\
                 .order_by(desc(EventPayment.payment_date))\
                 .all()

@@ -48,12 +48,21 @@ class ComptabiliteController:
         """
         Récupère la liste des comptes comptables de vente (classe 7)
         pour utilisation dans les formulaires de services et produits
+        Filtre par entreprise si entreprise_id est fourni
         """
         try:
-            # Récupérer les comptes de classe 7 (Produits/Ventes)
-            comptes = self.session.query(ComptaComptes).filter(
+            # Base query: Récupérer les comptes de classe 7 (Produits/Ventes)
+            query = self.session.query(ComptaComptes).join(
+                ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id
+            ).filter(
                 ComptaComptes.numero.like('7%')  # Comptes de classe 7
-            ).order_by(ComptaComptes.numero).all()
+            )
+            
+            # Filtrer par entreprise si spécifié
+            if entreprise_id:
+                query = query.filter(ComptaClasses.enterprise_id == entreprise_id)
+            
+            comptes = query.order_by(ComptaComptes.numero).all()
             
             return comptes
         except Exception as e:
@@ -835,27 +844,29 @@ class ComptabiliteController:
     # Classes Comptables
     def get_classes(self, entreprise_id):
         """Retourne toutes les classes comptables"""
-        # Import remplac� par les nouveaux mod�les
+        # Import remplacé par les nouveaux modèles
         classes = self.session.query(ClasseComptable).filter(ClasseComptable.enterprise_id == entreprise_id).all()
         if not classes:
-            # Création automatique des 7 classes Syscohada
-            sysco_classes = [
-                {"code": "1", "nom": "Actif", "document": "bilan", "type": "actif", "libelle": "Comptes de ressources durables"},
-                {"code": "2", "nom": "Passif", "document": "bilan", "type": "passif", "libelle": "Comptes emplois durables"},
-                {"code": "3", "nom": "Stocks", "document": "bilan", "type": "actif", "libelle": "Comptes de stocks et en-cours"},
-                {"code": "4", "nom": "Tierse", "document": "bilan", "type": "mixte", "libelle": "Comptes de tiers"},
-                {"code": "5", "nom": "Financiers", "document": "bilan", "type": "actif", "libelle": "Comptes financiers"},
-                {"code": "6", "nom": "Charges", "document": "resultat", "type": "charge", "libelle": "Comptes de charges"},
-                {"code": "7", "nom": "Produits", "document": "resultat", "type": "produit", "libelle": "Comptes de produits"},
+            # Création automatique des classes OHADA (1 à 8) + classe spéciale 44 pour les taxes
+            ohada_classes = [
+                {"code": "1", "nom": "COMPTES DE RESSOURCES DURABLES", "document": "bilan", "type": "passif", "libelle": "Comptes de ressources durables"},
+                {"code": "2", "nom": "COMPTES D'ACTIF IMMOBILISE", "document": "bilan", "type": "actif", "libelle": "Comptes d'actif immobilisé"},
+                {"code": "3", "nom": "COMPTES DE STOCKS", "document": "bilan", "type": "actif", "libelle": "Comptes de stocks"},
+                {"code": "4", "nom": "COMPTES DE TIERS", "document": "bilan", "type": "mixte", "libelle": "Comptes de tiers"},
+                {"code": "5", "nom": "COMPTES DE TRESORERIE", "document": "bilan", "type": "actif", "libelle": "Comptes de trésorerie"},
+                {"code": "6", "nom": "COMPTES DE CHARGES", "document": "resultat", "type": "charge", "libelle": "Comptes de charges"},
+                {"code": "7", "nom": "COMPTES DE PRODUITS", "document": "resultat", "type": "produit", "libelle": "Comptes de produits"},
+                {"code": "8", "nom": "COMPTES DES AUTRES CHARGES ET DES AUTRES PRODUITS", "document": "resultat", "type": "mixte", "libelle": "Autres charges et produits"},
+                {"code": "44", "nom": "ÉTAT ET AUTRES COLLECTIVITÉS PUBLIQUES", "document": "bilan", "type": "mixte", "libelle": "État et autres collectivités publiques - Taxes et impôts"}
             ]
-            for cl in sysco_classes:
+            for cl in ohada_classes:
                 new_classe = ClasseComptable(
                     code=cl["code"],
                     nom=cl["nom"],
                     document=cl["document"],
                     type=cl["type"],
                     libelle=cl["libelle"],
-                    entreprise_id=entreprise_id,
+                    enterprise_id=entreprise_id,  # Correction: enterprise_id au lieu d'entreprise_id
                     actif=1
                 )
                 self.session.add(new_classe)
