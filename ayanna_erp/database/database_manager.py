@@ -5,7 +5,7 @@ Utilise SQLAlchemy pour la gestion des modèles et des connexions
 
 import os
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
@@ -313,7 +313,7 @@ class Entreprise(Base):
     email = Column(String(100))
     rccm = Column(String(100))
     id_nat = Column(String(100))
-    logo = Column(Text)  # chemin vers le logo
+    logo = Column(LargeBinary)  # stockage du logo en BLOB
     slogan = Column(Text)
     currency = Column(String(10), default='USD')
     created_at = Column(DateTime, default=datetime.utcnow)

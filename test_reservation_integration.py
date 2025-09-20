@@ -71,7 +71,7 @@ def test_currency_consistency():
     try:
         from PyQt6.QtWidgets import QApplication
         from ayanna_erp.modules.salle_fete.view.reservation_form import ReservationForm
-        from ayanna_erp.core.entreprise_controller import EntrepriseController
+        from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
         
         app = QApplication(sys.argv)
         form = ReservationForm()

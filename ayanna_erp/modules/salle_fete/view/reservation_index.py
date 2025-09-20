@@ -22,7 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.reservation_controller import ReservationController
 from .reservation_form import ReservationForm
 from ....database.database_manager import get_database_manager
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class ReservationIndex(QWidget):

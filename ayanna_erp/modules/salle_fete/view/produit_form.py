@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from decimal import Decimal
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class ProduitForm(QDialog):

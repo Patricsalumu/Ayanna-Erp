@@ -10,7 +10,7 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.comptabilite.model.comptabilite import (
     ComptaClasses, ComptaComptes, ComptaJournaux, ComptaEcritures, ComptaConfig
 )
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 # Alias pour compatibilité avec l'ancien code
 CompteComptable = ComptaComptes

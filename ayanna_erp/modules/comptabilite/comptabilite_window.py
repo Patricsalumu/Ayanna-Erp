@@ -31,7 +31,7 @@ class ComptabiliteWindow(QMainWindow):
         
         # Initialiser la session et l'entreprise depuis l'utilisateur
         from ayanna_erp.database.database_manager import DatabaseManager
-        from ayanna_erp.core.entreprise_controller import EntrepriseController
+        from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
         self.db_manager = DatabaseManager()
         self.session = self.db_manager.get_session()
         self.entreprise_id = self.current_user.enterprise_id

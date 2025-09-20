@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.service_controller import ServiceController
 from .service_form import ServiceForm
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class ServiceIndex(QWidget):

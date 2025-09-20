@@ -6,7 +6,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '.'))
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 def test_currency_parsing():
     """Test du parsing de montants avec différentes devises"""

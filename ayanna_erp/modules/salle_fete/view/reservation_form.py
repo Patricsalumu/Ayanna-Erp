@@ -20,7 +20,7 @@ sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from controller.service_controller import ServiceController
 from controller.produit_controller import ProduitController
 from controller.reservation_controller import ReservationController
-from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class ReservationForm(QDialog):
@@ -92,7 +92,7 @@ class ReservationForm(QDialog):
         """Extrait un montant numérique depuis un texte formaté avec devise"""
         try:
             # Obtenir le symbole de devise actuel depuis EntrepriseController
-            from ayanna_erp.core.entreprise_controller import EntrepriseController
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
             entreprise_controller = EntrepriseController()
             currency_symbol = entreprise_controller.get_currency_symbol()
             

@@ -418,13 +418,97 @@ class MainWindow(QMainWindow):
         # Fermer la fenêtre principale
         self.close()
     
+    def user_to_dict(self):
+        """Convertir l'objet User en dictionnaire pour compatibilité avec les vues"""
+        if hasattr(self.current_user, '__dict__'):
+            # Si c'est déjà un dictionnaire-like
+            user_dict = {}
+            if hasattr(self.current_user, 'id'):
+                user_dict['id'] = self.current_user.id
+            if hasattr(self.current_user, 'username'):
+                user_dict['username'] = self.current_user.username
+            if hasattr(self.current_user, 'name'):
+                user_dict['name'] = self.current_user.name
+            if hasattr(self.current_user, 'role'):
+                user_dict['role'] = self.current_user.role
+            if hasattr(self.current_user, 'email'):
+                user_dict['email'] = getattr(self.current_user, 'email', '')
+            if hasattr(self.current_user, 'enterprise_id'):
+                user_dict['enterprise_id'] = self.current_user.enterprise_id
+            return user_dict
+        else:
+            # Si c'est déjà un dictionnaire
+            return self.current_user
+
     def open_enterprise_config(self):
         """Ouvrir la configuration de l'entreprise"""
-        QMessageBox.information(self, "Information", "Configuration de l'entreprise en cours de développement.")
+        try:
+            from ayanna_erp.core.view.enterprise_index import EnterpriseIndexView
+            
+            # Vérifier si la fenêtre est déjà ouverte
+            if 'enterprise_config' in self.module_windows:
+                window = self.module_windows['enterprise_config']
+                if window.isVisible():
+                    window.raise_()
+                    window.activateWindow()
+                    return
+            
+            # Créer une nouvelle fenêtre
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Configuration de l'Entreprise")
+            dialog.setMinimumSize(800, 600)
+            dialog.setModal(False)
+            
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Ajouter la vue enterprise_index
+            user_dict = self.user_to_dict()
+            enterprise_view = EnterpriseIndexView(dialog, user_dict)
+            layout.addWidget(enterprise_view)
+            
+            self.module_windows['enterprise_config'] = dialog
+            dialog.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir la configuration de l'entreprise:\n{str(e)}")
     
     def open_users_config(self):
         """Ouvrir la gestion des utilisateurs"""
-        QMessageBox.information(self, "Information", "Gestion des utilisateurs en cours de développement.")
+        try:
+            from ayanna_erp.core.view.user_index import UserIndexView
+            
+            # Vérifier si la fenêtre est déjà ouverte
+            if 'users_config' in self.module_windows:
+                window = self.module_windows['users_config']
+                if window.isVisible():
+                    window.raise_()
+                    window.activateWindow()
+                    return
+            
+            # Créer une nouvelle fenêtre
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout
+            
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Gestion des Utilisateurs")
+            dialog.setMinimumSize(1000, 700)
+            dialog.setModal(False)
+            
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+            
+            # Ajouter la vue user_index
+            user_dict = self.user_to_dict()
+            users_view = UserIndexView(dialog, user_dict)
+            layout.addWidget(users_view)
+            
+            self.module_windows['users_config'] = dialog
+            dialog.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir la gestion des utilisateurs:\n{str(e)}")
     
     def show_about(self):
         """Afficher les informations sur l'application"""

@@ -22,12 +22,12 @@ import os
 try:
     from ayanna_erp.modules.salle_fete.utils.payment_printer import PaymentPrintManager
     from ayanna_erp.modules.salle_fete.utils.print_settings import PrintSettings, PrintSettingsDialog
-    from ayanna_erp.core.entreprise_controller import EntrepriseController
+    from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 except ImportError:
     from ..utils.payment_printer import PaymentPrintManager
     from ..utils.print_settings import PrintSettings, PrintSettingsDialog
     try:
-        from ayanna_erp.core.entreprise_controller import EntrepriseController
+        from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
     except ImportError:
         EntrepriseController = None
 
@@ -58,7 +58,7 @@ class PaymentDialog(QDialog):
             # Récupérer le symbole de devise depuis l'entreprise
             currency_symbol = "$"  # Fallback par défaut
             try:
-                from ayanna_erp.core.entreprise_controller import EntrepriseController
+                from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
                 controller = EntrepriseController()
                 currency_symbol = controller.get_currency_symbol()
             except:

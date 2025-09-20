@@ -6,6 +6,7 @@ Génération de PDF A4 (réservation complète) et tickets 53mm (reçus)
 import os
 import io
 import sys
+import tempfile
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -18,7 +19,7 @@ from reportlab.pdfgen import canvas
 # Import du contrôleur d'entreprise
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 try:
-    from ayanna_erp.core.entreprise_controller import EntrepriseController
+    from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 except ImportError:
     EntrepriseController = None
 
@@ -42,12 +43,42 @@ class PaymentPrintManager:
                 'phone': '+243 123 456 789',
                 'email': 'contact@ayanna-erp.com',
                 'rccm': 'CD/KIN/RCCM/23-B-1234',
-                'logo_path': 'assets/logo.png'
+                'logo': None  # BLOB au lieu de logo_path
             }
         
         # Styles pour les documents
         self.styles = getSampleStyleSheet()
         self.setup_custom_styles()
+        
+        # Fichier temporaire pour le logo
+        self._temp_logo_path = None
+    
+    def _create_temp_logo_file(self):
+        """Créer un fichier temporaire pour le logo BLOB"""
+        if self.company_info.get('logo') and not self._temp_logo_path:
+            try:
+                # Créer un fichier temporaire
+                with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as temp_file:
+                    temp_file.write(self.company_info['logo'])
+                    self._temp_logo_path = temp_file.name
+            except Exception as e:
+                print(f"Erreur création fichier temporaire logo: {e}")
+                self._temp_logo_path = None
+        
+        return self._temp_logo_path
+    
+    def _cleanup_temp_logo(self):
+        """Nettoyer le fichier temporaire du logo"""
+        if self._temp_logo_path and os.path.exists(self._temp_logo_path):
+            try:
+                os.unlink(self._temp_logo_path)
+                self._temp_logo_path = None
+            except Exception as e:
+                print(f"Erreur suppression fichier temporaire: {e}")
+    
+    def __del__(self):
+        """Destructeur pour nettoyer les fichiers temporaires"""
+        self._cleanup_temp_logo()
     
     def get_currency_symbol(self):
         """Récupérer le symbole de devise de l'entreprise"""
@@ -118,11 +149,13 @@ class PaymentPrintManager:
         canvas.line(50, A4[1] - 120, A4[0] - 50, A4[1] - 120)
         
         # Logo (si disponible)
-        if self.company_info['logo_path'] and os.path.exists(self.company_info['logo_path']):
+        logo_path = self._create_temp_logo_file()
+        if logo_path and os.path.exists(logo_path):
             try:
-                canvas.drawImage(self.company_info['logo_path'], 50, A4[1] - 110, 
+                canvas.drawImage(logo_path, 50, A4[1] - 110, 
                                width=60, height=60, preserveAspectRatio=True)
-            except:
+            except Exception as e:
+                print(f"Erreur affichage logo: {e}")
                 pass
         
         # Informations entreprise
@@ -475,11 +508,12 @@ class PaymentPrintManager:
         line_height = 3*mm  # Espacement entre les lignes
         
         # Logo et en-tête entreprise (taille réduite pour 53mm)
-        if self.company_info['logo_path'] and os.path.exists(self.company_info['logo_path']):
+        logo_path = self._create_temp_logo_file()
+        if logo_path and os.path.exists(logo_path):
             try:
                 logo_width = 15*mm
                 logo_height = 10*mm
-                c.drawImage(self.company_info['logo_path'], 
+                c.drawImage(logo_path, 
                            (TICKET_WIDTH - logo_width) / 2, y_position - logo_height, 
                            width=logo_width, height=logo_height, preserveAspectRatio=True)
                 y_position -= logo_height + 2*mm

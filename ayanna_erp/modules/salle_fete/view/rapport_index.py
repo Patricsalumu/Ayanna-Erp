@@ -38,7 +38,7 @@ class RapportIndex(QWidget):
         self.pdf_exporter = PDFExporter()
         self.currency_symbol = "$"  # Fallback par défaut
         try:
-            from ayanna_erp.core.entreprise_controller import EntrepriseController
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
             self.controller = EntrepriseController()
             self.currency_symbol = self.controller.get_currency_symbol()
         except:
