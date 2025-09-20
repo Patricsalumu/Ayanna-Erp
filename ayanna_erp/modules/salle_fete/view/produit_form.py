@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                             QFormLayout, QLineEdit, QPushButton, 
                             QTextEdit, QDoubleSpinBox, QComboBox,
                             QCheckBox, QLabel, QMessageBox, QGroupBox,
-                            QSpinBox)
+                            QSpinBox, QScrollArea, QWidget)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from decimal import Decimal
@@ -26,6 +26,12 @@ class ProduitForm(QDialog):
         self.produit_data = produit_data
         self.controller = controller
         self.is_edit_mode = produit_data is not None
+        
+        """Initialiser l'interface utilisateur"""
+        self.setWindowTitle("Modifier le produit" if self.is_edit_mode else "Nouveau produit")
+        self.setModal(True)
+        self.setMinimumSize(700, 500)  # Augmenté pour une meilleure visibilité
+        self.resize(800, 600)  # Taille par défaut plus grande
         
         # Initialiser le contrôleur entreprise pour les devises
         self.entreprise_controller = EntrepriseController()
@@ -51,13 +57,19 @@ class ProduitForm(QDialog):
             return f"{amount:.2f} €"  # Fallback
     
     def setup_ui(self):
-        """Initialiser l'interface utilisateur"""
-        self.setWindowTitle("Modifier le produit" if self.is_edit_mode else "Nouveau produit")
-        self.setModal(True)
-        self.resize(550, 500)
-        
+            
         # Layout principal
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+        
+        # Créer le scroll area
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        
+        # Widget de contenu pour le scroll
+        content_widget = QWidget()
+        layout = QVBoxLayout(content_widget)
         
         # === INFORMATIONS GÉNÉRALES ===
         general_group = QGroupBox("Informations générales")
@@ -183,17 +195,34 @@ class ProduitForm(QDialog):
         
         layout.addWidget(options_group)
         
-        # === BOUTONS ===
-        buttons_layout = QHBoxLayout()
+        # Configurer le scroll area
+        scroll_area.setWidget(content_widget)
+        main_layout.addWidget(scroll_area)
+        
+        # === BOUTONS (en dehors du scroll) ===
+        buttons_widget = QWidget()
+        buttons_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f8f9fa;
+                border-top: 1px solid #dee2e6;
+            }
+        """)
+        buttons_layout = QHBoxLayout(buttons_widget)
+        buttons_layout.setContentsMargins(15, 10, 15, 10)
         
         self.cancel_btn = QPushButton("Annuler")
         self.save_btn = QPushButton("Modifier" if self.is_edit_mode else "Créer")
         
+        # Forcer la couleur du texte des boutons
+        self.cancel_btn.setStyleSheet("color: #2c3e50; font-weight: bold;")
+        self.save_btn.setStyleSheet("color: #2c3e50; font-weight: bold;")
+        
         buttons_layout.addStretch()
         buttons_layout.addWidget(self.cancel_btn)
+        buttons_layout.addSpacing(8)  # Espacement entre les boutons
         buttons_layout.addWidget(self.save_btn)
         
-        layout.addLayout(buttons_layout)
+        main_layout.addWidget(buttons_widget)
         
         # Connecter les signaux
         self.cancel_btn.clicked.connect(self.reject)
@@ -210,6 +239,10 @@ class ProduitForm(QDialog):
         """Appliquer les styles"""
         self.setStyleSheet("""
             QDialog {
+                background-color: #f8f9fa;
+            }
+            QScrollArea {
+                border: none;
                 background-color: #f8f9fa;
             }
             QGroupBox {
@@ -238,28 +271,55 @@ class ProduitForm(QDialog):
             }
             QPushButton {
                 padding: 8px 16px;
-                border: none;
+                border: 1px solid #dee2e6;
                 border-radius: 4px;
                 font-weight: bold;
+                font-size: 13px;
+                min-width: 80px;
+                max-height: 35px;
+                color: #2c3e50;
+                text-align: center;
+                background-color: #f8f9fa;
             }
             QPushButton#save_btn {
-                background-color: #007bff;
-                color: white;
+                background-color: #e3f2fd;
+                color: #1976d2;
+                border: 1px solid #1976d2;
             }
             QPushButton#save_btn:hover {
-                background-color: #0056b3;
+                background-color: #bbdefb;
+                border-color: #1565c0;
+                color: #0d47a1;
+            }
+            QPushButton#save_btn:pressed {
+                background-color: #90caf9;
+                color: #0d47a1;
             }
             QPushButton#cancel_btn {
-                background-color: #6c757d;
-                color: white;
+                background-color: #f5f5f5;
+                color: #424242;
+                border: 1px solid #9e9e9e;
             }
             QPushButton#cancel_btn:hover {
-                background-color: #545b62;
+                background-color: #eeeeee;
+                border-color: #757575;
+                color: #212121;
+            }
+            QPushButton#cancel_btn:pressed {
+                background-color: #e0e0e0;
+                color: #212121;
             }
         """)
         
         self.save_btn.setObjectName("save_btn")
         self.cancel_btn.setObjectName("cancel_btn")
+        
+        # S'assurer que les boutons utilisent une police claire
+        font = QFont()
+        font.setPointSize(10)
+        font.setBold(True)
+        self.save_btn.setFont(font)
+        self.cancel_btn.setFont(font)
     
     def update_margin(self):
         """Mettre à jour l'affichage de la marge"""

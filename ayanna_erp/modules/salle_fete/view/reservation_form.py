@@ -58,8 +58,8 @@ class ReservationForm(QDialog):
         
         self.setWindowTitle("Modifier la réservation" if self.is_edit_mode else "Nouvelle réservation")
         self.setModal(True)
-        self.setMinimumSize(900, 700)  # Augmenté pour une meilleure visibilité
-        self.resize(1000, 800)  # Taille par défaut plus grande
+        self.setMinimumSize(800, 600)  # Augmenté pour une meilleure visibilité
+        self.resize(900, 700)  # Taille par défaut plus grande
         
         self.setup_ui()
         
@@ -301,7 +301,11 @@ class ReservationForm(QDialog):
         # Acompte
         self.deposit_spinbox = QDoubleSpinBox()
         self.deposit_spinbox.setRange(0, 999999)
+        self.deposit_spinbox.setDecimals(2)
         self.deposit_spinbox.setSuffix(f" {self.get_currency_symbol()}")
+        self.deposit_spinbox.setMinimumWidth(120)
+        self.deposit_spinbox.setEnabled(True)  # Explicitement activé
+        self.deposit_spinbox.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.deposit_spinbox.valueChanged.connect(self.calculate_totals)
         
         self.remaining_label = QLabel(f"0.00 {self.get_currency_symbol()}")
@@ -314,7 +318,7 @@ class ReservationForm(QDialog):
         totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
         
         # Ligne 2: Total TTC (avant remise) et Montant TVA
-        totals_layout.addWidget(QLabel("Total TTC:"), 1, 0)
+        totals_layout.addWidget(QLabel("Total TTC brut:"), 1, 0)
         totals_layout.addWidget(self.total_before_discount_label, 1, 1)
         totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
         totals_layout.addWidget(self.tax_amount_label, 1, 3)
@@ -326,51 +330,63 @@ class ReservationForm(QDialog):
         totals_layout.addWidget(self.discount_amount_label, 2, 3)
         
         # Ligne 4: TOTAL FINAL et Acompte
-        totals_layout.addWidget(QLabel("TOTAL FINAL:"), 3, 0)
+        totals_layout.addWidget(QLabel("TOTAL NET:"), 3, 0)
         totals_layout.addWidget(self.total_label, 3, 1)
         totals_layout.addWidget(QLabel("Acompte:"), 3, 2)
         totals_layout.addWidget(self.deposit_spinbox, 3, 3)
         
-        # Ligne 5: Solde restant (centré)
-        remaining_layout = QHBoxLayout()
-        remaining_layout.addWidget(QLabel("Solde restant:"))
-        remaining_layout.addWidget(self.remaining_label)
-        remaining_layout.addStretch()
-        
-        remaining_widget = QWidget()
-        remaining_widget.setLayout(remaining_layout)
-        totals_layout.addWidget(remaining_widget, 3, 0, 1, 4)  # Span sur 4 colonnes
+        # Ligne 5: Solde restant (nouvelle ligne séparée)
+        totals_layout.addWidget(QLabel("Solde restant:"), 4, 0)
+        totals_layout.addWidget(self.remaining_label, 4, 1, 1, 3)  # Span sur 3 colonnes
         
         # Boutons d'action
         buttons_layout = QHBoxLayout()
         
-        self.cancel_button = QPushButton("❌ Annuler")
+        self.cancel_button = QPushButton("Annuler")
         self.cancel_button.setStyleSheet("""
             QPushButton {
-                background-color: #95A5A6;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
+                background-color: #f5f5f5;
+                color: #424242;
+                border: 1px solid #9e9e9e;
+                padding: 8px 16px;
+                border-radius: 4px;
                 font-weight: bold;
+                font-size: 13px;
+                min-width: 80px;
+                max-height: 35px;
             }
             QPushButton:hover {
-                background-color: #7F8C8D;
+                background-color: #eeeeee;
+                border-color: #757575;
+                color: #212121;
+            }
+            QPushButton:pressed {
+                background-color: #e0e0e0;
+                color: #212121;
             }
         """)
         
-        self.save_button = QPushButton("💾 Enregistrer")
+        self.save_button = QPushButton("Enregistrer")
         self.save_button.setStyleSheet("""
             QPushButton {
-                background-color: #27AE60;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
+                background-color: #e3f2fd;
+                color: #1976d2;
+                border: 1px solid #1976d2;
+                padding: 8px 16px;
+                border-radius: 4px;
                 font-weight: bold;
+                font-size: 13px;
+                min-width: 80px;
+                max-height: 35px;
             }
             QPushButton:hover {
-                background-color: #219A52;
+                background-color: #bbdefb;
+                border-color: #1565c0;
+                color: #0d47a1;
+            }
+            QPushButton:pressed {
+                background-color: #90caf9;
+                color: #0d47a1;
             }
         """)
         
@@ -389,6 +405,49 @@ class ReservationForm(QDialog):
         
         # Ajouter le scroll area au layout principal du dialog
         main_layout.addWidget(scroll_area)
+        
+        # Appliquer des styles globaux pour une meilleure apparence
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #f8f9fa;
+            }
+            QScrollArea {
+                border: none;
+                background-color: #f8f9fa;
+            }
+            QGroupBox {
+                font-weight: bold;
+                padding-top: 15px;
+                margin-top: 10px;
+                border: 2px solid #dee2e6;
+                border-radius: 8px;
+                background-color: white;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 10px 0 10px;
+                color: #495057;
+                background-color: #f8f9fa;
+            }
+            QLineEdit, QTextEdit, QComboBox, QDoubleSpinBox, QSpinBox, QDateTimeEdit {
+                padding: 6px;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                background-color: white;
+                min-height: 20px;
+            }
+            QLineEdit:focus, QTextEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus, QDateTimeEdit:focus {
+                border-color: #007bff;
+                outline: none;
+            }
+            QDoubleSpinBox {
+                min-width: 100px;
+            }
+            QLabel {
+                color: #495057;
+            }
+        """)
         
         # Connexion des signaux
         self.cancel_button.clicked.connect(self.reject)
