@@ -138,4 +138,5 @@ class ShopPayment(Base):
     # Relations
     sale = relationship("ShopSale", back_populates="payments")
     payment_method = relationship("PaymentMethod")
-    journal = relationship("JournalComptable")
+    # Note: Relationship to JournalComptable will be defined when the model is available
+    # journal = relationship("JournalComptable")

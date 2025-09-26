@@ -339,8 +339,17 @@ class UserIndexView(QWidget):
         self.user_controller.error_occurred.connect(self.on_error_occurred)
     
     def load_users(self):
-        """Charger la liste des utilisateurs"""
-        self.user_controller.get_all_users()
+        """Charger la liste des utilisateurs de l'entreprise courante"""
+        # Récupérer l'ID de l'entreprise de l'utilisateur courant
+        enterprise_id = None
+        if self.current_user:
+            enterprise_id = self.current_user.get('enterprise_id')
+        
+        if enterprise_id:
+            self.user_controller.get_all_users(enterprise_id)
+        else:
+            # Si pas d'entreprise définie, charger tous les utilisateurs (pour super admin)
+            self.user_controller.get_all_users()
     
     def create_user(self):
         """Ouvrir le dialogue de création d'utilisateur"""

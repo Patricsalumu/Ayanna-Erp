@@ -142,13 +142,22 @@ class SimpleUserController(QObject):
             self.error_occurred.emit(f"Erreur lors de la création de l'utilisateur: {str(e)}")
             return None
     
-    def get_all_users(self):
+    def get_all_users(self, enterprise_id=None):
         """
-        Récupérer tous les utilisateurs
+        Récupérer tous les utilisateurs (filtrés par entreprise si spécifié)
+        
+        Args:
+            enterprise_id (int, optional): ID de l'entreprise pour filtrer les utilisateurs
         """
         try:
             session = self.get_session()
-            users = session.query(User).order_by(desc(User.created_at)).all()
+            
+            # Si un enterprise_id est fourni, filtrer par entreprise
+            if enterprise_id:
+                users = session.query(User).filter(User.enterprise_id == enterprise_id).order_by(desc(User.created_at)).all()
+            else:
+                users = session.query(User).order_by(desc(User.created_at)).all()
+            
             session.close()
             
             result = []

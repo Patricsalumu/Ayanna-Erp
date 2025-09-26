@@ -228,7 +228,13 @@ class DatabaseManager:
                 # Classe 7 - Comptes de produits
                 {"numero": "701", "nom": "Ventes marchandises", "libelle": "Ventes de marchandises dans la région", "classe": "7"},
                 {"numero": "706", "nom": "Services vendus", "libelle": "Services vendus dans la région", "classe": "7"},
-                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers de gestion courante", "classe": "7"}
+                {"numero": "709", "nom": "Remises accordées", "libelle": "Remises, rabais et ristournes accordés", "classe": "7"},
+                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers de gestion courante", "classe": "7"},
+                
+                # Classe 44 - Comptes de taxes (TVA)
+                {"numero": "4431", "nom": "TVA collectée", "libelle": "TVA collectée sur ventes", "classe": "44"},
+                {"numero": "4432", "nom": "TVA déductible", "libelle": "TVA déductible sur achats", "classe": "44"},
+                {"numero": "4434", "nom": "TVA due", "libelle": "TVA due à l'État", "classe": "44"},
             ]
             
             comptes_created = {}
@@ -285,11 +291,179 @@ class DatabaseManager:
             print(f"❌ Erreur lors de l'insertion des données comptables: {e}")
             raise
     
+    def _insert_default_services_and_products(self, session, enterprise_id):
+        """Insérer les services et produits par défaut pour une nouvelle entreprise"""
+        try:
+            # Import des modèles nécessaires avec gestion des erreurs
+            EventService = None
+            EventProduct = None
+            ShopService = None
+            ShopProduct = None
+            ShopProductCategory = None
+            
+            # Import sécurisé des modèles Salle de Fête
+            try:
+                from ayanna_erp.modules.salle_fete.model.salle_fete import EventService, EventProduct
+                print("✅ Modèles Salle de Fête importés avec succès")
+            except Exception as e:
+                print(f"⚠️ Impossible d'importer les modèles Salle de Fête: {e}")
+            
+            # Import sécurisé des modèles Boutique (temporairement désactivé à cause de JournalComptable)
+            try:
+                # Temporairement commenté jusqu'à résolution du problème JournalComptable
+                # from ayanna_erp.modules.boutique.models import ShopService, ShopProduct, ShopProductCategory
+                print("⚠️ Import des modèles Boutique temporairement désactivé (problème JournalComptable)")
+            except Exception as e:
+                print(f"⚠️ Impossible d'importer les modèles Boutique: {e}")
+                print(f"   Détail: {type(e).__name__}: {str(e)}")
+            
+            # Récupérer les POS de cette entreprise
+            pos_list = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
+            
+            if not pos_list:
+                print("⚠️ Aucun POS trouvé pour créer les services/produits par défaut")
+                return
+            
+            # Services par défaut pour Salle de Fête
+            salle_fete_pos = None
+            for pos in pos_list:
+                module = session.query(Module).filter_by(id=pos.module_id).first()
+                if module and module.name == 'SalleFete':
+                    salle_fete_pos = pos
+                    break
+            
+            if salle_fete_pos and EventService is not None and EventProduct is not None:
+                default_event_services = [
+                    {"name": "Service de base", "description": "Service de base pour événement", "price": 100.0, "cost": 50.0},
+                    {"name": "Animation DJ", "description": "Service d'animation musicale", "price": 200.0, "cost": 100.0},
+                    {"name": "Décoration florale", "description": "Décoration avec des fleurs", "price": 150.0, "cost": 75.0},
+                    {"name": "Service traiteur", "description": "Service de restauration", "price": 300.0, "cost": 150.0},
+                ]
+                
+                for service_data in default_event_services:
+                    existing_service = session.query(EventService).filter_by(
+                        pos_id=salle_fete_pos.id,
+                        name=service_data["name"]
+                    ).first()
+                    
+                    if not existing_service:
+                        service = EventService(
+                            pos_id=salle_fete_pos.id,
+                            **service_data
+                        )
+                        session.add(service)
+                        print(f"✅ Service créé: {service.name} - {service.price}€")
+                
+                default_event_products = [
+                    {"name": "Chaises", "description": "Chaises pour événement", "price_unit": 5.0, "cost": 2.0, "unit": "pièce", "stock_quantity": 100},
+                    {"name": "Tables", "description": "Tables pour événement", "price_unit": 10.0, "cost": 5.0, "unit": "pièce", "stock_quantity": 50},
+                    {"name": "Vaisselle", "description": "Vaisselle pour événement", "price_unit": 3.0, "cost": 1.5, "unit": "pièce", "stock_quantity": 200},
+                    {"name": "Éclairage", "description": "Équipement d'éclairage", "price_unit": 50.0, "cost": 25.0, "unit": "ensemble", "stock_quantity": 10},
+                ]
+                
+                for product_data in default_event_products:
+                    existing_product = session.query(EventProduct).filter_by(
+                        pos_id=salle_fete_pos.id,
+                        name=product_data["name"]
+                    ).first()
+                    
+                    if not existing_product:
+                        product = EventProduct(
+                            pos_id=salle_fete_pos.id,
+                            **product_data
+                        )
+                        session.add(product)
+                        print(f"✅ Produit créé: {product.name} - {product.price_unit}€/{product.unit}")
+            
+            # Services et produits pour Boutique
+            boutique_pos = None
+            for pos in pos_list:
+                module = session.query(Module).filter_by(id=pos.module_id).first()
+                if module and module.name == 'Boutique':
+                    boutique_pos = pos
+                    break
+            
+            if boutique_pos and ShopService is not None and ShopProduct is not None and ShopProductCategory is not None:
+                # Créer une catégorie par défaut
+                default_category = session.query(ShopProductCategory).filter_by(
+                    pos_id=boutique_pos.id,
+                    name="Général"
+                ).first()
+                
+                if not default_category:
+                    default_category = ShopProductCategory(
+                        pos_id=boutique_pos.id,
+                        name="Général",
+                        description="Catégorie générale par défaut"
+                    )
+                    session.add(default_category)
+                    session.flush()  # Pour obtenir l'ID
+                    print(f"✅ Catégorie créée: {default_category.name}")
+                
+                default_shop_services = [
+                    {"name": "Livraison", "description": "Service de livraison", "price": 20.0, "cost": 10.0},
+                    {"name": "Installation", "description": "Service d'installation", "price": 50.0, "cost": 25.0},
+                    {"name": "Maintenance", "description": "Service de maintenance", "price": 30.0, "cost": 15.0},
+                ]
+                
+                for service_data in default_shop_services:
+                    existing_service = session.query(ShopService).filter_by(
+                        pos_id=boutique_pos.id,
+                        name=service_data["name"]
+                    ).first()
+                    
+                    if not existing_service:
+                        service = ShopService(
+                            pos_id=boutique_pos.id,
+                            **service_data
+                        )
+                        session.add(service)
+                        print(f"✅ Service boutique créé: {service.name} - {service.price}€")
+                
+                default_shop_products = [
+                    {"name": "Produit exemple 1", "description": "Premier produit exemple", "price_unit": 25.0, "cost": 15.0, "stock_quantity": 50},
+                    {"name": "Produit exemple 2", "description": "Deuxième produit exemple", "price_unit": 45.0, "cost": 30.0, "stock_quantity": 30},
+                    {"name": "Produit exemple 3", "description": "Troisième produit exemple", "price_unit": 75.0, "cost": 50.0, "stock_quantity": 20},
+                ]
+                
+                for product_data in default_shop_products:
+                    existing_product = session.query(ShopProduct).filter_by(
+                        pos_id=boutique_pos.id,
+                        name=product_data["name"]
+                    ).first()
+                    
+                    if not existing_product:
+                        product = ShopProduct(
+                            pos_id=boutique_pos.id,
+                            category_id=default_category.id,
+                            **product_data
+                        )
+                        session.add(product)
+                        print(f"✅ Produit boutique créé: {product.name} - {product.price_unit}€")
+            
+            session.flush()
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'insertion des services/produits: {e}")
+            raise
+    
     def create_pos_for_new_enterprise(self, enterprise_id):
         """Créer tous les POS pour une nouvelle entreprise (méthode publique)"""
         session = self.get_session()
         try:
+            # Créer les POS
             self._create_pos_for_enterprise(session, enterprise_id)
+            
+            # Créer également les données comptables par défaut pour la nouvelle entreprise
+            print(f"🔄 Création des comptes comptables par défaut pour l'entreprise {enterprise_id}...")
+            self._insert_default_accounting_data(session, enterprise_id)
+            print(f"✅ Comptes comptables créés pour l'entreprise {enterprise_id}")
+            
+            # Créer les services et produits par défaut pour la nouvelle entreprise
+            print(f"🔄 Création des services et produits par défaut pour l'entreprise {enterprise_id}...")
+            self._insert_default_services_and_products(session, enterprise_id)
+            print(f"✅ Services et produits par défaut créés pour l'entreprise {enterprise_id}")
+            
             session.commit()
             return True
         except Exception as e:
