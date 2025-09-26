@@ -4,8 +4,9 @@ Fenêtre principale d'Ayanna ERP avec grille des modules
 
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QGridLayout, QPushButton, QLabel, QMenuBar, 
-                            QStatusBar, QFrame, QMessageBox, QApplication)
-from PyQt6.QtCore import Qt, QSize
+                            QStatusBar, QFrame, QMessageBox, QApplication,
+                            QProgressDialog)
+from PyQt6.QtCore import Qt, QSize, QTimer
 from PyQt6.QtGui import QIcon, QPixmap, QAction, QFont
 from ayanna_erp.database.database_manager import DatabaseManager, Module, POSPoint
 
@@ -355,6 +356,90 @@ class MainWindow(QMainWindow):
         # Implémentation simple - dans un vrai projet, utiliser QColor
         return color  # Pour l'instant, retourne la même couleur
     
+    def ensure_boutique_module_registered(self):
+        """S'assurer que le module Boutique est enregistré dans la base de données"""
+        try:
+            session = self.db_manager.get_session()
+            
+            # Vérifier si le module Boutique existe déjà
+            existing_module = session.query(Module).filter(Module.name == "Boutique").first()
+            
+            if not existing_module:
+                # Afficher un message de progression
+                progress = QProgressDialog("Initialisation du module Boutique...", None, 0, 100, self)
+                progress.setWindowTitle("Première utilisation")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumDuration(0)
+                progress.setValue(10)
+                QApplication.processEvents()
+                
+                print("🚀 Enregistrement du module Boutique...")
+                
+                # Créer le module Boutique
+                boutique_module = Module(
+                    name="Boutique",
+                    description="Gestion de la boutique et des ventes - Point de vente avec catalogue produits/services, panier, gestion des stocks et paiements",
+                    is_active=True
+                )
+                
+                session.add(boutique_module)
+                session.commit()
+                
+                progress.setValue(50)
+                progress.setLabelText("Module enregistré, initialisation des données...")
+                QApplication.processEvents()
+                
+                print("✅ Module Boutique enregistré avec succès!")
+                
+                # Initialiser les données par défaut de la boutique
+                try:
+                    from ayanna_erp.modules.boutique.init_boutique_data import initialize_boutique_data
+                    initialize_boutique_data()
+                    
+                    progress.setValue(90)
+                    progress.setLabelText("Finalisation...")
+                    QApplication.processEvents()
+                    
+                    print("✅ Données par défaut de la boutique initialisées!")
+                    
+                    # Afficher un message de succès
+                    progress.setValue(100)
+                    QApplication.processEvents()
+                    
+                    QTimer.singleShot(500, progress.close)
+                    
+                    QMessageBox.information(
+                        self,
+                        "Module Boutique Initialisé",
+                        "🎉 Le module Boutique a été configuré avec succès!\n\n"
+                        "Fonctionnalités disponibles :\n"
+                        "• 📂 5 catégories de produits\n"
+                        "• 📦 16 produits avec stock\n" 
+                        "• 🔧 4 services\n"
+                        "• 👥 4 clients de test\n"
+                        "• 💳 4 moyens de paiement\n\n"
+                        "L'interface va maintenant s'ouvrir..."
+                    )
+                    
+                except Exception as init_error:
+                    progress.close()
+                    print(f"⚠️ Erreur lors de l'initialisation des données: {init_error}")
+                    QMessageBox.warning(
+                        self,
+                        "Avertissement",
+                        f"Le module a été enregistré mais l'initialisation des données a échoué:\n{str(init_error)}\n\nVous pourrez créer vos données manuellement."
+                    )
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'enregistrement du module Boutique: {e}")
+            QMessageBox.critical(
+                self,
+                "Erreur d'Initialisation",
+                f"Impossible d'initialiser le module Boutique:\n{str(e)}"
+            )
+        finally:
+            session.close()
+
     def open_module(self, module_name):
         """Ouvrir un module spécifique"""
         try:
@@ -379,11 +464,17 @@ class MainWindow(QMainWindow):
                     return
                 window = SalleFeteWindow(self.current_user, pos_id=pos_id)
             elif module_name == "Boutique":
-                from ayanna_erp.modules.boutique.boutique_window import BoutiqueWindow
+                # Enregistrer le module s'il n'existe pas déjà
+                self.ensure_boutique_module_registered()
+                
+                from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
                 window = BoutiqueWindow(self.current_user)
             elif module_name == "Pharmacie":
-                from ayanna_erp.modules.boutique.boutique_window import BoutiqueWindow
-                window = BoutiqueWindow(self.current_user, is_pharmacy=True)
+                # Enregistrer le module s'il n'existe pas déjà
+                self.ensure_boutique_module_registered()
+                
+                from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
+                window = BoutiqueWindow(self.current_user, pos_id=1)
             elif module_name == "Restaurant":
                 from ayanna_erp.modules.restaurant.restaurant_window import RestaurantWindow
                 window = RestaurantWindow(self.current_user)

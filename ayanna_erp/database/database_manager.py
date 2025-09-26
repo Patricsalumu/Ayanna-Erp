@@ -308,11 +308,10 @@ class DatabaseManager:
             except Exception as e:
                 print(f"⚠️ Impossible d'importer les modèles Salle de Fête: {e}")
             
-            # Import sécurisé des modèles Boutique (temporairement désactivé à cause de JournalComptable)
+            # Import sécurisé des modèles Boutique (nouvelle architecture organisée)
             try:
-                # Temporairement commenté jusqu'à résolution du problème JournalComptable
-                # from ayanna_erp.modules.boutique.models import ShopService, ShopProduct, ShopProductCategory
-                print("⚠️ Import des modèles Boutique temporairement désactivé (problème JournalComptable)")
+                from ayanna_erp.modules.boutique.model.models import ShopService, ShopProduct
+                print("✅ Modèles Boutique importés avec succès (nouvelle architecture organisée)")
             except Exception as e:
                 print(f"⚠️ Impossible d'importer les modèles Boutique: {e}")
                 print(f"   Détail: {type(e).__name__}: {str(e)}")
@@ -383,27 +382,12 @@ class DatabaseManager:
                     boutique_pos = pos
                     break
             
-            if boutique_pos and ShopService is not None and ShopProduct is not None and ShopProductCategory is not None:
-                # Créer une catégorie par défaut
-                default_category = session.query(ShopProductCategory).filter_by(
-                    pos_id=boutique_pos.id,
-                    name="Général"
-                ).first()
-                
-                if not default_category:
-                    default_category = ShopProductCategory(
-                        pos_id=boutique_pos.id,
-                        name="Général",
-                        description="Catégorie générale par défaut"
-                    )
-                    session.add(default_category)
-                    session.flush()  # Pour obtenir l'ID
-                    print(f"✅ Catégorie créée: {default_category.name}")
+            if boutique_pos and ShopService is not None and ShopProduct is not None:
                 
                 default_shop_services = [
-                    {"name": "Livraison", "description": "Service de livraison", "price": 20.0, "cost": 10.0},
-                    {"name": "Installation", "description": "Service d'installation", "price": 50.0, "cost": 25.0},
-                    {"name": "Maintenance", "description": "Service de maintenance", "price": 30.0, "cost": 15.0},
+                    {"name": "Livraison", "description": "Service de livraison", "price": 20.0, "cost": 10.0, "image": "/images/services/livraison.jpg"},
+                    {"name": "Installation", "description": "Service d'installation", "price": 50.0, "cost": 25.0, "image": "/images/services/installation.jpg"},
+                    {"name": "Maintenance", "description": "Service de maintenance", "price": 30.0, "cost": 15.0, "image": "/images/services/maintenance.jpg"},
                 ]
                 
                 for service_data in default_shop_services:
@@ -435,7 +419,8 @@ class DatabaseManager:
                     if not existing_product:
                         product = ShopProduct(
                             pos_id=boutique_pos.id,
-                            category_id=default_category.id,
+                            image="/images/products/default.jpg",  # Image par défaut
+                            category="Général",  # Catégorie par défaut
                             **product_data
                         )
                         session.add(product)
