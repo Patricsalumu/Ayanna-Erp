@@ -235,13 +235,18 @@ class LoginWindow(QWidget):
             self.password_input.setFocus()
     
     def authenticate_user(self, email, password):
-        """Authentifier l'utilisateur"""
+        """Authentifier l'utilisateur et initialiser la session"""
         try:
             session = self.db_manager.get_session()
             user = session.query(User).filter_by(email=email).first()
             
             if user and user.check_password(password):
                 self.current_user = user
+                
+                # Importer et initialiser le SessionManager
+                from ayanna_erp.core.session_manager import SessionManager
+                SessionManager.set_current_user(user)
+                
                 return True
             return False
             

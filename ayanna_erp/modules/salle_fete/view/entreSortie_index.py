@@ -22,19 +22,39 @@ import json
 # Import des contrôleurs
 from ..controller.entre_sortie_controller import EntreSortieController
 from ..controller.paiement_controller import PaiementController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class DepenseDialog(QDialog):
     """Dialog pour enregistrer une dépense"""
     
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, current_user=None):
         super().__init__(parent)
         self.setWindowTitle("Enregistrer une dépense")
         self.setModal(True)
         self.resize(450, 400)
+        self.current_user = current_user
         self.comptes_charges = []
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
         self.setup_ui()
         self.load_comptes_charges()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -52,7 +72,7 @@ class DepenseDialog(QDialog):
         self.montant_spinbox = QDoubleSpinBox()
         self.montant_spinbox.setRange(0.01, 999999.99)
         self.montant_spinbox.setDecimals(2)
-        self.montant_spinbox.setSuffix(" €")
+        self.montant_spinbox.setSuffix(f" {self.get_currency_symbol()}")
         form_layout.addRow("Montant *:", self.montant_spinbox)
         
         # Compte comptable (nouveau)
@@ -123,7 +143,7 @@ class DepenseDialog(QDialog):
         self.libelle_edit.setFocus()
     
     def load_comptes_charges(self):
-        """Charger les comptes de charges (classe 6) depuis la base de données"""
+        """Charger les comptes de charges (classe 6) depuis la base de données filtrés par entreprise"""
         try:
             from ayanna_erp.database.database_manager import DatabaseManager
             from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
@@ -131,10 +151,17 @@ class DepenseDialog(QDialog):
             db_manager = DatabaseManager()
             session = db_manager.get_session()
             
-            # Récupérer les comptes de classe 6 (charges)
+            # Importer et utiliser le SessionManager
+            from ayanna_erp.core.session_manager import SessionManager
+            
+            # Obtenir l'enterprise_id depuis la session utilisateur
+            enterprise_id = SessionManager.get_current_enterprise_id() or 1
+            
+            # Récupérer les comptes de classe 6 (charges) filtrés par entreprise
             comptes = session.query(ComptaComptes)\
                 .join(ComptaClasses)\
                 .filter(ComptaClasses.code.like('6%'))\
+                .filter(ComptaClasses.enterprise_id == enterprise_id)\
                 .filter(ComptaComptes.actif == True)\
                 .order_by(ComptaComptes.numero)\
                 .all()
@@ -147,7 +174,7 @@ class DepenseDialog(QDialog):
                 self.compte_combo.addItem(display_text, compte.id)
             
             session.close()
-            print(f"✅ {len(comptes)} comptes de charges chargés")
+            print(f"✅ {len(comptes)} comptes de charges chargés pour l'entreprise {enterprise_id}")
             
         except Exception as e:
             print(f"❌ Erreur lors du chargement des comptes: {e}")
@@ -188,6 +215,9 @@ class EntreeSortieIndex(QWidget):
         self.current_user = current_user
         self.journal_data = []
         
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
         # Initialiser le contrôleur des dépenses
         from ayanna_erp.modules.salle_fete.controller.entre_sortie_controller import EntreSortieController
         pos_id = getattr(main_controller, 'pos_id', 1)
@@ -195,6 +225,20 @@ class EntreeSortieIndex(QWidget):
         
         self.setup_ui()
         self.load_journal_data()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except:
+            return "€"  # Fallback
+    
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        try:
+            return self.entreprise_controller.format_amount(amount)
+        except:
+            return f"{amount:.2f} €"  # Fallback
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -329,8 +373,9 @@ class EntreeSortieIndex(QWidget):
         
         self.journal_table = QTableWidget()
         self.journal_table.setColumnCount(7)
+        currency_symbol = self.get_currency_symbol()
         self.journal_table.setHorizontalHeaderLabels([
-            "Date/Heure", "Type", "Libellé", "Catégorie", "Entrée (€)", "Sortie (€)", "Utilisateur"
+            "Date/Heure", "Type", "Libellé", "Catégorie", f"Entrée ({currency_symbol})", f"Sortie ({currency_symbol})", "Utilisateur"
         ])
         
         # Configuration du tableau
@@ -378,7 +423,8 @@ class EntreeSortieIndex(QWidget):
         stats_layout = QHBoxLayout(stats_group)
         
         # Total Entrées
-        self.total_entrees_label = QLabel("Total Entrées: 0.00 €")
+        currency_symbol = self.get_currency_symbol()
+        self.total_entrees_label = QLabel(f"Total Entrées: 0.00 {currency_symbol}")
         self.total_entrees_label.setStyleSheet("""
             QLabel {
                 background-color: #27AE60;
@@ -391,7 +437,7 @@ class EntreeSortieIndex(QWidget):
         """)
         
         # Total Sorties  
-        self.total_sorties_label = QLabel("Total Sorties: 0.00 €")
+        self.total_sorties_label = QLabel(f"Total Sorties: 0.00 {currency_symbol}")
         self.total_sorties_label.setStyleSheet("""
             QLabel {
                 background-color: #E74C3C;
@@ -404,7 +450,7 @@ class EntreeSortieIndex(QWidget):
         """)
         
         # Solde
-        self.solde_label = QLabel("Solde: 0.00 €")
+        self.solde_label = QLabel(f"Solde: 0.00 {currency_symbol}")
         self.solde_label.setStyleSheet("""
             QLabel {
                 background-color: #3498DB;
@@ -596,13 +642,15 @@ class EntreeSortieIndex(QWidget):
         total_sorties = sum(entry['montant_sortie'] for entry in data)
         solde = total_entrees - total_sorties
         
+        currency_symbol = self.get_currency_symbol()
+        
         # Mettre à jour les labels
-        self.total_entrees_label.setText(f"Total Entrées: {total_entrees:.2f} €")
-        self.total_sorties_label.setText(f"Total Sorties: {total_sorties:.2f} €")
+        self.total_entrees_label.setText(f"Total Entrées: {total_entrees:.2f} {currency_symbol}")
+        self.total_sorties_label.setText(f"Total Sorties: {total_sorties:.2f} {currency_symbol}")
         
         # Couleur du solde selon le signe
         if solde >= 0:
-            self.solde_label.setText(f"Solde: +{solde:.2f} €")
+            self.solde_label.setText(f"Solde: +{solde:.2f} {currency_symbol}")
             self.solde_label.setStyleSheet("""
                 QLabel {
                     background-color: #27AE60;
@@ -614,7 +662,7 @@ class EntreeSortieIndex(QWidget):
                 }
             """)
         else:
-            self.solde_label.setText(f"Solde: {solde:.2f} €")
+            self.solde_label.setText(f"Solde: {solde:.2f} {currency_symbol}")
             self.solde_label.setStyleSheet("""
                 QLabel {
                     background-color: #E67E22;
@@ -632,7 +680,7 @@ class EntreeSortieIndex(QWidget):
     
     def show_depense_dialog(self):
         """Afficher le dialog pour enregistrer une dépense"""
-        dialog = DepenseDialog(self)
+        dialog = DepenseDialog(self, current_user=self.current_user)
         
         if dialog.exec() == QDialog.DialogCode.Accepted:
             data = dialog.get_data()
@@ -648,9 +696,10 @@ class EntreeSortieIndex(QWidget):
                 # Recharger les données
                 self.load_journal_data()
                 
+                currency_symbol = self.get_currency_symbol()
                 QMessageBox.information(self, "Succès", 
                     f"Dépense enregistrée avec succès!\n"
-                    f"Montant: {expense.amount}€\n"
+                    f"Montant: {expense.amount}{currency_symbol}\n"
                     f"Écritures comptables créées automatiquement.")
             else:
                 QMessageBox.critical(self, "Erreur", "Impossible d'enregistrer la dépense.")
@@ -697,7 +746,8 @@ class EntreeSortieIndex(QWidget):
             filtered_data = self.get_filtered_data()
             
             # Créer le tableau
-            data = [["Date/Heure", "Type", "Libellé", "Catégorie", "Entrée (€)", "Sortie (€)", "Utilisateur"]]
+            currency_symbol = self.get_currency_symbol()
+            data = [["Date/Heure", "Type", "Libellé", "Catégorie", f"Entrée ({currency_symbol})", f"Sortie ({currency_symbol})", "Utilisateur"]]
             
             for entry in filtered_data:
                 row = [
@@ -732,10 +782,11 @@ class EntreeSortieIndex(QWidget):
             total_sorties = sum(entry['montant_sortie'] for entry in filtered_data)
             solde = total_entrees - total_sorties
             
+            currency_symbol = self.get_currency_symbol()
             stats_data = [
-                ["Total Entrées", f"{total_entrees:.2f} €"],
-                ["Total Sorties", f"{total_sorties:.2f} €"],
-                ["Solde", f"{solde:.2f} €"]
+                ["Total Entrées", f"{total_entrees:.2f} {currency_symbol}"],
+                ["Total Sorties", f"{total_sorties:.2f} {currency_symbol}"],
+                ["Solde", f"{solde:.2f} {currency_symbol}"]
             ]
             
             stats_table = Table(stats_data)

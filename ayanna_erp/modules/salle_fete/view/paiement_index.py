@@ -137,8 +137,14 @@ class PaiementIndex(QWidget):
         # Initialiser les paramètres d'impression
         self.print_settings = PrintSettings()
         
-        # Initialiser le gestionnaire d'impression
-        self.payment_printer = PaymentPrintManager()
+        # Importer le SessionManager
+        from ayanna_erp.core.session_manager import SessionManager
+        
+        # Obtenir l'enterprise_id depuis la session utilisateur
+        enterprise_id = SessionManager.get_current_enterprise_id()
+        
+        # Initialiser le gestionnaire d'impression avec l'enterprise_id de la session
+        self.payment_printer = PaymentPrintManager(enterprise_id=enterprise_id)
         
         # Initialiser les contrôleurs - Import dynamique pour éviter les problèmes SQLAlchemy
         try:
@@ -166,8 +172,9 @@ class PaiementIndex(QWidget):
             return f"{amount:.2f} €"  # Fallback
     
     def get_currency_symbol(self):
-        """Récupérer le symbole de devise"""
+        """Récupérer le symbole de devise via la session"""
         if self.entreprise_controller:
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             return self.entreprise_controller.get_currency_symbol()
         else:
             return "€"  # Fallback
@@ -289,7 +296,7 @@ class PaiementIndex(QWidget):
         financial_layout.addRow("TVA:", self.tax_label)
         financial_layout.addRow("Total TTC:", self.total_ttc_label)
         financial_layout.addRow("Remise:", self.discount_label)
-        financial_layout.addRow("Total NET:", self.total_net_label)
+        financial_layout.addRow("Net à payer:", self.total_net_label)
         financial_layout.addRow("Payé:", self.paid_label)
         financial_layout.addRow("Solde:", self.balance_label)
         
@@ -655,18 +662,20 @@ class PaiementIndex(QWidget):
             # Nouvelle logique : Sous-total HT + TVA = Total TTC, puis remise sur TTC
             subtotal_ht = self.selected_reservation.get('total_services', 0) + self.selected_reservation.get('total_products', 0)
             tax_amount = self.selected_reservation.get('tax_amount', 0) or 0
-            total_ttc = self.selected_reservation.get('total_amount', 0) or 0  # TTC sans remise (stocké en BDD)
             discount_percent = self.selected_reservation.get('discount_percent', 0) or 0
+            
+            # Calculer le vrai Total TTC (avant remise) = Sous-total HT + TVA
+            total_ttc = subtotal_ht + tax_amount
             
             # Calcul de la remise sur le TTC 
             discount_amount = total_ttc * (discount_percent / 100) if total_ttc > 0 else 0
             
-            # Total net = TTC - remise
-            total_net = total_ttc - discount_amount
+            # Net à payer = Total TTC - remise
+            net_a_payer = total_ttc - discount_amount
             
             # Montants payés et solde
             paid = self.selected_reservation.get('total_paid', 0) or 0
-            balance = total_net - paid  # Solde calculé sur le total net
+            balance = net_a_payer - paid  # Solde calculé sur le net à payer
             
             # Mettre à jour les labels avec la nouvelle structure
             self.subtotal_label.setText(self.format_amount(subtotal_ht))
@@ -679,7 +688,7 @@ class PaiementIndex(QWidget):
             else:
                 self.discount_label.setText("0%")
             
-            self.total_net_label.setText(self.format_amount(total_net))
+            self.total_net_label.setText(self.format_amount(net_a_payer))
             self.paid_label.setText(self.format_amount(paid))
             self.balance_label.setText(self.format_amount(balance))
             
@@ -1120,13 +1129,15 @@ class PaiementIndex(QWidget):
         subtotal_ht = total_services + total_products
         
         # Récupérer les valeurs depuis la BDD
-        tax_amount = self.selected_reservation.get('tax_amount', 0)
-        total_ttc = self.selected_reservation.get('total_amount', 0)  # TTC sans remise (stocké en BDD)
-        discount_percent = self.selected_reservation.get('discount_percent', 0)
+        tax_amount = self.selected_reservation.get('tax_amount', 0) or 0
+        discount_percent = self.selected_reservation.get('discount_percent', 0) or 0
         
-        # Calculer remise et total net
+        # Calculer le vrai Total TTC (avant remise) = Sous-total HT + TVA
+        total_ttc = subtotal_ht + tax_amount
+        
+        # Calculer remise et net à payer
         discount_amount = total_ttc * (discount_percent / 100) if total_ttc > 0 else 0
-        total_net = total_ttc - discount_amount
+        net_a_payer = total_ttc - discount_amount
         
         return {
             'reference': self.selected_reservation.get('reference', 'N/A'),
@@ -1150,7 +1161,8 @@ class PaiementIndex(QWidget):
             'total_ttc': total_ttc,
             'discount_percent': discount_percent,
             'discount_amount': discount_amount,
-            'total_net': total_net,
+            'total_net': net_a_payer,  # Net à payer = Total TTC - Remise
+            'net_a_payer': net_a_payer,  # Alias pour clarté
             'total_amount': total_ttc  # Pour compatibilité
         }
     

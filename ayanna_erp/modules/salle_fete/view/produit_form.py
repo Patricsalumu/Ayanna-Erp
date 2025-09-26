@@ -43,15 +43,17 @@ class ProduitForm(QDialog):
             self.load_produit_data()
     
     def get_currency_symbol(self):
-        """Récupère le symbole de devise depuis l'entreprise"""
+        """Récupère le symbole de devise depuis l'entreprise via la session"""
         try:
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             return self.entreprise_controller.get_currency_symbol()
         except:
             return "€"  # Fallback
     
     def format_amount(self, amount):
-        """Formate un montant avec la devise de l'entreprise"""
+        """Formate un montant avec la devise de l'entreprise via la session"""
         try:
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             return self.entreprise_controller.format_amount(amount)
         except:
             return f"{amount:.2f} €"  # Fallback

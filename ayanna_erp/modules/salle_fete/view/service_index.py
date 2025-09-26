@@ -153,7 +153,7 @@ class ServiceIndex(QWidget):
         toolbar_layout.addWidget(self.delete_service_button)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(QLabel("Catégorie:"))
-        toolbar_layout.addWidget(self.category_filter)
+        # toolbar_layout.addWidget(self.category_filter)
         toolbar_layout.addWidget(self.search_input)
         
         # Splitter pour diviser en deux parties

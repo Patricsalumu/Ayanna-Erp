@@ -163,7 +163,7 @@ class ReservationForm(QDialog):
         self.event_type_combo = QComboBox()
         self.event_type_combo.addItems([
             "Soirée", "Coutumier", "Anniversaire", "Formation", 
-            "Réunion d'entreprise", "Cocktail", "Autre"
+            "Réunion d'entreprise", "Cocktail", "Réunion de l'église", "Autre"
         ])
         
         self.guests_spinbox = QSpinBox()

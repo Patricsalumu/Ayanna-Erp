@@ -308,22 +308,22 @@ def create_sample_data(pos_id=1):
         
         # Créer des services d'exemple
         services = [
-            EventService(pos_id=pos_id, name="Décoration florale premium", description="Décoration complète avec fleurs fraîches", cost=150.0, price=250.0),
-            EventService(pos_id=pos_id, name="DJ avec équipement son", description="DJ professionnel avec système son complet", cost=200.0, price=400.0),
-            EventService(pos_id=pos_id, name="Service traiteur", description="Service complet de restauration", cost=15.0, price=25.0),
-            EventService(pos_id=pos_id, name="Animation enfants", description="Animateur professionnel pour enfants", cost=80.0, price=150.0),
-            EventService(pos_id=pos_id, name="Photobooth", description="Borne photo avec accessoires", cost=100.0, price=200.0),
-            EventService(pos_id=pos_id, name="Service de nettoyage", description="Nettoyage complet après événement", cost=50.0, price=100.0),
+            EventService(pos_id=pos_id, name="Location Soirée Vendredi & Dimanche", description="Décoration complète avec fleurs fraîches", cost=150.0, price=2250.0),
+            EventService(pos_id=pos_id, name="Location Soirée Samedi", description="DJ professionnel avec système son complet", cost=200.0, price=2600.0),
+            EventService(pos_id=pos_id, name="Service traiteur", description="Service complet de restauration", cost=15.0, price=10.0),
+            EventService(pos_id=pos_id, name="Réunion d'entreprise", description="Réunion d'entreprises", cost=80.0, price=1500.0),
+            EventService(pos_id=pos_id, name="Réunion de l'église", description="Réunions des églises", cost=100.0, price=200.0),
+            EventService(pos_id=pos_id, name="Formation", description="Location salle pour les formations", cost=50.0, price=500.0),
         ]
         
         # Créer des produits d'exemple
         products = [
-            EventProduct(pos_id=pos_id, name="Champagne Moët & Chandon", cost=30.0, price_unit=45.0, stock_quantity=25, stock_min=10, unit="bouteille", category="Boissons"),
-            EventProduct(pos_id=pos_id, name="Petits fours assortis", cost=8.0, price_unit=12.0, stock_quantity=20, stock_min=20, unit="plateau", category="Alimentaire"),
-            EventProduct(pos_id=pos_id, name="Nappe blanche 3m", cost=10.0, price_unit=15.0, stock_quantity=30, stock_min=5, unit="pièce", category="Matériel"),
-            EventProduct(pos_id=pos_id, name="Bouquet de roses", cost=20.0, price_unit=35.0, stock_quantity=5, stock_min=5, unit="bouquet", category="Décoration"),
-            EventProduct(pos_id=pos_id, name="Assiettes jetables", cost=5.0, price_unit=8.0, stock_quantity=100, stock_min=50, unit="lot de 20", category="Matériel"),
-            EventProduct(pos_id=pos_id, name="Vin rouge Bordeaux", cost=15.0, price_unit=25.0, stock_quantity=15, stock_min=10, unit="bouteille", category="Boissons"),
+            EventProduct(pos_id=pos_id, name="Simba", cost=30.0, price_unit=45.0, stock_quantity=25, stock_min=10, unit="gazier", category="Boissons"),
+            EventProduct(pos_id=pos_id, name="Tembo", cost=8.0, price_unit=12.0, stock_quantity=20, stock_min=20, unit="gazier", category="Alimentaire"),
+            EventProduct(pos_id=pos_id, name="Castel", cost=10.0, price_unit=15.0, stock_quantity=30, stock_min=5, unit="gazier", category="Matériel"),
+            EventProduct(pos_id=pos_id, name="Chui", cost=20.0, price_unit=35.0, stock_quantity=5, stock_min=5, unit="gazier", category="Décoration"),
+            EventProduct(pos_id=pos_id, name="Sucrées", cost=5.0, price_unit=8.0, stock_quantity=100, stock_min=50, unit="Gazier", category="Matériel"),
+            EventProduct(pos_id=pos_id, name="Heineken", cost=15.0, price_unit=25.0, stock_quantity=15, stock_min=10, unit="Lot de 24B", category="Boissons"),
         ]
         
         # Créer des clients d'exemple

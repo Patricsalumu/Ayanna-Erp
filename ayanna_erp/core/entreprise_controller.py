@@ -11,7 +11,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 # Import du gestionnaire de base de données et des modèles
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from ayanna_erp.database.database_manager import DatabaseManager, Entreprise
+from ayanna_erp.database.database_manager import DatabaseManager, Entreprise, User
 
 
 class EntrepriseController(QObject):
@@ -156,26 +156,80 @@ class EntrepriseController(QObject):
             self.error_occurred.emit(f"Erreur lors de la mise à jour de l'entreprise: {str(e)}")
             return False
     
-    def get_company_info_for_pdf(self, enterprise_id=1):
+    def get_company_info_for_pdf(self, enterprise_id=None):
         """
         Récupérer les informations de l'entreprise formatées pour les PDF
         
         Args:
-            enterprise_id (int): ID de l'entreprise
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             
         Returns:
             dict: Informations formatées pour PDF
         """
+        # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+        if enterprise_id is None:
+            from ayanna_erp.core.session_manager import SessionManager
+            session_enterprise_id = SessionManager.get_current_enterprise_id()
+            enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+            
         enterprise = self.get_current_enterprise(enterprise_id)
+        
+        # Extraire la ville de l'adresse si possible
+        address = enterprise['address']
+        city = ''
+        if address:
+            # Essayer de détecter la ville dans l'adresse (souvent après une virgule ou un tiret)
+            parts = address.split(',')
+            if len(parts) >= 2:
+                city = parts[-1].strip()
+            else:
+                # Essayer avec un tiret
+                parts = address.split('-')
+                if len(parts) >= 2:
+                    city = parts[-1].strip()
+                else:
+                    # Sinon, utiliser une valeur par défaut basée sur l'entreprise
+                    city = 'Kinshasa, RDC'
+        else:
+            city = 'Kinshasa, RDC'
+        
+        # Gérer le logo (BLOB vers fichier temporaire)
+        logo_path = 'assets/logo.png'  # Fallback par défaut
+        
+        # Vérifier s'il y a un logo BLOB dans l'entreprise
+        if 'logo' in enterprise and enterprise['logo']:
+            try:
+                import os
+                import tempfile
+                
+                # Créer un fichier temporaire pour le logo
+                temp_dir = tempfile.gettempdir()
+                logo_filename = f"logo_enterprise_{enterprise_id}.png"
+                temp_logo_path = os.path.join(temp_dir, logo_filename)
+                
+                # Écrire le BLOB dans le fichier temporaire
+                with open(temp_logo_path, 'wb') as f:
+                    f.write(enterprise['logo'])
+                
+                logo_path = temp_logo_path
+                print(f"✅ Logo temporaire créé: {temp_logo_path}")
+                
+            except Exception as e:
+                print(f"⚠️ Erreur lors de la création du logo temporaire: {e}")
+                # Garder le logo par défaut en cas d'erreur
+        
+        # Sinon, vérifier si l'ancien système utilise 'logo_path'
+        elif 'logo_path' in enterprise and enterprise['logo_path']:
+            logo_path = enterprise['logo_path']
         
         return {
             'name': enterprise['name'],
             'address': enterprise['address'],
-            'city': '',  # Peut être extrait de l'adresse si nécessaire
+            'city': city,
             'phone': enterprise['phone'],
             'email': enterprise['email'],
             'rccm': enterprise['rccm'],
-            'logo_path': enterprise['logo_path']
+            'logo_path': logo_path
         }
     
     def get_currency(self, enterprise_id=1):
@@ -273,7 +327,7 @@ class EntrepriseController(QObject):
     
     def create_enterprise(self, data):
         """
-        Créer une nouvelle entreprise
+        Créer une nouvelle entreprise avec utilisateur administrateur
         
         Args:
             data (dict): Données de l'entreprise
@@ -284,6 +338,7 @@ class EntrepriseController(QObject):
         try:
             session = self.get_session()
             
+            # Créer l'entreprise
             enterprise = Entreprise(
                 name=data.get('name', ''),
                 address=data.get('address', ''),
@@ -297,28 +352,129 @@ class EntrepriseController(QObject):
             )
             
             session.add(enterprise)
+            session.flush()  # Pour obtenir l'ID sans commiter
+            
+            # Capturer TOUTES les valeurs nécessaires juste après le flush
+            enterprise_id = enterprise.id
+            enterprise_name = enterprise.name
+            enterprise_address = enterprise.address
+            enterprise_phone = enterprise.phone
+            enterprise_email = enterprise.email
+            enterprise_rccm = enterprise.rccm
+            enterprise_id_nat = enterprise.id_nat
+            enterprise_logo = enterprise.logo
+            enterprise_slogan = enterprise.slogan
+            enterprise_currency = enterprise.currency
+            enterprise_created_at = enterprise.created_at
+            
+            print(f"🔄 Entreprise '{enterprise_name}' créée avec ID: {enterprise_id}")
+            
+            # Créer automatiquement les POS pour tous les modules
+            pos_created = self.db_manager.create_pos_for_new_enterprise(enterprise_id)
+            if not pos_created:
+                print("⚠️ Erreur lors de la création des POS pour l'entreprise")
+                session.rollback()
+                raise Exception("Erreur lors de la création des POS")
+            else:
+                print(f"✅ POS créés automatiquement pour l'entreprise {enterprise_name}")
+            
+            # Créer automatiquement un utilisateur admin associé à cette entreprise
+            try:
+                print(f"🔄 Création de l'utilisateur admin pour l'entreprise {enterprise_name}...")
+                
+                # Générer un email unique pour l'admin
+                admin_email = data.get('email', 'admin@' + data.get('name', 'entreprise').lower().replace(' ', '') + '.com')
+                
+                # Vérifier si l'email existe déjà
+                existing_user = session.query(User).filter(User.email == admin_email).first()
+                if existing_user:
+                    print(f"⚠️ Utilisateur avec email {admin_email} existe déjà, génération d'un email unique...")
+                    admin_email = f"admin_{enterprise_id}@{data.get('name', 'entreprise').lower().replace(' ', '')}.local"
+                
+                admin_user = User(
+                    name='Administrateur Système',
+                    email=admin_email,
+                    role='admin',
+                    enterprise_id=enterprise_id
+                )
+                
+                # Utiliser la méthode set_password du modèle
+                admin_user.set_password('admin123')
+                
+                session.add(admin_user)
+                session.flush()  # Pour obtenir l'ID sans commiter
+                
+                # Cacher les valeurs nécessaires avant le commit
+                admin_user_id = admin_user.id
+                admin_user_email = admin_user.email
+                
+                print(f"✅ Utilisateur admin créé avec succès:")
+                print(f"   - ID: {admin_user_id}")
+                print(f"   - Email: {admin_user_email}")
+                print(f"   - Entreprise: {enterprise_name} (ID: {enterprise_id})")
+                
+            except Exception as user_error:
+                print(f"❌ Erreur lors de la création de l'utilisateur admin: {user_error}")
+                session.rollback()
+                raise Exception(f"Erreur création utilisateur: {str(user_error)}")
+            
+            # Commiter toute la transaction (entreprise + POS + utilisateur)
             session.commit()
             
             result = {
-                'id': enterprise.id,
-                'name': enterprise.name,
-                'address': enterprise.address,
-                'phone': enterprise.phone,
-                'email': enterprise.email,
-                'rccm': enterprise.rccm,
-                'id_nat': enterprise.id_nat,
-                'logo_path': enterprise.logo,
-                'slogan': enterprise.slogan,
-                'currency': enterprise.currency,
-                'created_at': enterprise.created_at
+                'id': enterprise_id,
+                'name': enterprise_name,
+                'address': enterprise_address,
+                'phone': enterprise_phone,
+                'email': enterprise_email,
+                'rccm': enterprise_rccm,
+                'id_nat': enterprise_id_nat,
+                'logo_path': enterprise_logo,
+                'slogan': enterprise_slogan,
+                'currency': enterprise_currency,
+                'created_at': enterprise_created_at,
+                'admin_user_id': admin_user_id,
+                'admin_user_email': admin_user_email,
+                'admin_credentials': {
+                    'name': 'Administrateur Système',
+                    'email': admin_user_email,
+                    'password': 'admin123'
+                },
+                'pos_created': pos_created,
+                'success': True
             }
+            
+            print(f"🎉 Entreprise et utilisateur créés avec succès:")
+            print(f"   - Entreprise: {enterprise_name} (ID: {enterprise_id})")
+            print(f"   - Admin: {admin_user_email} (ID: {admin_user_id})")
+            print(f"   - POS créés: {'Oui' if pos_created else 'Non'}")
             
             session.close()
             return result
             
         except Exception as e:
-            self.error_occurred.emit(f"Erreur lors de la création de l'entreprise: {str(e)}")
-            return None
+            print(f"❌ ERREUR lors de la création de l'entreprise: {str(e)}")
+            print(f"   Type d'erreur: {type(e).__name__}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+            
+            if 'session' in locals():
+                try:
+                    session.rollback()
+                    print("🔄 Transaction annulée (rollback)")
+                except:
+                    pass
+                finally:
+                    session.close()
+                    print("🔒 Session fermée")
+            
+            error_message = f"Erreur lors de la création de l'entreprise: {str(e)}"
+            self.error_occurred.emit(error_message)
+            return {
+                'success': False,
+                'error': error_message,
+                'details': str(e)
+            }
     
     def delete_enterprise(self, enterprise_id):
         """

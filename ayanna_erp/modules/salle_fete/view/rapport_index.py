@@ -37,11 +37,21 @@ class RapportIndex(QWidget):
         # Utiliser le pos_id du contrôleur principal
         pos_id = getattr(main_controller, 'pos_id', 1)
         self.rapport_controller = RapportController(pos_id=pos_id)
-        self.pdf_exporter = PDFExporter()
+        
+        # Importer le SessionManager
+        from ayanna_erp.core.session_manager import SessionManager
+        
+        # Obtenir l'enterprise_id depuis la session utilisateur
+        enterprise_id = SessionManager.get_current_enterprise_id()
+        
+        # Initialiser le PDF exporter avec l'enterprise_id de la session
+        self.pdf_exporter = PDFExporter(enterprise_id=enterprise_id)
+        
         self.currency_symbol = "$"  # Fallback par défaut
         try:
             from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
             self.controller = EntrepriseController()
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             self.currency_symbol = self.controller.get_currency_symbol()
         except:
             pass

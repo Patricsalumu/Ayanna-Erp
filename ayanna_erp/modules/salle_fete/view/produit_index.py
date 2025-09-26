@@ -55,15 +55,17 @@ class ProduitIndex(QWidget):
         QTimer.singleShot(100, self.load_products)
     
     def get_currency_symbol(self):
-        """Récupère le symbole de devise depuis l'entreprise"""
+        """Récupère le symbole de devise depuis l'entreprise via la session"""
         try:
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             return self.entreprise_controller.get_currency_symbol()
         except:
             return "€"  # Fallback
     
     def format_amount(self, amount):
-        """Formate un montant avec la devise de l'entreprise"""
+        """Formate un montant avec la devise de l'entreprise via la session"""
         try:
+            # Utiliser la méthode sans paramètre car elle utilise automatiquement la session maintenant
             return self.entreprise_controller.format_amount(amount)
         except:
             return f"{amount:.2f} €"  # Fallback
@@ -324,12 +326,12 @@ class ProduitIndex(QWidget):
         # TODO: Implémenter le chargement depuis la base de données
         # Pour l'instant, on utilise des données de test
         sample_data = [
-            ["001", "Champagne Moët & Chandon", "Boissons", "45.00 $", "25", "10", "bouteille", "En stock"],
-            ["002", "Petits fours assortis", "Alimentaire", "12.00 $", "5", "20", "plateau", "Stock faible"],
-            ["003", "Nappe blanche 3m", "Matériel", "15.00 $", "30", "5", "pièce", "En stock"],
-            ["004", "Bouquet de roses", "Décoration", "35.00 $", "0", "5", "bouquet", "Rupture"],
-            ["005", "Assiettes jetables", "Matériel", "8.00 $", "100", "50", "lot de 20", "En stock"],
-            ["006", "Vin rouge Bordeaux", "Boissons", "25.00 $", "15", "10", "bouteille", "En stock"],
+            ["001", "Simba", "Boissons", "16 $", "25", "10", "bouteille", "En stock"],
+            ["002", "Tembo", "Boissons", "17 $", "5", "20", "plateau", "Stock faible"],
+            ["003", "Castel", "Boissons", "17 $", "30", "5", "pièce", "En stock"],
+            ["004", "Chui", "Boissons", "10 $", "0", "5", "bouquet", "Rupture"],
+            ["005", "Sucrées", "Boissons", "11.59 $", "100", "50", "lot de 20", "En stock"],
+            ["006", "Heineken", "Boissons", "11.57 $", "15", "10", "bouteille", "En stock"],
         ]
         
         self.products_table.setRowCount(len(sample_data))

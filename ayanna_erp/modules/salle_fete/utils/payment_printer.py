@@ -27,13 +27,14 @@ except ImportError:
 class PaymentPrintManager:
     """Gestionnaire d'impression pour les paiements et réservations"""
     
-    def __init__(self):
+    def __init__(self, enterprise_id=None):
         # Initialiser le contrôleur d'entreprise
         self.entreprise_controller = EntrepriseController() if EntrepriseController else None
+        self.enterprise_id = enterprise_id  # Stocker l'ID de l'entreprise
         
         # Récupérer les informations de l'entreprise depuis la BDD
         if self.entreprise_controller:
-            self.company_info = self.entreprise_controller.get_company_info_for_pdf()
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf(enterprise_id)
         else:
             # Fallback aux données statiques
             self.company_info = {
@@ -52,6 +53,31 @@ class PaymentPrintManager:
         
         # Fichier temporaire pour le logo
         self._temp_logo_path = None
+    
+    def set_enterprise(self, enterprise_id):
+        """
+        Changer l'entreprise utilisée pour l'impression
+        
+        Args:
+            enterprise_id (int): ID de l'entreprise à utiliser
+        """
+        self.enterprise_id = enterprise_id
+        
+        # Recharger les informations de l'entreprise
+        if self.entreprise_controller:
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf(enterprise_id)
+            
+        # Nettoyer l'ancien logo temporaire
+        self._cleanup_temp_logo()
+        
+    def get_current_enterprise_id(self):
+        """
+        Récupérer l'ID de l'entreprise actuellement utilisée
+        
+        Returns:
+            int: ID de l'entreprise ou None si pas défini
+        """
+        return self.enterprise_id
     
     def _create_temp_logo_file(self):
         """Créer un fichier temporaire pour le logo BLOB"""
@@ -83,14 +109,14 @@ class PaymentPrintManager:
     def get_currency_symbol(self):
         """Récupérer le symbole de devise de l'entreprise"""
         if self.entreprise_controller:
-            return self.entreprise_controller.get_currency_symbol()
+            return self.entreprise_controller.get_currency_symbol(self.enterprise_id)
         else:
             return "$"  # Fallback
     
     def format_amount(self, amount):
         """Formater un montant avec la devise de l'entreprise"""
         if self.entreprise_controller:
-            return self.entreprise_controller.format_amount(amount)
+            return self.entreprise_controller.format_amount(amount, self.enterprise_id)
         else:
             return f"{amount:.2f} €"  # Fallback
     
@@ -134,7 +160,7 @@ class PaymentPrintManager:
         canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(HexColor('#555555'))
         generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
-        filigrane_text = f"Généré par Ayanna ERP © - {generation_time}"
+        filigrane_text = f"Généré par {self.company_info['name']} © - {generation_time}"
         text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
         x_center = (A4[0] - text_width) / 2
         canvas.drawString(x_center, 15, filigrane_text)
@@ -328,10 +354,11 @@ class PaymentPrintManager:
         financial_data = [
             ['Total Services:', f"{reservation_data.get('total_services', 0):.2f} {currency_symbol}"],
             ['Total Produits:', f"{reservation_data.get('total_products', 0):.2f} {currency_symbol}"],
-            ['Sous-total:', f"{reservation_data.get('subtotal', 0):.2f} {currency_symbol}"],
+            ['Sous-total HT:', f"{reservation_data.get('subtotal_ht', 0):.2f} {currency_symbol}"],
             ['TVA:', f"{reservation_data.get('tax_amount', 0):.2f} {currency_symbol}"],
-            ['Remise:', f"{reservation_data.get('discount_amount', 0):.2f} {currency_symbol}"],
-            ['TOTAL NET À PAYER:', f"{reservation_data.get('total_amount', 0):.2f} {currency_symbol}"]
+            ['Total TTC:', f"{reservation_data.get('total_ttc', 0):.2f} {currency_symbol}"],
+            ['Remise:', f"-{reservation_data.get('discount_amount', 0):.2f} {currency_symbol}"],
+            ['NET À PAYER:', f"{reservation_data.get('total_net', 0):.2f} {currency_symbol}"]
         ]
         
         financial_table = Table(financial_data, colWidths=[12*cm, 4*cm])
@@ -411,7 +438,9 @@ class PaymentPrintManager:
                     user_name
                 ])
             
-            balance = reservation_data.get('total_amount', 0) - total_paid
+            # Calculer le solde sur le net à payer (après remise)
+            net_a_payer = reservation_data.get('total_net', reservation_data.get('net_a_payer', 0))
+            balance = net_a_payer - total_paid
             currency_symbol = self.get_currency_symbol()
             payment_data.append(['', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} {currency_symbol}"])
             payment_data.append(['', '', 'RESTE À PAYER:', f"{balance:.2f} {currency_symbol}"])
@@ -654,12 +683,13 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
-        total_amount = reservation_data.get('total_amount', 0)
-        balance = total_amount - total_paid
+        # Utiliser le net à payer (après remise) au lieu du total brut
+        net_a_payer = reservation_data.get('total_net', reservation_data.get('net_a_payer', 0))
+        balance = net_a_payer - total_paid
         currency_symbol = self.get_currency_symbol()
         
-        # Total à payer
-        total_text = f"Total: {total_amount:.2f} {currency_symbol}"
+        # Net à payer (après remise)
+        total_text = f"Net a payer: {net_a_payer:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, total_text)
         y_position -= 2.5*mm
         
@@ -678,10 +708,10 @@ class PaymentPrintManager:
         c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
         y_position -= 3*mm
         
-        # Filigrane Ayanna ERP
+        # Filigrane avec nom d'entreprise dynamique
         c.setFont('Helvetica', 8)  # Augmenté de 4 à 8
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
-        filigrane_text = f"Ayanna ERP (c) {generation_time}"
+        filigrane_text = f"{self.company_info['name']} (c) {generation_time}"
         text_width = c.stringWidth(filigrane_text, 'Helvetica', 8)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
         

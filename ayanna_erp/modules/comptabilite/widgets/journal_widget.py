@@ -259,8 +259,17 @@ class JournalWidget(QWidget):
         styleN = styles['Normal']
         styleTitre = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=15, spaceAfter=10)
         styleMention = ParagraphStyle('Mention', parent=styles['Normal'], alignment=1, textColor=colors.HexColor('#888888'), fontSize=9, spaceAfter=0, spaceBefore=0)
-        # Mention spéciale en haut
-        mention_text = "Généré par Ayanna School - {}".format(datetime.now().strftime('%d/%m/%Y %H:%M'))
+        # Mention spéciale en haut avec nom d'entreprise dynamique
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            entreprise_id = getattr(self.controller, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+            entreprise_name = entreprise_info['name']
+        except Exception:
+            entreprise_name = 'AYANNA ERP'
+        
+        mention_text = "Généré par {} - {}".format(entreprise_name, datetime.now().strftime('%d/%m/%Y %H:%M'))
         elements.append(Paragraph(mention_text, styleMention))
         elements.append(Spacer(1, 0.2*cm))
         # Bloc logo + infos école

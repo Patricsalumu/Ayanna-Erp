@@ -13,6 +13,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from ayanna_erp.database.database_manager import DatabaseManager, Entreprise, User
 from ayanna_erp.core.utils.image_utils import ImageUtils
+from ayanna_erp.core.session_manager import SessionManager
 
 
 class EntrepriseController(QObject):
@@ -25,30 +26,76 @@ class EntrepriseController(QObject):
     def __init__(self):
         super().__init__()
         self.db_manager = DatabaseManager()
-        self._current_enterprise = None
+        self._enterprise_cache = {}  # Cache pour plusieurs entreprises {enterprise_id: enterprise_data}
+        self._active_enterprise_id = 1  # ID de l'entreprise active par défaut
         
     def get_session(self):
         """Créer une nouvelle session de base de données"""
         return self.db_manager.get_session()
     
-    def get_current_enterprise(self, enterprise_id=1):
+    def set_active_enterprise(self, enterprise_id):
+        """
+        Définir l'entreprise active
+        
+        Args:
+            enterprise_id (int): ID de l'entreprise à activer
+            
+        Returns:
+            bool: True si l'entreprise a été activée avec succès
+        """
+        try:
+            # Vérifier que l'entreprise existe
+            enterprise = self.get_current_enterprise(enterprise_id)
+            if enterprise:
+                self._active_enterprise_id = enterprise_id
+                return True
+            return False
+        except Exception as e:
+            self.error_occurred.emit(f"Erreur lors de l'activation de l'entreprise: {str(e)}")
+            return False
+    
+    def get_active_enterprise_id(self):
+        """
+        Récupérer l'ID de l'entreprise active
+        
+        Returns:
+            int: ID de l'entreprise active
+        """
+        return self._active_enterprise_id
+    
+    def get_active_enterprise(self):
+        """
+        Récupérer les informations de l'entreprise active
+        
+        Returns:
+            dict: Informations de l'entreprise active
+        """
+        return self.get_current_enterprise()
+    
+    def get_current_enterprise(self, enterprise_id=None):
         """
         Récupérer l'entreprise courante
         
         Args:
-            enterprise_id (int): ID de l'entreprise (par défaut 1)
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             
         Returns:
             dict: Informations de l'entreprise
         """
         try:
-            if self._current_enterprise is None:
+            # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+            if enterprise_id is None:
+                session_enterprise_id = SessionManager.get_current_enterprise_id()
+                enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+            
+            # Vérifier si l'entreprise est déjà en cache
+            if enterprise_id not in self._enterprise_cache:
                 session = self.get_session()
                 enterprise = session.query(Entreprise).filter(Entreprise.id == enterprise_id).first()
                 session.close()
                 
                 if enterprise:
-                    self._current_enterprise = {
+                    self._enterprise_cache[enterprise_id] = {
                         'id': enterprise.id,
                         'name': enterprise.name or 'AYANNA ERP',
                         'address': enterprise.address or '123 Avenue de la République',
@@ -63,9 +110,13 @@ class EntrepriseController(QObject):
                     }
                 else:
                     # Créer une entreprise par défaut si aucune n'existe
-                    self._current_enterprise = self.create_default_enterprise()
+                    if enterprise_id == 1:
+                        self._enterprise_cache[enterprise_id] = self.create_default_enterprise()
+                    else:
+                        # Pour les autres IDs, retourner les infos par défaut sans créer
+                        return self.get_default_enterprise_info()
                     
-            return self._current_enterprise
+            return self._enterprise_cache[enterprise_id]
             
         except Exception as e:
             self.error_occurred.emit(f"Erreur lors de la récupération de l'entreprise: {str(e)}")
@@ -147,8 +198,9 @@ class EntrepriseController(QObject):
             session.commit()
             session.close()
             
-            # Invalider le cache
-            self._current_enterprise = None
+            # Invalider le cache pour cette entreprise spécifique
+            if enterprise_id in self._enterprise_cache:
+                del self._enterprise_cache[enterprise_id]
             
             self.enterprise_updated.emit(self.get_current_enterprise(enterprise_id))
             return True
@@ -157,16 +209,21 @@ class EntrepriseController(QObject):
             self.error_occurred.emit(f"Erreur lors de la mise à jour de l'entreprise: {str(e)}")
             return False
     
-    def get_company_info_for_pdf(self, enterprise_id=1):
+    def get_company_info_for_pdf(self, enterprise_id=None):
         """
         Récupérer les informations de l'entreprise formatées pour les PDF
         
         Args:
-            enterprise_id (int): ID de l'entreprise
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             
         Returns:
             dict: Informations formatées pour PDF
         """
+        # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+        if enterprise_id is None:
+            session_enterprise_id = SessionManager.get_current_enterprise_id()
+            enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+            
         enterprise = self.get_current_enterprise(enterprise_id)
         
         return {
@@ -179,29 +236,39 @@ class EntrepriseController(QObject):
             'logo': enterprise['logo']  # BLOB data au lieu de logo_path
         }
     
-    def get_currency(self, enterprise_id=1):
+    def get_currency(self, enterprise_id=None):
         """
         Récupérer la devise de l'entreprise
         
         Args:
-            enterprise_id (int): ID de l'entreprise
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             
         Returns:
             str: Code de la devise (USD, EUR, CDF, etc.)
         """
+        # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+        if enterprise_id is None:
+            session_enterprise_id = SessionManager.get_current_enterprise_id()
+            enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+            
         enterprise = self.get_current_enterprise(enterprise_id)
         return enterprise.get('currency', 'USD')
     
-    def get_currency_symbol(self, enterprise_id=1):
+    def get_currency_symbol(self, enterprise_id=None):
         """
         Récupérer le symbole de la devise
         
         Args:
-            enterprise_id (int): ID de l'entreprise
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             
         Returns:
             str: Symbole de la devise
         """
+        # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+        if enterprise_id is None:
+            session_enterprise_id = SessionManager.get_current_enterprise_id()
+            enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+            
         currency = self.get_currency(enterprise_id)
         
         # Mapping des devises vers leurs symboles
@@ -220,19 +287,24 @@ class EntrepriseController(QObject):
         
         return currency_symbols.get(currency, currency)
     
-    def format_amount(self, amount, enterprise_id=1, show_symbol=True):
+    def format_amount(self, amount, enterprise_id=None, show_symbol=True):
         """
         Formater un montant avec la devise de l'entreprise
         
         Args:
             amount (float): Montant à formater
-            enterprise_id (int): ID de l'entreprise
+            enterprise_id (int, optional): ID de l'entreprise. Si None, utilise l'entreprise de l'utilisateur en session
             show_symbol (bool): Afficher le symbole de devise
             
         Returns:
             str: Montant formaté
         """
         try:
+            # Si aucun ID n'est fourni, utiliser l'entreprise de l'utilisateur en session
+            if enterprise_id is None:
+                session_enterprise_id = SessionManager.get_current_enterprise_id()
+                enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
+                
             if show_symbol:
                 symbol = self.get_currency_symbol(enterprise_id)
                 return f"{amount:.2f} {symbol}"
@@ -298,59 +370,130 @@ class EntrepriseController(QObject):
             )
             
             session.add(enterprise)
-            session.commit()
+            session.flush()  # Pour obtenir l'ID sans commiter encore
+            
+            # Capturer TOUTES les valeurs nécessaires juste après le flush
+            enterprise_id = enterprise.id
+            enterprise_name = enterprise.name
+            enterprise_address = enterprise.address
+            enterprise_phone = enterprise.phone
+            enterprise_email = enterprise.email
+            enterprise_rccm = enterprise.rccm
+            enterprise_id_nat = enterprise.id_nat
+            enterprise_logo = enterprise.logo
+            enterprise_slogan = enterprise.slogan
+            enterprise_currency = enterprise.currency
+            enterprise_created_at = enterprise.created_at
+            
+            print(f"🔄 Entreprise '{enterprise_name}' ajoutée avec ID: {enterprise_id}")
             
             # Créer automatiquement les POS pour tous les modules
-            pos_created = self.db_manager.create_pos_for_new_enterprise(enterprise.id)
+            pos_created = self.db_manager.create_pos_for_new_enterprise(enterprise_id)
             if not pos_created:
                 print("⚠️ Erreur lors de la création des POS pour l'entreprise")
+                session.rollback()
+                raise Exception("Erreur lors de la création des POS")
             else:
-                print(f"✅ POS créés automatiquement pour l'entreprise {enterprise.name}")
+                print(f"✅ POS créés automatiquement pour l'entreprise {enterprise_name}")
             
             # Créer automatiquement un utilisateur admin associé à cette entreprise
-            admin_user = User(
-                name='Administrateur Système',
-                email=data.get('email', 'admin@' + data.get('name', 'entreprise').lower().replace(' ', '') + '.com'),
-                role='admin',
-                enterprise_id=enterprise.id
-            )
+            try:
+                print(f"🔄 Création de l'utilisateur admin pour l'entreprise {enterprise_name}...")
+                
+                # Générer un email unique pour l'admin
+                admin_email = data.get('email', 'admin@' + data.get('name', 'entreprise').lower().replace(' ', '') + '.com')
+                
+                # Vérifier si l'email existe déjà
+                existing_user = session.query(User).filter(User.email == admin_email).first()
+                if existing_user:
+                    print(f"⚠️ Utilisateur avec email {admin_email} existe déjà, génération d'un email unique...")
+                    admin_email = f"admin_{enterprise_id}@{data.get('name', 'entreprise').lower().replace(' ', '')}.local"
+                
+                admin_user = User(
+                    name='Administrateur Système',
+                    email=admin_email,
+                    role='admin',
+                    enterprise_id=enterprise_id
+                )
+                
+                # Utiliser la méthode set_password du modèle
+                admin_user.set_password('admin123')
+                
+                session.add(admin_user)
+                session.flush()  # Pour obtenir l'ID sans commiter
+                
+                # Capturer les valeurs de l'utilisateur avant de continuer
+                admin_user_id = admin_user.id
+                admin_user_email = admin_user.email
+                
+                print(f"✅ Utilisateur admin créé avec succès:")
+                print(f"   - ID: {admin_user_id}")
+                print(f"   - Email: {admin_user_email}")
+                print(f"   - Entreprise: {enterprise_name} (ID: {enterprise_id})")
+                
+            except Exception as user_error:
+                print(f"❌ Erreur lors de la création de l'utilisateur admin: {user_error}")
+                # Rollback et relancer l'exception pour être capturée par le bloc principal
+                session.rollback()
+                raise Exception(f"Erreur création utilisateur: {str(user_error)}")
             
-            # Utiliser la méthode set_password du modèle
-            admin_user.set_password('admin123')
-            
-            session.add(admin_user)
+            # Commiter toute la transaction (entreprise + POS + utilisateur)
             session.commit()
             
             result = {
-                'id': enterprise.id,
-                'name': enterprise.name,
-                'address': enterprise.address,
-                'phone': enterprise.phone,
-                'email': enterprise.email,
-                'rccm': enterprise.rccm,
-                'id_nat': enterprise.id_nat,
-                'logo': enterprise.logo,  # BLOB au lieu de logo_path
-                'slogan': enterprise.slogan,
-                'currency': enterprise.currency,
-                'created_at': enterprise.created_at,
-                'admin_user_id': admin_user.id,
+                'id': enterprise_id,
+                'name': enterprise_name,
+                'address': enterprise_address,
+                'phone': enterprise_phone,
+                'email': enterprise_email,
+                'rccm': enterprise_rccm,
+                'id_nat': enterprise_id_nat,
+                'logo': enterprise_logo,  # BLOB au lieu de logo_path
+                'slogan': enterprise_slogan,
+                'currency': enterprise_currency,
+                'created_at': enterprise_created_at,
+                'admin_user_id': admin_user_id,
+                'admin_user_email': admin_user_email,
                 'admin_credentials': {
                     'name': 'Administrateur Système',
-                    'email': admin_user.email,
+                    'email': admin_user_email,
                     'password': 'admin123'
                 },
-                'pos_created': pos_created
+                'pos_created': pos_created,
+                'success': True
             }
+            
+            print(f"🎉 Entreprise et utilisateur créés avec succès:")
+            print(f"   - Entreprise: {enterprise_name} (ID: {enterprise_id})")
+            print(f"   - Admin: {admin_user_email} (ID: {admin_user_id})")
+            print(f"   - POS créés: {'Oui' if pos_created else 'Non'}")
             
             session.close()
             return result
             
         except Exception as e:
+            print(f"❌ ERREUR lors de la création de l'entreprise: {str(e)}")
+            print(f"   Type d'erreur: {type(e).__name__}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+            
             if 'session' in locals():
-                session.rollback()
-                session.close()
-            self.error_occurred.emit(f"Erreur lors de la création de l'entreprise: {str(e)}")
-            return None
+                try:
+                    session.rollback()
+                    print("🔄 Transaction annulée (rollback)")
+                except:
+                    pass
+                finally:
+                    session.close()
+                    print("🔒 Session fermée")
+            
+            error_message = f"Erreur lors de la création de l'entreprise: {str(e)}"
+            self.error_occurred.emit(error_message)
+            return {
+                'success': False,
+                'error': error_message,
+                'details': str(e)
+            }
 
     def delete_enterprise(self, enterprise_id):
         """
@@ -385,9 +528,20 @@ class EntrepriseController(QObject):
             self.error_occurred.emit(f"Erreur lors de la suppression de l'entreprise: {str(e)}")
             return False
     
-    def refresh_cache(self):
-        """Rafraîchir le cache de l'entreprise courante"""
-        self._current_enterprise = None
+    def refresh_cache(self, enterprise_id=None):
+        """
+        Rafraîchir le cache des entreprises
+        
+        Args:
+            enterprise_id (int, optional): ID de l'entreprise à rafraîchir. Si None, vide tout le cache
+        """
+        if enterprise_id is None:
+            # Vider tout le cache
+            self._enterprise_cache.clear()
+        else:
+            # Vider le cache pour une entreprise spécifique
+            if enterprise_id in self._enterprise_cache:
+                del self._enterprise_cache[enterprise_id]
     
     def update_logo_from_file(self, enterprise_id, logo_file_path):
         """
@@ -422,7 +576,7 @@ class EntrepriseController(QObject):
             self.error_occurred.emit(f"Erreur lors de la mise à jour du logo: {str(e)}")
             return False
     
-    def get_logo_pixmap(self, enterprise_id=1):
+    def get_logo_pixmap(self, enterprise_id=None):
         """
         Récupérer le logo d'une entreprise en tant que QPixmap
         
@@ -462,7 +616,7 @@ class EntrepriseController(QObject):
             self.error_occurred.emit(f"Erreur lors de la suppression du logo: {str(e)}")
             return False
     
-    def get_logo_info(self, enterprise_id=1):
+    def get_logo_info(self, enterprise_id=None):
         """
         Obtenir des informations sur le logo d'une entreprise
         
@@ -484,3 +638,17 @@ class EntrepriseController(QObject):
         except Exception as e:
             self.error_occurred.emit(f"Erreur lors de la récupération des informations du logo: {str(e)}")
             return None
+    
+    def get_enterprise_summary(self):
+        """
+        Obtenir un résumé du système d'entreprises
+        
+        Returns:
+            dict: Informations sur les entreprises en cache et l'entreprise active
+        """
+        return {
+            'active_enterprise_id': self._active_enterprise_id,
+            'cached_enterprises': list(self._enterprise_cache.keys()),
+            'cache_count': len(self._enterprise_cache),
+            'active_enterprise_name': self.get_active_enterprise().get('name', 'N/A')
+        }

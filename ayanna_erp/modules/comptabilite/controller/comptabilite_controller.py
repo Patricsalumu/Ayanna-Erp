@@ -165,11 +165,30 @@ class ComptabiliteController:
         c = canvas.Canvas(file_path, pagesize=A4)
         width, height = A4
 
+        # Récupérer les informations de l'entreprise dynamiquement
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            # Utiliser l'entreprise_id passé en paramètre ou celui de l'instance
+            if not entreprise_id:
+                entreprise_id = getattr(self, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des infos entreprise: {e}")
+            # Fallback vers les valeurs par défaut
+            entreprise_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234'
+            }
+
         # Mention spéciale en haut
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par Ayanna School - {now}")
+        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
         c.setFillColorRGB(0, 0, 0)
 
         # Bloc logo + infos école
@@ -179,30 +198,23 @@ class ComptabiliteController:
         logo_h = 1.5*cm
         info_x = logo_x + logo_w + 0.5*cm
         info_y = logo_y + logo_h - 0.2*cm
-        # Récupérer infos école et logo BLOB
-        school_name = "Ayanna School"
-        school_address = ""
-        school_phone = ""
-        school_email = ""
+        
+        # Utiliser les informations récupérées dynamiquement
+        school_name = entreprise_info['name']
+        school_address = entreprise_info['address']
+        school_phone = entreprise_info['phone']
+        school_email = entreprise_info['email']
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
-        if entreprise_id:
+        
+        # Gestion du logo depuis la base de données
+        if entreprise_info.get('logo'):
             try:
-                from modules.comptabilite.controller import EcoleController
-                ecole_ctrl = EcoleController(self.session)
-                entreprise = ecole_ctrl.get_school_by_id(entreprise_id)
-                if entreprise:
-                    school_name = getattr(entreprise, 'nom', school_name)
-                    school_address = getattr(entreprise, 'adresse', '')
-                    school_phone = getattr(entreprise, 'telephone', '')
-                    school_email = getattr(entreprise, 'email', '')
-                    # Logo BLOB
-                    logo_blob = getattr(entreprise, 'logo', None)
-                    if logo_blob:
-                        logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
-                        with open(logo_path, "wb") as f:
-                            f.write(logo_blob)
-            except Exception:
-                pass
+                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                with open(logo_path, "wb") as f:
+                    f.write(entreprise_info['logo'])
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde du logo: {e}")
+        
         if os.path.exists(logo_path):
             c.drawImage(logo_path, logo_x, logo_y, width=logo_w, height=logo_h, mask='auto')
         c.setFont("Helvetica-Bold", 12)
@@ -225,18 +237,9 @@ class ComptabiliteController:
             c.setFont("Helvetica-Bold", 13)
             c.drawCentredString(width/2, height-4.7*cm, f"Compte : {nom_compte}")
         
-                # Récupérer la devise de l'entreprise
-        devise = ""
-        if entreprise_id:
-            try:
-                # Import non n�cessaire dans Ayanna ERP
-                ecole_ctrl = EcoleController(self.session)
-                entreprise = ecole_ctrl.get_school_by_id(entreprise_id)
-                if entreprise:
-                    devise = getattr(entreprise, 'devise', devise) or devise
-            except Exception:
-                pass
-
+        # Récupérer la devise de l'entreprise
+        devise = entreprise_info.get('currency', 'USD')
+        
         # Tableau
         table_data = [["Date", "Libellé", "Débit", "Crédit"]]
         total_debit = 0.0
@@ -519,25 +522,54 @@ class ComptabiliteController:
         c = canvas.Canvas(file_path, pagesize=A4)
         width, height = A4
 
+        # Récupérer les informations de l'entreprise dynamiquement
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            entreprise_id = getattr(self, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des infos entreprise: {e}")
+            # Fallback vers les valeurs par défaut
+            entreprise_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234'
+            }
+
         # En-tête
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par Ayanna School - {now}")
+        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
         c.setFillColorRGB(0, 0, 0)
 
         # Logo + infos école (optionnel)
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        # Gestion du logo depuis la base de données
+        if entreprise_info.get('logo'):
+            try:
+                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                with open(logo_path, "wb") as f:
+                    f.write(entreprise_info['logo'])
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde du logo: {e}")
+        
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(3*cm, height-2*cm, "Ayanna School")
+        c.drawString(3*cm, height-2*cm, entreprise_info['name'])
         c.setFont("Helvetica", 9)
-        c.drawString(3*cm, height-2.6*cm, "Grand Livre comptable")
+        c.drawString(3*cm, height-2.6*cm, entreprise_info['address'])
+        c.drawString(3*cm, height-3.2*cm, f"Tél: {entreprise_info['phone']}")
+        c.drawString(3*cm, height-3.8*cm, f"Email: {entreprise_info['email']}")
+        c.drawString(3*cm, height-4.4*cm, f"RCCM: {entreprise_info['rccm']}")
 
         # Titre centré
         c.setFont("Helvetica-Bold", 15)
-        c.drawCentredString(width/2, height-3.2*cm, "Grand Livre comptable")
+        c.drawCentredString(width/2, height-5.5*cm, "GRAND LIVRE COMPTABLE")
 
         # Table
         table_data = [["Numéro", "Libellé", "Total Débit", "Total Crédit", "Solde"]]
@@ -570,10 +602,27 @@ class ComptabiliteController:
 
     def _format_pdf_currency(self, value):
         try:
+            # Convertir en float si c'est une chaîne
+            if isinstance(value, str):
+                # Retirer les espaces et remplacer les virgules par des points
+                value = value.replace(" ", "").replace(",", ".")
+                value = float(value)
+            elif value is None:
+                value = 0.0
+            
             currency_symbol = self.get_currency_symbol()
             return f"{value:,.2f} {currency_symbol}".replace(",", " ").replace(".00", "")
-        except:
-            return f"{value:,.2f} €".replace(",", " ").replace(".00", "")
+        except Exception as e:
+            print(f"Erreur format currency: {e}")
+            # Fallback avec conversion sécurisée
+            try:
+                if isinstance(value, str):
+                    value = float(value.replace(" ", "").replace(",", "."))
+                elif value is None:
+                    value = 0.0
+                return f"{value:,.2f} €".replace(",", " ").replace(".00", "")
+            except:
+                return f"0.00 €"
 
 
 
@@ -591,29 +640,58 @@ class ComptabiliteController:
         c = canvas.Canvas(file_path, pagesize=A4)
         width, height = A4
 
+        # Récupérer les informations de l'entreprise dynamiquement
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            entreprise_id = getattr(self, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des infos entreprise: {e}")
+            # Fallback vers les valeurs par défaut
+            entreprise_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234'
+            }
+
         # En-tête
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par Ayanna School - {now}")
+        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
         c.setFillColorRGB(0, 0, 0)
 
-        # Logo + infos école (optionnel)
+        # Logo + infos entreprise
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        # Gestion du logo depuis la base de données
+        if entreprise_info.get('logo'):
+            try:
+                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                with open(logo_path, "wb") as f:
+                    f.write(entreprise_info['logo'])
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde du logo: {e}")
+        
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(3*cm, height-2*cm, "Ayanna School")
+        c.drawString(3*cm, height-2*cm, entreprise_info['name'])
         c.setFont("Helvetica", 9)
-        c.drawString(3*cm, height-2.6*cm, "Compte de Résultat")
+        c.drawString(3*cm, height-2.6*cm, entreprise_info['address'])
+        c.drawString(3*cm, height-3.2*cm, f"Tél: {entreprise_info['phone']}")
+        c.drawString(3*cm, height-3.8*cm, f"Email: {entreprise_info['email']}")
+        c.drawString(3*cm, height-4.4*cm, f"RCCM: {entreprise_info['rccm']}")
 
         # Titre centré
         c.setFont("Helvetica-Bold", 15)
-        c.drawCentredString(width/2, height-3.2*cm, "Compte de Résultat")
+        c.drawCentredString(width/2, height-5.5*cm, "COMPTE DE RÉSULTAT")
 
         # Charges
         c.setFont("Helvetica-Bold", 11)
-        c.drawString(1*cm, height-4.2*cm, "Charges (Classe 6)")
+        c.drawString(1*cm, height-6.5*cm, "Charges (Classe 6)")
         table_data = [["Compte", "Libellé", "Total"]]
         for row in data["charges"]:
             table_data.append([
@@ -796,25 +874,54 @@ class ComptabiliteController:
         c = canvas.Canvas(file_path, pagesize=A4)
         width, height = A4
 
+        # Récupérer les informations de l'entreprise dynamiquement
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            entreprise_id = getattr(self, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des infos entreprise: {e}")
+            # Fallback vers les valeurs par défaut
+            entreprise_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234'
+            }
+
         # En-tête
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par Ayanna School - {now}")
+        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
         c.setFillColorRGB(0, 0, 0)
 
-        # Logo + infos école (optionnel)
+        # Logo + infos entreprise
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        # Gestion du logo depuis la base de données
+        if entreprise_info.get('logo'):
+            try:
+                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                with open(logo_path, "wb") as f:
+                    f.write(entreprise_info['logo'])
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde du logo: {e}")
+        
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(3*cm, height-2*cm, "Ayanna School")
+        c.drawString(3*cm, height-2*cm, entreprise_info['name'])
         c.setFont("Helvetica", 9)
-        c.drawString(3*cm, height-2.6*cm, "Plan Comptable")
+        c.drawString(3*cm, height-2.6*cm, entreprise_info['address'])
+        c.drawString(3*cm, height-3.2*cm, f"Tél: {entreprise_info['phone']}")
+        c.drawString(3*cm, height-3.8*cm, f"Email: {entreprise_info['email']}")
+        c.drawString(3*cm, height-4.4*cm, f"RCCM: {entreprise_info['rccm']}")
 
         # Titre centré
         c.setFont("Helvetica-Bold", 15)
-        c.drawCentredString(width/2, height-3.2*cm, "Plan Comptable")
+        c.drawCentredString(width/2, height-5.5*cm, "PLAN COMPTABLE")
 
         # Table
         table_data = [["Numéro", "Libellé", "Classe"]]
@@ -836,7 +943,7 @@ class ComptabiliteController:
         ]))
         table.wrapOn(c, width-2*cm, height)
         table_height = table._height
-        table.drawOn(c, 1*cm, height-4.5*cm-table_height)
+        table.drawOn(c, 1*cm, height-6.5*cm-table_height)
 
         c.showPage()
         c.save()
@@ -895,25 +1002,54 @@ class ComptabiliteController:
         c = canvas.Canvas(file_path, pagesize=A4)
         width, height = A4
 
+        # Récupérer les informations de l'entreprise dynamiquement
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            entreprise_controller = EntrepriseController()
+            entreprise_id = getattr(self, 'entreprise_id', 1)
+            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
+        except Exception as e:
+            print(f"Erreur lors de la récupération des infos entreprise: {e}")
+            # Fallback vers les valeurs par défaut
+            entreprise_info = {
+                'name': 'AYANNA ERP',
+                'address': '123 Avenue de la République',
+                'phone': '+243 123 456 789',
+                'email': 'contact@ayanna-erp.com',
+                'rccm': 'CD/KIN/RCCM/23-B-1234'
+            }
+
         # En-tête
         now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
         c.setFont("Helvetica", 10)
         c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par Ayanna School - {now}")
+        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
         c.setFillColorRGB(0, 0, 0)
 
-        # Logo + infos école (optionnel)
+        # Logo + infos entreprise
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        # Gestion du logo depuis la base de données
+        if entreprise_info.get('logo'):
+            try:
+                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                with open(logo_path, "wb") as f:
+                    f.write(entreprise_info['logo'])
+            except Exception as e:
+                print(f"Erreur lors de la sauvegarde du logo: {e}")
+        
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
-        c.drawString(3*cm, height-2*cm, "Ayanna School")
+        c.drawString(3*cm, height-2*cm, entreprise_info['name'])
         c.setFont("Helvetica", 9)
-        c.drawString(3*cm, height-2.6*cm, "Classes Comptables")
+        c.drawString(3*cm, height-2.6*cm, entreprise_info['address'])
+        c.drawString(3*cm, height-3.2*cm, f"Tél: {entreprise_info['phone']}")
+        c.drawString(3*cm, height-3.8*cm, f"Email: {entreprise_info['email']}")
+        c.drawString(3*cm, height-4.4*cm, f"RCCM: {entreprise_info['rccm']}")
 
         # Titre centré
         c.setFont("Helvetica-Bold", 15)
-        c.drawCentredString(width/2, height-3.2*cm, "Classes Comptables")
+        c.drawCentredString(width/2, height-5.5*cm, "CLASSES COMPTABLES")
 
         # Table
         table_data = [["Numéro", "Libellé"]]
@@ -934,7 +1070,7 @@ class ComptabiliteController:
         ]))
         table.wrapOn(c, width-2*cm, height)
         table_height = table._height
-        table.drawOn(c, 1*cm, height-4.5*cm-table_height)
+        table.drawOn(c, 1*cm, height-6.5*cm-table_height)
 
         c.showPage()
         c.save()

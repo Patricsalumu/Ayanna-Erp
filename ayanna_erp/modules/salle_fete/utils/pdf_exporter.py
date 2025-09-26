@@ -21,20 +21,33 @@ from PIL import Image as PILImage
 class PDFExporter:
     """Classe pour l'export des rapports en PDF format A4"""
     
-    def __init__(self):
+    def __init__(self, enterprise_id=None):
+        self.enterprise_id = enterprise_id  # Stocker l'ID de l'entreprise
         self.currency_symbol = "$"  # Fallback par défaut
+        
+        # Initialiser le contrôleur d'entreprise
         try:
             from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
             self.controller = EntrepriseController()
-            self.currency_symbol = self.controller.get_currency_symbol()
-        except:
-            pass
-         # Initialiser le contrôleur d'entreprise
-        self.entreprise_controller = EntrepriseController() if EntrepriseController else None
+            self.entreprise_controller = self.controller
+            
+            # Si aucun enterprise_id n'est fourni, utiliser celui de la session utilisateur
+            if enterprise_id is None:
+                from ayanna_erp.core.session_manager import SessionManager
+                session_enterprise_id = SessionManager.get_current_enterprise_id()
+                self.enterprise_id = session_enterprise_id if session_enterprise_id else 1
+            
+            self.currency_symbol = self.controller.get_currency_symbol(self.enterprise_id)
+        except Exception as e:
+            print(f"⚠️ Erreur lors de l'initialisation du contrôleur d'entreprise: {e}")
+            self.controller = None
+            self.entreprise_controller = None
+            if enterprise_id is None:
+                self.enterprise_id = 1  # Fallback par défaut
         
         # Récupérer les informations de l'entreprise depuis la BDD
         if self.entreprise_controller:
-            self.company_info = self.entreprise_controller.get_company_info_for_pdf()
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf(self.enterprise_id)
         else:
             # Fallback aux données statiques
             self.company_info = {
@@ -50,6 +63,29 @@ class PDFExporter:
         # Configuration des styles
         self.styles = getSampleStyleSheet()
         self.setup_custom_styles()
+    
+    def set_enterprise(self, enterprise_id):
+        """
+        Changer l'entreprise utilisée pour l'export PDF
+        
+        Args:
+            enterprise_id (int): ID de l'entreprise à utiliser
+        """
+        self.enterprise_id = enterprise_id
+        
+        # Recharger les informations de l'entreprise
+        if self.entreprise_controller:
+            self.company_info = self.entreprise_controller.get_company_info_for_pdf(enterprise_id)
+            self.currency_symbol = self.controller.get_currency_symbol(enterprise_id)
+    
+    def get_current_enterprise_id(self):
+        """
+        Récupérer l'ID de l'entreprise actuellement utilisée
+        
+        Returns:
+            int: ID de l'entreprise ou None si pas défini
+        """
+        return self.enterprise_id
     
     def setup_custom_styles(self):
         """Configurer les styles personnalisés"""
@@ -102,7 +138,7 @@ class PDFExporter:
         canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(HexColor('#555555'))  # Gris plus foncé
         generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
-        filigrane_text = f"Gérée par Ayanna ERP © - Généré le {generation_time}"
+        filigrane_text = f"Généré par {self.company_info['name']} © - {generation_time}"
         # Position en bas de page - centré
         text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
         x_center = (A4[0] - text_width) / 2
