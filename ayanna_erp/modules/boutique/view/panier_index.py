@@ -8,11 +8,31 @@ from typing import Optional, List, Dict, Any
 from decimal import Decimal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
+    QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox, QTableWidget,
+    QTableWidgetItem, QHeaderView, QDialog, QMessageBox, QFrame
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from ayanna_erp.modules.boutique.model.models import ShopProduct, ShopService, ShopPanier
+
+# ...existing code...
+
+"""
+Widget de l'onglet Panier - Interface principale de vente pour la boutique
+Affiche le catalogue des produits/services et la gestion du panier
+"""
+
+import sys
+from typing import Optional, List, Dict, Any
+from decimal import Decimal
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox, QTableWidget, 
     QTableWidgetItem, QHeaderView, QMessageBox, QScrollArea, QFrame,
     QSplitter, QTextEdit, QCheckBox, QButtonGroup, QRadioButton,
-    QDialog, QDialogButtonBox, QFormLayout, QDoubleSpinBox
+    QDialog, QDialogButtonBox, QFormLayout, QDoubleSpinBox, QTabWidget
 )
+from .dashboard_tab import DashboardTab
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
@@ -21,6 +41,49 @@ from ..model.models import ShopClient, ShopCategory, ShopProduct, ShopService, S
 
 
 class PanierIndex(QWidget):
+    def load_panier_list_data(self):
+        """Charge des exemples de paniers pour l'onglet liste (mock)."""
+        paniers = [
+            {"id": 1, "client": "Kabasele Jean", "statut": "Validé", "montant": 35000.00},
+            {"id": 2, "client": "Mbuyi Marie", "statut": "Annulé", "montant": 27000.00},
+            {"id": 3, "client": "Ngoy Pierre", "statut": "En attente", "montant": 18000.00},
+            {"id": 4, "client": "Tshibanda Paul", "statut": "Validé", "montant": 15000.00},
+            {"id": 5, "client": "Client anonyme", "statut": "Validé", "montant": 12000.00}
+        ]
+        if hasattr(self, 'panier_list_table'):
+            self.panier_list_table.setRowCount(len(paniers))
+            for i, panier in enumerate(paniers):
+                self.panier_list_table.setItem(i, 0, QTableWidgetItem(str(panier["id"])))
+                self.panier_list_table.setItem(i, 1, QTableWidgetItem(panier["client"]))
+                self.panier_list_table.setItem(i, 2, QTableWidgetItem(panier["statut"]))
+                self.panier_list_table.setItem(i, 3, QTableWidgetItem(f"{panier['montant']:.2f}"))
+    def create_new_panier(self):
+        """Ouvre la fenêtre modale NouveauPanierDialog, qui crée le panier en BDD via le controller."""
+        from ayanna_erp.modules.boutique.view.nouveau_panier_dialog import NouveauPanierDialog
+        dialog = NouveauPanierDialog(self, self.boutique_controller, self.current_user)
+        dialog.exec()
+    def setup_ui_panier(self, layout):
+        """
+        Initialise l'UI d'un nouveau panier vide (dialogue de création).
+        Ajoutez ici les widgets nécessaires pour la saisie d'un panier.
+        """
+        label = QLabel("Nouveau panier vide créé. Ajoutez des produits ou services.")
+        layout.addWidget(label)
+        # Vous pouvez ajouter ici la logique pour afficher les champs du panier, la liste des produits, etc.
+    def load_initial_data(self):
+        """Méthode factice pour éviter l'erreur d'attribut manquant. À compléter selon le mode d'affichage."""
+        # Si on est en mode dashboard, rien à charger
+        if getattr(self, 'dashboard_mode', False):
+            return
+        # Sinon, charger les données du panier
+        try:
+            self.load_categories()
+            self.load_clients()
+            self.load_payment_methods()
+            self.refresh_catalog()
+            self.refresh_panier()
+        except Exception:
+            pass
     """Widget principal pour la gestion du panier et catalogue"""
     
     # Signaux
@@ -40,34 +103,263 @@ class PanierIndex(QWidget):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.perform_search)
         
-        self.setup_ui()
-        self.load_initial_data()
-        
+        # Onglets : Dashboard (widget séparé) et Liste des paniers
+        self.tabs = QTabWidget(self)
+        self.dashboard_tab = DashboardTab(on_new_panier=self.create_new_panier)
+        self.dashboard_tab = DashboardTab(on_new_panier=self.create_new_panier)
+        self.panier_tab = QWidget()
+        self.tabs.addTab(self.dashboard_tab, "Tableau de bord")
+        self.tabs.addTab(self.panier_tab, "Paniers")
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.tabs)
+
+        self.setup_panier_list_ui()
+
         # Connecter les signaux du contrôleur
         self.boutique_controller.panier_updated.connect(self.refresh_panier)
-    
-    def setup_ui(self):
-        """Configuration de l'interface utilisateur"""
-        main_layout = QHBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
         
-        # Splitter principal (catalogue à gauche, panier à droite)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # === SECTION CATALOGUE (GAUCHE) ===
-        catalog_widget = self.create_catalog_section()
-        splitter.addWidget(catalog_widget)
-        
-        # === SECTION PANIER (DROITE) ===
-        panier_widget = self.create_panier_section()
-        splitter.addWidget(panier_widget)
-        
-        # Définir les proportions du splitter (catalogue 60%, panier 40%)
-        splitter.setSizes([600, 400])
-        
-        main_layout.addWidget(splitter)
-    
+        def setup_dashboard_ui(self):
+            """Configure le dashboard dans l'onglet dédié"""
+            layout = QVBoxLayout(self.dashboard_tab)
+            layout.setContentsMargins(20, 20, 20, 20)
+            layout.setSpacing(20)
+            dash_layout = QGridLayout()
+            dash_layout.setSpacing(20)
+
+            # Indicateurs principaux
+            self.label_total_ventes = QLabel("Total ventes du jour : ... €")
+            self.label_total_depenses = QLabel("Dépenses du jour : ... €")
+            self.label_total_creances = QLabel("Créances du jour : ... €")
+            self.label_solde = QLabel("Solde caisse : ... €")
+            for lbl in [self.label_total_ventes, self.label_total_depenses, self.label_total_creances, self.label_solde]:
+                lbl.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+            dash_layout.addWidget(self.label_total_ventes, 0, 0)
+            dash_layout.addWidget(self.label_total_depenses, 0, 1)
+            dash_layout.addWidget(self.label_total_creances, 1, 0)
+            dash_layout.addWidget(self.label_solde, 1, 1)
+
+            # Top produits
+            self.top_products_group = QGroupBox("Top produits achetés")
+            self.top_products_list = QTableWidget()
+            self.top_products_list.setColumnCount(2)
+            self.top_products_list.setHorizontalHeaderLabels(["Produit", "Qté"])
+            self.top_products_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            self.top_products_list.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+            self.top_products_list.setMaximumHeight(150)
+            top_prod_layout = QVBoxLayout(self.top_products_group)
+            top_prod_layout.addWidget(self.top_products_list)
+            dash_layout.addWidget(self.top_products_group, 2, 0)
+
+            # Top clients
+            self.top_clients_group = QGroupBox("Top clients")
+            self.top_clients_list = QTableWidget()
+            self.top_clients_list.setColumnCount(2)
+            self.top_clients_list.setHorizontalHeaderLabels(["Client", "Montant (€)"])
+            self.top_clients_list.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+            self.top_clients_list.setSelectionMode(QTableWidget.SelectionMode.NoSelection)
+            self.top_clients_list.setMaximumHeight(150)
+            top_cli_layout = QVBoxLayout(self.top_clients_group)
+            top_cli_layout.addWidget(self.top_clients_list)
+            dash_layout.addWidget(self.top_clients_group, 2, 1)
+
+            # Bouton ouvrir panier
+            self.open_panier_btn = QPushButton("🛒 Ouvrir un nouveau panier")
+            self.open_panier_btn.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+            self.open_panier_btn.setStyleSheet("background-color: #3498DB; color: white; padding: 12px; border-radius: 8px;")
+            self.open_panier_btn.clicked.connect(self.create_new_panier)
+            dash_layout.addWidget(self.open_panier_btn, 3, 0, 1, 2)
+
+            layout.addLayout(dash_layout)
+            self.load_dashboard_data()
+
+    def setup_panier_list_ui(self):
+        """Configure l'onglet liste des paniers (validés, annulés, etc.)"""
+        layout = QVBoxLayout(self.panier_tab)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+        self.panier_list_table = QTableWidget()
+        self.panier_list_table.setColumnCount(4)
+        self.panier_list_table.setHorizontalHeaderLabels([
+            "N°", "Client", "Statut", "Montant (€)"
+        ])
+        self.panier_list_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.panier_list_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.panier_list_table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
+        layout.addWidget(self.panier_list_table)
+        self.load_panier_list_data()
+
+    def create_catalog_section(self):
+        """Créer la section catalogue des produits/services avec option cards/liste"""
+        catalog_widget = QWidget()
+        catalog_layout = QVBoxLayout(catalog_widget)
+
+        # === HEADER ET FILTRES ===
+        header_group = QGroupBox("🛍️ Catalogue - Produits & Services")
+        header_layout = QVBoxLayout(header_group)
+
+        # Ligne 1: Recherche et filtres
+        filter_layout = QHBoxLayout()
+        filter_layout.addWidget(QLabel("Recherche:"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Rechercher un produit ou service...")
+        self.search_input.textChanged.connect(self.on_search_changed)
+        filter_layout.addWidget(self.search_input)
+        filter_layout.addWidget(QLabel("Catégorie:"))
+        self.category_combo = QComboBox()
+        self.category_combo.currentTextChanged.connect(self.on_category_changed)
+        filter_layout.addWidget(self.category_combo)
+        refresh_btn = QPushButton("🔄 Actualiser")
+        refresh_btn.clicked.connect(self.refresh_catalog)
+        filter_layout.addWidget(refresh_btn)
+
+        # Toggle affichage liste/cards
+        self.catalog_view_mode = 'liste'  # 'liste' ou 'cards'
+        self.toggle_view_btn = QPushButton("🗂️ Mode cards")
+        self.toggle_view_btn.setCheckable(True)
+        self.toggle_view_btn.setChecked(False)
+        self.toggle_view_btn.clicked.connect(self.toggle_catalog_view)
+        filter_layout.addWidget(self.toggle_view_btn)
+
+        header_layout.addLayout(filter_layout)
+
+        # Ligne 2: Sélection type (Produits/Services)
+        type_layout = QHBoxLayout()
+        self.type_button_group = QButtonGroup()
+        self.products_radio = QRadioButton("Produits")
+        self.products_radio.setChecked(True)
+        self.products_radio.toggled.connect(self.on_type_changed)
+        self.type_button_group.addButton(self.products_radio)
+        type_layout.addWidget(self.products_radio)
+        self.services_radio = QRadioButton("Services")
+        self.services_radio.toggled.connect(self.on_type_changed)
+        self.type_button_group.addButton(self.services_radio)
+        type_layout.addWidget(self.services_radio)
+        type_layout.addStretch()
+        header_layout.addLayout(type_layout)
+        catalog_layout.addWidget(header_group)
+
+        # === CONTENU DU CATALOGUE ===
+        self.catalog_content_widget = QWidget()
+        self.catalog_content_layout = QVBoxLayout(self.catalog_content_widget)
+        catalog_layout.addWidget(self.catalog_content_widget)
+
+        self.show_catalog_list()  # Par défaut, affichage liste
+
+        return catalog_widget
+
+    def toggle_catalog_view(self):
+        """Switch entre mode liste et mode cards"""
+        if self.toggle_view_btn.isChecked():
+            self.catalog_view_mode = 'cards'
+            self.toggle_view_btn.setText("📋 Mode liste")
+            self.show_catalog_cards()
+        else:
+            self.catalog_view_mode = 'liste'
+            self.toggle_view_btn.setText("🗂️ Mode cards")
+            self.show_catalog_list()
+
+    def show_catalog_list(self):
+        """Affiche le catalogue en mode liste (table)"""
+        # Nettoyer le layout
+        for i in reversed(range(self.catalog_content_layout.count())):
+            widget = self.catalog_content_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        self.catalog_table = QTableWidget()
+        self.catalog_table.setColumnCount(6)
+        self.catalog_table.setHorizontalHeaderLabels([
+            "Nom", "Description", "Prix", "Stock", "Quantité", "Action"
+        ])
+        header = self.catalog_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        self.catalog_table.setAlternatingRowColors(True)
+        self.catalog_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.catalog_content_layout.addWidget(self.catalog_table)
+        self.refresh_catalog()
+
+    def show_catalog_cards(self):
+        """Affiche le catalogue en mode cards (grille de produits avec image, nom, prix)"""
+        # Nettoyer le layout
+        for i in reversed(range(self.catalog_content_layout.count())):
+            widget = self.catalog_content_layout.itemAt(i).widget()
+            if widget:
+                widget.setParent(None)
+        from PyQt6.QtWidgets import QScrollArea, QGridLayout, QFrame, QVBoxLayout, QLabel, QPushButton
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        grid = QGridLayout()
+        card_container = QWidget()
+        card_container.setLayout(grid)
+        scroll.setWidget(card_container)
+        self.catalog_content_layout.addWidget(scroll)
+        # Charger les produits/services
+        # Pour l'instant, on utilise les produits mock
+        products = [
+            {'name': 'Pain', 'price': 1.20, 'image': None},
+            {'name': 'Lait', 'price': 0.85, 'image': None},
+            {'name': 'Riz', 'price': 2.60, 'image': None},
+            {'name': 'Savon', 'price': 1.45, 'image': None},
+            {'name': 'Sucre', 'price': 1.40, 'image': None}
+        ]
+        # TODO: remplacer par les vrais produits du catalogue
+        for idx, prod in enumerate(products):
+            card = QFrame()
+            card.setFrameShape(QFrame.Shape.StyledPanel)
+            card.setStyleSheet("""
+                QFrame {
+                    border: 1px solid #3498db;
+                    border-radius: 8px;
+                    background: #f8f8f8;
+                    padding: 8px;
+                }
+            """)
+            vbox = QVBoxLayout(card)
+            # Image
+            img_label = QLabel()
+            img_label.setFixedSize(80, 80)
+            img_label.setStyleSheet("background: #ecf0f1; border-radius: 6px;")
+            # TODO: charger l'image réelle si disponible
+            img_label.setText("🖼️")
+            img_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vbox.addWidget(img_label)
+            # Nom
+            name_label = QLabel(prod['name'])
+            name_label.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
+            name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vbox.addWidget(name_label)
+            # Prix
+            price_label = QLabel(f"{prod['price']:.2f} €")
+            price_label.setFont(QFont("Segoe UI", 10))
+            price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            vbox.addWidget(price_label)
+            # Bouton ajouter
+            add_btn = QPushButton("➕ Ajouter")
+            add_btn.setStyleSheet("background-color: #27ae60; color: white; border-radius: 6px; padding: 4px;")
+            add_btn.clicked.connect(lambda checked, p=prod: self.add_product_card_to_panier(p))
+            vbox.addWidget(add_btn)
+            grid.addWidget(card, idx // 3, idx % 3)
+        # TODO: gérer le click sur la card pour incrémenter la quantité
+
+    def add_product_card_to_panier(self, prod):
+        """Ajoute le produit au panier depuis une card, ajoute ou incrémente dans la BDD et rafraîchit le panier."""
+        # Recherche du vrai produit en BDD par nom (à adapter selon l'ID réel)
+        from ayanna_erp.modules.boutique.model.models import ShopProduct
+        with self.db_manager.get_session() as session:
+            product_obj = session.query(ShopProduct).filter(ShopProduct.name == prod['name']).first()
+            if not product_obj:
+                QMessageBox.warning(self, "Erreur", f"Produit '{prod['name']}' introuvable en BDD.")
+                return
+            # Ajout ou incrémentation dans le panier via le controller
+            success = self.add_product_to_panier(product_obj.id, 1)
+            if success:
+                self.refresh_panier()
+            else:
+                QMessageBox.warning(self, "Erreur", f"Impossible d'ajouter le produit au panier.")
     def create_catalog_section(self):
         """Créer la section catalogue des produits/services"""
         catalog_widget = QWidget()
@@ -247,30 +539,43 @@ class PanierIndex(QWidget):
         
         return panier_widget
     
-    def load_initial_data(self):
-        """Charger les données initiales"""
-        self.load_categories()
-        self.load_clients()
-        self.load_payment_methods()
-        self.refresh_catalog()
-        self.refresh_panier()
-    
-    def load_categories(self):
-        """Charger les catégories dans le combo box"""
-        try:
-            with self.db_manager.get_session() as session:
-                categories = self.boutique_controller.get_categories(session)
-                
-                self.category_combo.clear()
-                self.category_combo.addItem("Toutes les catégories", None)
-                
-                for category in categories:
-                    self.category_combo.addItem(category.name, category.id)
-                    
-        except Exception as e:
-            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des catégories: {str(e)}")
-    
-    def load_clients(self):
+    def load_dashboard_data(self):
+        """Charge les indicateurs du dashboard avec des données d'exemple (mock)"""
+        # Données fictives pour l'UI
+        stats = {
+            'ventes': 125000.50,
+            'depenses': 32000.00,
+            'creances': 15000.00,
+            'solde': 78000.50
+        }
+        self.label_total_ventes.setText(f"Total ventes du jour : {stats['ventes']:.2f} €")
+        self.label_total_depenses.setText(f"Dépenses du jour : {stats['depenses']:.2f} €")
+        self.label_total_creances.setText(f"Créances du jour : {stats['creances']:.2f} €")
+        self.label_solde.setText(f"Solde caisse : {stats['solde']:.2f} €")
+
+        top_products = [
+            {'name': 'Pain', 'qty': 120},
+            {'name': 'Lait', 'qty': 85},
+            {'name': 'Riz', 'qty': 60},
+            {'name': 'Savon', 'qty': 45},
+            {'name': 'Sucre', 'qty': 40}
+        ]
+        self.top_products_list.setRowCount(len(top_products))
+        for i, prod in enumerate(top_products):
+            self.top_products_list.setItem(i, 0, QTableWidgetItem(prod['name']))
+            self.top_products_list.setItem(i, 1, QTableWidgetItem(str(prod['qty'])))
+
+        top_clients = [
+            {'name': 'Kabasele Jean', 'amount': 35000.00},
+            {'name': 'Mbuyi Marie', 'amount': 27000.00},
+            {'name': 'Ngoy Pierre', 'amount': 18000.00},
+            {'name': 'Tshibanda Paul', 'amount': 15000.00},
+            {'name': 'Client anonyme', 'amount': 12000.00}
+        ]
+        self.top_clients_list.setRowCount(len(top_clients))
+        for i, cli in enumerate(top_clients):
+            self.top_clients_list.setItem(i, 0, QTableWidgetItem(cli['name']))
+            self.top_clients_list.setItem(i, 1, QTableWidgetItem(f"{cli['amount']:.2f}"))
         """Charger les clients dans le combo box"""
         try:
             with self.db_manager.get_session() as session:
