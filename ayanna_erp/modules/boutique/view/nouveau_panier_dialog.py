@@ -9,6 +9,30 @@ from ayanna_erp.modules.boutique.controller.panier_coontroller import PanierCont
 
 
 class NouveauPanierDialog(QDialog):
+    def get_filtered_products(self):
+        from ayanna_erp.modules.boutique.model.models import ShopProduct, ShopCategory, ShopService
+        session = self.panier_controller.db_manager.get_session()
+        pos_id = getattr(self.current_user, 'pos_id', 1)
+        search_text = self.search_input.text().strip().lower()
+        selected_cat = self.category_combo.currentText()
+        # Si Produits sélectionné
+        if hasattr(self, 'products_radio') and self.products_radio.isChecked():
+            query = session.query(ShopProduct).filter(ShopProduct.pos_id == pos_id)
+            if search_text:
+                query = query.filter(ShopProduct.name.ilike(f'%{search_text}%'))
+            if selected_cat and selected_cat != "Toutes":
+                cat_obj = session.query(ShopCategory).filter(ShopCategory.name == selected_cat).first()
+                if cat_obj:
+                    query = query.filter(ShopProduct.category_id == cat_obj.id)
+            return query.all()
+        # Si Services sélectionné
+        elif hasattr(self, 'services_radio') and self.services_radio.isChecked():
+            query = session.query(ShopService).filter(ShopService.pos_id == pos_id)
+            if search_text:
+                query = query.filter(ShopService.name.ilike(f'%{search_text}%'))
+            # Pas de filtre catégorie pour les services
+            return query.all()
+        return []
     def __init__(self, parent=None, boutique_controller=None, current_user=None):
         super().__init__(parent)
         self.setWindowTitle("Nouveau panier de vente")
@@ -77,6 +101,17 @@ class NouveauPanierDialog(QDialog):
         filter_layout.addWidget(QLabel("Catégorie:"))
         self.category_combo = QComboBox()
         filter_layout.addWidget(self.category_combo)
+        # Initialisation des catégories APRÈS la création du QComboBox
+        from ayanna_erp.modules.boutique.model.models import ShopCategory
+        session = self.panier_controller.db_manager.get_session()
+        pos_id = getattr(self.current_user, 'pos_id', 1)
+        categories = session.query(ShopCategory).filter(ShopCategory.pos_id == pos_id).all()
+        self.category_combo.addItem("Toutes")
+        for cat in categories:
+            if cat.name:
+                self.category_combo.addItem(cat.name)
+        self.category_combo.currentIndexChanged.connect(self.populate_catalog_with_products)
+        self.search_input.textChanged.connect(self.populate_catalog_with_products)
 
         refresh_btn = QPushButton("🔄 Actualiser")
         filter_layout.addWidget(refresh_btn)
@@ -99,22 +134,31 @@ class NouveauPanierDialog(QDialog):
         self.type_button_group.addButton(self.services_radio)
         type_layout.addWidget(self.services_radio)
         type_layout.addStretch()
+        # Connecter le changement de type au rafraîchissement du catalogue
+        self.products_radio.toggled.connect(self.populate_catalog_with_products)
+        self.services_radio.toggled.connect(self.populate_catalog_with_products)
         header_layout.addLayout(type_layout)
 
         catalog_layout.addWidget(header_group)
 
-        # Zone affichage
+        # Zone affichage statique avec scroll
+        from PyQt6.QtWidgets import QScrollArea
         self.catalog_display = QWidget()
         self.catalog_display_layout = QVBoxLayout(self.catalog_display)
-        catalog_layout.addWidget(self.catalog_display)
+        self.catalog_display_layout.setContentsMargins(0, 0, 0, 0)
+        self.catalog_display_layout.setSpacing(0)
+
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setWidget(self.catalog_display)
+        scroll_area.setFixedHeight(420)  # Hauteur fixe pour la zone catalogue
+        catalog_layout.addWidget(scroll_area)
 
         self.populate_catalog_with_products()
         return catalog_widget
 
     def populate_catalog_with_products(self):
-        from ayanna_erp.modules.boutique.model.models import ShopProduct
-        session = self.panier_controller.db_manager.get_session()
-        products = session.query(ShopProduct).all()
+        items = self.get_filtered_products()
 
         # Nettoyer complètement l'affichage (cartes ou tableau)
         while self.catalog_display_layout.count():
@@ -123,7 +167,6 @@ class NouveauPanierDialog(QDialog):
             if widget:
                 widget.deleteLater()
             elif item.layout():
-                # Supprimer tous les widgets du layout
                 sublayout = item.layout()
                 while sublayout.count():
                     subitem = sublayout.takeAt(0)
@@ -132,12 +175,20 @@ class NouveauPanierDialog(QDialog):
                         subwidget.deleteLater()
                 sublayout.deleteLater()
 
+        # Toujours garder la zone de filtre/recherche statique
+        # Si aucun produit/service, afficher un message dans la zone d’affichage
+        if not items:
+            empty_lbl = QLabel("Aucun produit ou service trouvé.")
+            empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_lbl.setStyleSheet("color: #7F8C8D; font-size: 16px; margin: 40px;")
+            self.catalog_display_layout.addWidget(empty_lbl)
+            return
+
         if self.catalog_mode == 'card':
             grid = QGridLayout()
             grid.setSpacing(15)
-            max_cards = 6  # Limité à 6 produits
-
-            for idx, product in enumerate(products[:max_cards]):
+            max_cards = 6
+            for idx, item in enumerate(items[:max_cards]):
                 card = QFrame()
                 card.setFrameShape(QFrame.Shape.StyledPanel)
                 card.setStyleSheet("""
@@ -152,16 +203,13 @@ class NouveauPanierDialog(QDialog):
                         background: #F4F9FF;
                     }
                 """)
-
                 vbox = QVBoxLayout(card)
-
-                # Image produit
                 img = QLabel()
                 img.setFixedSize(120, 100)
                 img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-                if hasattr(product, "image_path") and product.image_path:
-                    pixmap = QPixmap(product.image_path)
+                image_path = getattr(item, "image", None)
+                if image_path:
+                    pixmap = QPixmap(image_path)
                     if not pixmap.isNull():
                         img.setPixmap(pixmap.scaled(120, 100, Qt.AspectRatioMode.KeepAspectRatio,
                                                     Qt.TransformationMode.SmoothTransformation))
@@ -171,32 +219,25 @@ class NouveauPanierDialog(QDialog):
                 else:
                     img.setText("🖼️")
                     img.setStyleSheet("background: #ECF0F1; border-radius: 8px;")
-
                 vbox.addWidget(img, alignment=Qt.AlignmentFlag.AlignCenter)
-
-                # Nom produit
-                name_lbl = QLabel(product.name)
+                name_lbl = QLabel(item.name)
                 name_lbl.setFont(QFont("Arial", 11, QFont.Weight.Bold))
                 name_lbl.setWordWrap(True)
                 name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 vbox.addWidget(name_lbl)
-
-                # Prix
-                price_lbl = QLabel(f"{product.price_unit:.2f} €")
+                # Prix : ShopProduct.price_unit ou ShopService.price
+                price = getattr(item, "price_unit", None)
+                if price is None:
+                    price = getattr(item, "price", 0)
+                price_lbl = QLabel(f"{price:.2f} €")
                 price_lbl.setFont(QFont("Arial", 11))
                 price_lbl.setStyleSheet("color: #27AE60; font-weight: bold;")
                 price_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 vbox.addWidget(price_lbl)
-
-                # 👉 Rendre toute la carte cliquable
-                card.mousePressEvent = lambda event, pid=product.id: self.handle_card_click(pid)
-
-                grid.addWidget(card, idx // 3, idx % 3)  # 3 par ligne
-
+                card.mousePressEvent = lambda event, pid=item.id: self.handle_card_click(pid)
+                grid.addWidget(card, idx // 3, idx % 3)
             self.catalog_display_layout.addLayout(grid)
-
         else:
-            # Affichage en tableau (mode liste)
             table = QTableWidget()
             table.setColumnCount(4)
             table.setHorizontalHeaderLabels(["Nom", "Description", "Prix", "Action"])
@@ -207,12 +248,15 @@ class NouveauPanierDialog(QDialog):
             header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
             table.setAlternatingRowColors(True)
             table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-            table.setRowCount(len(products))
-            for row, product in enumerate(products):
-                table.setItem(row, 0, QTableWidgetItem(product.name))
-                description = product.description if product.description else "-"
+            table.setRowCount(len(items))
+            for row, item in enumerate(items):
+                table.setItem(row, 0, QTableWidgetItem(item.name))
+                description = getattr(item, "description", "-") or "-"
                 table.setItem(row, 1, QTableWidgetItem(description))
-                price_item = QTableWidgetItem(f"{product.price_unit:.2f} €")
+                price = getattr(item, "price_unit", None)
+                if price is None:
+                    price = getattr(item, "price", 0)
+                price_item = QTableWidgetItem(f"{price:.2f} €")
                 price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row, 2, price_item)
                 add_btn = QPushButton("➕ Ajouter")
@@ -233,7 +277,7 @@ class NouveauPanierDialog(QDialog):
                     }
                 """)
                 add_btn.clicked.connect(
-                    lambda checked, pid=product.id: self.handle_card_click(pid)
+                    lambda checked, pid=item.id: self.handle_card_click(pid)
                 )
                 table.setCellWidget(row, 3, add_btn)
             self.catalog_display_layout.addWidget(table)
