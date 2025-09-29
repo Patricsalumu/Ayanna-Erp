@@ -4,7 +4,7 @@ Modèle de base pour tous les autres modèles
 from sqlalchemy import Column, Integer, DateTime, func
 from sqlalchemy.ext.declarative import declarative_base
 
-Base = declarative_base()
+from ayanna_erp.database.base import Base
 
 class BaseModel(Base):
     """Modèle de base avec colonnes communes"""

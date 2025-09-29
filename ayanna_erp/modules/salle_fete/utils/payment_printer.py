@@ -160,7 +160,7 @@ class PaymentPrintManager:
         canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(HexColor('#555555'))
         generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
-        filigrane_text = f"Généré par {self.company_info['name']} © - {generation_time}"
+        filigrane_text = f"Généré par Ayanna Erp App © - {generation_time}"
         text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
         x_center = (A4[0] - text_width) / 2
         canvas.drawString(x_center, 15, filigrane_text)
@@ -425,10 +425,10 @@ class PaymentPrintManager:
                     
                     # Si le nom devient vide ou trop court, utiliser une valeur par défaut
                     if not user_name_clean or len(user_name_clean) < 3:
-                        user_name_clean = "Système"
+                        user_name_clean = "N/A"
                     
                     # Limiter la longueur pour éviter le débordement
-                    user_name = user_name_clean[:20] if len(user_name_clean) > 20 else user_name_clean
+                    user_name = user_name_clean[:30] if len(user_name_clean) > 30 else user_name_clean
                 
                 currency_symbol = self.get_currency_symbol()
                 payment_data.append([
@@ -534,7 +534,7 @@ class PaymentPrintManager:
         c = canvas.Canvas(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT))
         
         y_position = TICKET_HEIGHT - 5*mm  # Commencer en haut
-        line_height = 3*mm  # Espacement entre les lignes
+        line_height = 4*mm  # Espacement entre les lignes
         
         # Logo et en-tête entreprise (taille réduite pour 53mm)
         logo_path = self._create_temp_logo_file()
@@ -551,32 +551,32 @@ class PaymentPrintManager:
                 pass
         
         # Nom de l'entreprise
-        c.setFont('Helvetica-Bold', 12)  # Augmenté de 7 à 12
+        c.setFont('Helvetica-Bold', 11)  # Augmenté de 7 à 12
         text = self.company_info['name'][:30]  # Limiter la longueur
-        text_width = c.stringWidth(text, 'Helvetica-Bold', 12)
+        text_width = c.stringWidth(text, 'Helvetica-Bold', 11)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, text)
         y_position -= line_height
         
         # Coordonnées entreprise (police très petite)
-        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
+        c.setFont('Helvetica', 8)  # Augmenté de 5 à 10
         for info in [self.company_info['phone'], self.company_info['email']]:
             if info:
                 info_text = info[:35]  # Limiter la longueur
-                text_width = c.stringWidth(info_text, 'Helvetica', 10)
+                text_width = c.stringWidth(info_text, 'Helvetica', 8)
                 c.drawString((TICKET_WIDTH - text_width) / 2, y_position, info_text)
                 y_position -= 2.5*mm
         
         # Adresse sur une ligne
         if self.company_info['address']:
             address_text = self.company_info['address'][:40]
-            text_width = c.stringWidth(address_text, 'Helvetica', 10)
+            text_width = c.stringWidth(address_text, 'Helvetica', 8)
             c.drawString((TICKET_WIDTH - text_width) / 2, y_position, address_text)
             y_position -= 2.5*mm
         
         # RCCM
         if self.company_info['rccm']:
             rccm_text = self.company_info['rccm'][:30]
-            text_width = c.stringWidth(rccm_text, 'Helvetica', 10)
+            text_width = c.stringWidth(rccm_text, 'Helvetica', 8)
             c.drawString((TICKET_WIDTH - text_width) / 2, y_position, rccm_text)
             y_position -= 2.5*mm
         
@@ -586,14 +586,14 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Titre du reçu
-        c.setFont('Helvetica-Bold', 14)  # Augmenté de 8 à 14
+        c.setFont('Helvetica-Bold', 8   )  # Augmenté de 8 à 14
         title = "RECU DE PAIEMENT"
-        text_width = c.stringWidth(title, 'Helvetica-Bold', 14)
+        text_width = c.stringWidth(title, 'Helvetica-Bold', 11)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, title)
         y_position -= line_height + 2*mm
         
         # Informations de base de la réservation (format compact)
-        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
+        c.setFont('Helvetica', 8)  # Augmenté de 5 à 10
         
         # Référence
         ref_text = f"Ref: {reservation_data.get('reference', 'N/A')[:15]}"
@@ -601,7 +601,7 @@ class PaymentPrintManager:
         y_position -= 2.5*mm
         
         # Client (limiter la longueur)
-        client_name = reservation_data.get('client_nom', 'N/A')[:20]
+        client_name = reservation_data.get('client_nom', 'N/A')[:30]
         client_text = f"Client: {client_name}"
         c.drawString(2*mm, y_position, client_text)
         y_position -= 2.5*mm
@@ -618,7 +618,7 @@ class PaymentPrintManager:
         y_position -= 2.5*mm
         
         # Date événement
-        event_date = reservation_data.get('event_date', 'N/A')[:12]
+        event_date = reservation_data.get('event_date', 'N/A')[:20]
         date_text = f"Date: {event_date}"
         c.drawString(2*mm, y_position, date_text)
         y_position -= 2.5*mm
@@ -629,7 +629,7 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Détail de chaque paiement
-        c.setFont('Helvetica-Bold', 11)  # Augmenté de 6 à 11
+        c.setFont('Helvetica-Bold', 7)  # Augmenté de 6 à 11
         c.drawString(2*mm, y_position, "DETAIL PAIEMENTS:")
         y_position -= 3*mm
         
@@ -641,25 +641,25 @@ class PaymentPrintManager:
                 total_paid += payment_amount
                 
                 # Numéro et montant sur une ligne
-                c.setFont('Helvetica-Bold', 10)  # Augmenté de 5 à 10
+                c.setFont('Helvetica-Bold', 7)  # Augmenté de 5 à 10
                 currency_symbol = self.get_currency_symbol()
                 payment_line = f"#{i}: {payment_amount:.2f} {currency_symbol}"
                 c.drawString(2*mm, y_position, payment_line)
-                y_position -= 2.5*mm
+                y_position -= 3.5*mm
                 
                 # Méthode
-                c.setFont('Helvetica', 8)  # Augmenté de 4 à 8
+                c.setFont('Helvetica', 6)  # Augmenté de 4 à 8
                 method_text = payment.get('payment_method', 'N/A')[:20]
                 c.drawString(3*mm, y_position, method_text)
                 y_position -= 2*mm
                 
                 # Date
-                date_text = payment.get('payment_date', 'N/A')[:15]
+                date_text = payment.get('payment_date', 'N/A')[:20]
                 c.drawString(3*mm, y_position, date_text)
                 y_position -= 2*mm
                 
                 # Caissier
-                cashier_name = payment.get('user_name', 'N/A')[:15]
+                cashier_name = payment.get('user_name', 'N/A')[:25]
                 cashier_text = f"Par: {cashier_name}"
                 c.drawString(3*mm, y_position, cashier_text)
                 y_position -= 2*mm
@@ -667,9 +667,9 @@ class PaymentPrintManager:
                 # Petite ligne de séparation entre paiements
                 if i < len(payments_list):
                     c.line(3*mm, y_position, TICKET_WIDTH - 3*mm, y_position)
-                    y_position -= 2*mm
+                    y_position -= 3*mm
         else:
-            c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
+            c.setFont('Helvetica', 6)  # Augmenté de 5 à 10
             c.drawString(2*mm, y_position, "Aucun paiement")
             y_position -= 3*mm
         
@@ -678,11 +678,11 @@ class PaymentPrintManager:
         c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
         y_position -= 3*mm
         
-        c.setFont('Helvetica-Bold', 11)  # Augmenté de 6 à 11
+        c.setFont('Helvetica-Bold', 7)  # Augmenté de 6 à 11
         c.drawString(2*mm, y_position, "RECAPITULATIF:")
         y_position -= 3*mm
         
-        c.setFont('Helvetica', 10)  # Augmenté de 5 à 10
+        c.setFont('Helvetica', 7)  # Augmenté de 5 à 10
         # Utiliser le net à payer (après remise) au lieu du total brut
         net_a_payer = reservation_data.get('total_net', reservation_data.get('net_a_payer', 0))
         balance = net_a_payer - total_paid
@@ -691,15 +691,15 @@ class PaymentPrintManager:
         # Net à payer (après remise)
         total_text = f"Net a payer: {net_a_payer:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, total_text)
-        y_position -= 2.5*mm
+        y_position -= 3.5*mm
         
         # Total payé
         paid_text = f"Paye: {total_paid:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, paid_text)
-        y_position -= 2.5*mm
+        y_position -= 3.5*mm
         
         # Reste à payer
-        c.setFont('Helvetica-Bold', 10)  # Augmenté de 5 à 10
+        c.setFont('Helvetica-Bold', 8)  # Augmenté de 5 à 10
         balance_text = f"Reste: {balance:.2f} {currency_symbol}"
         c.drawString(2*mm, y_position, balance_text)
         y_position -= 3*mm
@@ -709,9 +709,9 @@ class PaymentPrintManager:
         y_position -= 3*mm
         
         # Filigrane avec nom d'entreprise dynamique
-        c.setFont('Helvetica', 8)  # Augmenté de 4 à 8
+        c.setFont('Helvetica', 6)  # Augmenté de 4 à 8
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
-        filigrane_text = f"{self.company_info['name']} (c) {generation_time}"
+        filigrane_text = f"Ayanna Erp App (c) {generation_time}"
         text_width = c.stringWidth(filigrane_text, 'Helvetica', 8)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
         

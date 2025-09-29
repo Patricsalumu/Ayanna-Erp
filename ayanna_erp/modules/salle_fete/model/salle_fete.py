@@ -12,7 +12,8 @@ from datetime import datetime
 
 # Import du gestionnaire de base de données principal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-from ayanna_erp.database.database_manager import Base, DatabaseManager
+from ayanna_erp.database.base import Base
+from ayanna_erp.database.database_manager import DatabaseManager
 
 
 class EventClient(Base):

@@ -983,7 +983,7 @@ class ReservationController(QObject):
                             compte_comptable_id=config.compte_remise_id,
                             debit=remise_totale,
                             credit=0,
-                            ordre=ordre,
+                            ordre=1,
                             libelle=f"{libelle_base} - Remise {reservation.discount_percent}% (TOTALE)"
                         )
                         session.add(ecriture_remise)

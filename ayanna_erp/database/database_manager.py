@@ -1,3 +1,5 @@
+from ayanna_erp.database.base import Base
+from ayanna_erp.modules.boutique.model.models import ShopCategory
 """
 Gestionnaire de base de données pour Ayanna ERP
 Utilise SQLAlchemy pour la gestion des modèles et des connexions
@@ -12,7 +14,6 @@ from sqlalchemy.pool import StaticPool
 import bcrypt
 
 
-Base = declarative_base()
 
 # Import des modèles comptables pour qu'ils soient inclus dans Base.metadata
 try:
@@ -28,16 +29,23 @@ class DatabaseManager:
     def __init__(self, database_url=None):
         if database_url is None:
             database_url = "sqlite:///ayanna_erp.db"
-        
         self.engine = create_engine(
             database_url,
             poolclass=StaticPool,
             connect_args={"check_same_thread": False} if "sqlite" in database_url else {},
             echo=False
         )
-        
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.session = None
+        self.current_enterprise_id = None
+
+    def set_current_enterprise(self, enterprise_id):
+        """Définit l'entreprise actuellement sélectionnée (ID)"""
+        self.current_enterprise_id = enterprise_id
+
+    def get_current_enterprise_id(self):
+        """Retourne l'ID de l'entreprise actuellement sélectionnée"""
+        return self.current_enterprise_id
     
     def get_session(self):
         """Obtenir une session de base de données"""
@@ -404,23 +412,31 @@ class DatabaseManager:
                         session.add(service)
                         print(f"✅ Service boutique créé: {service.name} - {service.price}€")
                 
+                # Récupérer ou créer la catégorie par défaut "Général"
+                default_category = session.query(ShopCategory).filter_by(name="Général", pos_id=boutique_pos.id).first()
+                if not default_category:
+                    default_category = ShopCategory(name="Général", pos_id=boutique_pos.id, description="Catégorie par défaut")
+                    session.add(default_category)
+                    session.flush()  # Pour obtenir l'ID
+                default_category_id = default_category.id
+
                 default_shop_products = [
                     {"name": "Produit exemple 1", "description": "Premier produit exemple", "price_unit": 25.0, "cost": 15.0, "stock_quantity": 50},
                     {"name": "Produit exemple 2", "description": "Deuxième produit exemple", "price_unit": 45.0, "cost": 30.0, "stock_quantity": 30},
                     {"name": "Produit exemple 3", "description": "Troisième produit exemple", "price_unit": 75.0, "cost": 50.0, "stock_quantity": 20},
                 ]
-                
+
                 for product_data in default_shop_products:
                     existing_product = session.query(ShopProduct).filter_by(
                         pos_id=boutique_pos.id,
                         name=product_data["name"]
                     ).first()
-                    
+
                     if not existing_product:
                         product = ShopProduct(
                             pos_id=boutique_pos.id,
                             image="/images/products/default.jpg",  # Image par défaut
-                            category="Général",  # Catégorie par défaut
+                            category_id=default_category_id,  # Catégorie par défaut
                             **product_data
                         )
                         session.add(product)

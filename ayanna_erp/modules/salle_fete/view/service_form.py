@@ -223,7 +223,7 @@ class ServiceForm(QDialog):
             # Importer ici pour éviter les imports circulaires
             from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
             
-            comptabilite_controller = ComptabiliteController()
+            comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
             
             # Récupérer l'entreprise depuis le contrôleur service
             entreprise_id = self.get_enterprise_id()

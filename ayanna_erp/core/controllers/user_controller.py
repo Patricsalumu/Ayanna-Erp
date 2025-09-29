@@ -146,6 +146,7 @@ class UserController(QObject):
                 
                 session.close()
                 self._current_user = user_info
+                # Suppression de l'appel à set_current_user (obsolète)
                 self.authentication_result.emit(True, user_info)
                 return user_info
             else:

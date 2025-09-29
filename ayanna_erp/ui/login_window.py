@@ -242,11 +242,12 @@ class LoginWindow(QWidget):
             
             if user and user.check_password(password):
                 self.current_user = user
-                
+                # Enregistrer l'utilisateur et l'entreprise dans DatabaseManager
+                # Suppression de l'appel obsolète à set_current_user (gestion centralisée)
+                self.db_manager.set_current_enterprise(user.enterprise_id)
                 # Importer et initialiser le SessionManager
                 from ayanna_erp.core.session_manager import SessionManager
                 SessionManager.set_current_user(user)
-                
                 return True
             return False
             

@@ -13,9 +13,10 @@ class ComptabiliteWindow(QMainWindow):
     - Comptes comptables
     - Classes comptables
     """
-    def __init__(self, current_user):
+    def __init__(self, current_user, user_controller=None):
         super().__init__()
         self.current_user = current_user
+        self.user_controller = user_controller
         
         # Configuration de la fenêtre
         self.setWindowTitle("Ayanna ERP - Module Comptabilité")
@@ -42,7 +43,7 @@ class ComptabiliteWindow(QMainWindow):
         # Import du controller corrigé
         try:
             from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
-            self.controller = ComptabiliteController()
+            self.controller = ComptabiliteController(user_controller=self.user_controller)
         except ImportError:
             # Fallback si le controller n'existe pas encore
             self.controller = None

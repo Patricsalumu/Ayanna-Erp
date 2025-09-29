@@ -4,7 +4,7 @@ Adapté pour Ayanna ERP
 """
 from sqlalchemy import Column, Integer, String, Text, Numeric, DateTime, ForeignKey, Boolean, func, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
-from ayanna_erp.database.database_manager import Base
+from ayanna_erp.database.base import Base
 from datetime import datetime
 
 

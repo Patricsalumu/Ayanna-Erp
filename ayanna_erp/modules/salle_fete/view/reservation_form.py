@@ -79,14 +79,14 @@ class ReservationForm(QDialog):
         try:
             return self.entreprise_controller.get_currency_symbol()
         except:
-            return "€"  # Fallback
+            return "$"  # Fallback
     
     def format_amount(self, amount):
         """Formate un montant avec la devise de l'entreprise"""
         try:
             return self.entreprise_controller.format_amount(amount)
         except:
-            return f"{amount:.2f} €"  # Fallback
+            return f"{amount:.2f} $"  # Fallback
     
     def parse_amount_from_text(self, text):
         """Extrait un montant numérique depuis un texte formaté avec devise"""
@@ -286,7 +286,7 @@ class ReservationForm(QDialog):
         
         self.tax_rate_spinbox = QDoubleSpinBox()
         self.tax_rate_spinbox.setRange(0, 30)
-        self.tax_rate_spinbox.setValue(20)  # TVA à 20% par défaut
+        self.tax_rate_spinbox.setValue(0)  # TVA à 20% par défaut
         self.tax_rate_spinbox.setSuffix(" %")
         self.tax_rate_spinbox.valueChanged.connect(self.calculate_totals)
         
@@ -314,14 +314,14 @@ class ReservationForm(QDialog):
         # Ligne 1: Sous-total HT et TVA
         totals_layout.addWidget(QLabel("Sous-total HT:"), 0, 0)
         totals_layout.addWidget(self.subtotal_label, 0, 1)
-        totals_layout.addWidget(QLabel("Taux de TVA:"), 0, 2)
-        totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
+        # totals_layout.addWidget(QLabel("Taux de TVA:"), 0, 2)
+        # totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
         
         # Ligne 2: Total TTC (avant remise) et Montant TVA
         totals_layout.addWidget(QLabel("Total TTC brut:"), 1, 0)
         totals_layout.addWidget(self.total_before_discount_label, 1, 1)
-        totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
-        totals_layout.addWidget(self.tax_amount_label, 1, 3)
+        # totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
+        # totals_layout.addWidget(self.tax_amount_label, 1, 3)
         
         # Ligne 3: Remise et montant de remise
         totals_layout.addWidget(QLabel("Remise:"), 2, 0)
@@ -542,7 +542,7 @@ class ReservationForm(QDialog):
             service_layout.setContentsMargins(0, 0, 0, 0)
             
             # Case à cocher pour le service
-            checkbox = QCheckBox(f"{service.name} - {service.price:.2f} €")
+            checkbox = QCheckBox(f"{service.name} - {service.price:.2f} $")
             checkbox.setObjectName(f"service_{service.id}")
             checkbox.service_data = service
             checkbox.toggled.connect(self.update_selection_summary)
@@ -600,7 +600,7 @@ class ReservationForm(QDialog):
             product_layout.setContentsMargins(0, 0, 0, 0)
             
             # Checkbox du produit
-            checkbox = QCheckBox(f"{product.name} - {product.price_unit:.2f} €")
+            checkbox = QCheckBox(f"{product.name} - {product.price_unit:.2f} $")
             checkbox.setObjectName(f"product_{product.id}")
             checkbox.product_data = product
             checkbox.toggled.connect(self.update_selection_summary)
@@ -643,7 +643,7 @@ class ReservationForm(QDialog):
         ]
         
         for service_data in default_services:
-            checkbox = QCheckBox(f"{service_data['name']} - {service_data['price']:.2f} €")
+            checkbox = QCheckBox(f"{service_data['name']} - {service_data['price']:.2f} $")
             checkbox.service_data = service_data
             checkbox.toggled.connect(self.update_selection_summary)
             
@@ -662,7 +662,7 @@ class ReservationForm(QDialog):
         ]
         
         for product_data in default_products:
-            checkbox = QCheckBox(f"{product_data['name']} - {product_data['price']:.2f} €")
+            checkbox = QCheckBox(f"{product_data['name']} - {product_data['price']:.2f} $")
             checkbox.product_data = product_data
             checkbox.toggled.connect(self.update_selection_summary)
             
@@ -696,7 +696,7 @@ class ReservationForm(QDialog):
                     price = float(service_data['price'])
                 
                 line_total = price * quantity
-                selected_services.append(f"🔧 {name} - {price:.2f} € x{quantity} = {line_total:.2f} €")
+                selected_services.append(f"🔧 {name} - {price:.2f} $ x{quantity} = {line_total:.2f} $")
                 total_services += line_total
         
         # Vérifier les produits sélectionnés avec quantités
@@ -717,13 +717,13 @@ class ReservationForm(QDialog):
                     unit_price = float(product_data['price'])
                 
                 line_total = unit_price * quantity
-                selected_products.append(f"📦 {name} (x{quantity}) - {line_total:.2f} €")
+                selected_products.append(f"📦 {name} (x{quantity}) - {line_total:.2f} $")
                 total_products += line_total
         
         # Mettre à jour l'affichage des services
         if selected_services:
             services_text = "\n".join(selected_services)
-            services_text += f"\n\nSous-total services: {total_services:.2f} €"
+            services_text += f"\n\nSous-total services: {total_services:.2f} $"
             self.services_summary_label.setText(services_text)
             self.services_summary_label.setStyleSheet("color: #27AE60; font-weight: bold;")
         else:
@@ -733,7 +733,7 @@ class ReservationForm(QDialog):
         # Mettre à jour l'affichage des produits
         if selected_products:
             products_text = "\n".join(selected_products)
-            products_text += f"\n\nSous-total produits: {total_products:.2f} €"
+            products_text += f"\n\nSous-total produits: {total_products:.2f} $"
             self.products_summary_label.setText(products_text)
             self.products_summary_label.setStyleSheet("color: #3498DB; font-weight: bold;")
         else:

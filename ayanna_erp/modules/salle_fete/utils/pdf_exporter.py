@@ -138,7 +138,7 @@ class PDFExporter:
         canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(HexColor('#555555'))  # Gris plus foncé
         generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
-        filigrane_text = f"Généré par {self.company_info['name']} © - {generation_time}"
+        filigrane_text = f"Généré par Ayanna Erp App © - {generation_time}"
         # Position en bas de page - centré
         text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
         x_center = (A4[0] - text_width) / 2

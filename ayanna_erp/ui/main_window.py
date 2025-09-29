@@ -82,9 +82,12 @@ class MainWindow(QMainWindow):
     def __init__(self, current_user):
         super().__init__()
         self.current_user = current_user
+        from ayanna_erp.core.controllers.user_controller import UserController
+        self.user_controller = UserController()
+        self.user_controller._current_user = current_user
         self.db_manager = DatabaseManager()
         self.module_windows = {}  # Stockage des fenêtres de modules ouvertes
-        
+
         self.setup_ui()
         self.load_modules()
     
@@ -489,7 +492,8 @@ class MainWindow(QMainWindow):
                 window = StockWindow(self.current_user)
             elif module_name == "Comptabilite":
                 from ayanna_erp.modules.comptabilite.comptabilite_window import ComptabiliteWindow
-                window = ComptabiliteWindow(self.current_user)
+                # On suppose que l'instance UserController est accessible via self.user_controller
+                window = ComptabiliteWindow(self.current_user, user_controller=self.user_controller)
             else:
                 QMessageBox.information(self, "Information", f"Module {module_name} en cours de développement.")
                 return

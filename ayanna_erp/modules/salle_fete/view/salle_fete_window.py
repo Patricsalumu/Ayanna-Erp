@@ -28,10 +28,16 @@ from .entreSortie_index import EntreeSortieIndex
 class SalleFeteWindow(QMainWindow):
     """Fenêtre principale du module Salle de Fête"""
     
-    def __init__(self, current_user, pos_id=1):
+    def __init__(self, current_user, pos_id=1, user_controller=None):
         super().__init__()
         self.current_user = current_user
         self.pos_id = pos_id
+        # Initialiser le UserController si non fourni
+        if user_controller is None:
+            from ayanna_erp.core.controllers.user_controller import UserController
+            self.user_controller = UserController()
+        else:
+            self.user_controller = user_controller
         
         # Initialiser le contrôleur principal
         self.main_controller = MainWindowController(self)
@@ -124,11 +130,13 @@ class SalleFeteWindow(QMainWindow):
         # self.tab_widget.addTab(self.clients_widget, "👥 Clients")
         
         # Onglet Services
-        self.services_widget = ServiceIndex(self.main_controller, self.current_user)
+
+        self.services_widget = ServiceIndex(self.main_controller, self.current_user, user_controller=self.user_controller)
         self.tab_widget.addTab(self.services_widget, "🔧 Services")
         
         # Onglet Produits
-        self.produits_widget = ProduitIndex(self.main_controller, self.current_user)
+
+        self.produits_widget = ProduitIndex(self.main_controller, self.current_user, user_controller=self.user_controller)
         self.tab_widget.addTab(self.produits_widget, "📦 Produits")
         
         # Onglet Entrées/Sorties

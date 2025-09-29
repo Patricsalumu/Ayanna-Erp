@@ -28,7 +28,8 @@ def init_boutique_data(db_session):
             ShopPanier, ShopPanierProduct, ShopPanierService,
             ShopPayment, ShopStock, ShopExpense, ShopComptesConfig
         )
-        from ayanna_erp.database.database_manager import Base, DatabaseManager
+        from ayanna_erp.database.base import Base
+        from ayanna_erp.database.database_manager import DatabaseManager
         
         # Obtenir l'engine pour créer les tables
         db_manager = DatabaseManager()
@@ -175,6 +176,9 @@ def init_boutique_data(db_session):
         
         # Ajouter les produits
         for prod_data in products_data:
+            # S'assurer que prod_data contient 'category_id' et non 'category'
+            if 'category' in prod_data:
+                prod_data['category_id'] = prod_data.pop('category')
             product = ShopProduct(**prod_data)
             db_session.add(product)
         

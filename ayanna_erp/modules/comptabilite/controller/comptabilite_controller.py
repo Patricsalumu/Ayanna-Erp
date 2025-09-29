@@ -24,11 +24,12 @@ import datetime
 class ComptabiliteController:
     """Contrôleur principal pour la gestion de la comptabilité"""
     
-    def __init__(self):
+    def __init__(self, user_controller=None):
         self.db_manager = DatabaseManager()
         self.session = self.db_manager.get_session()
-        # Initialiser le contrôleur entreprise pour les devises
         self.entreprise_controller = EntrepriseController()
+        # Ajout du contrôleur utilisateur pour récupérer l'utilisateur connecté
+        self.user_controller = user_controller
     
     def get_currency_symbol(self):
         """Récupère le symbole de devise depuis l'entreprise"""
@@ -378,7 +379,7 @@ class ComptabiliteController:
         return total_debit - total_credit
 
 
-    def transfert_journal(self, entreprise_id, compte_debit_id, compte_credit_id, montant, libelle):
+    def transfert_journal(self, entreprise_id, compte_debit_id, compte_credit_id, montant, libelle, user_id=None):
         """
         Effectue un transfert de fonds entre deux comptes.
         - On ne peut créditer un compte caisse (classe 5) que dans la limite de son solde.
@@ -386,6 +387,15 @@ class ComptabiliteController:
         # Import remplac� par les nouveaux mod�les
         from datetime import datetime
         try:
+            # Si user_id n'est pas fourni, le récupérer via le UserController
+            if user_id is None:
+                if self.user_controller and self.user_controller.get_current_user():
+                    user_obj = self.user_controller.get_current_user()
+                    user_id = getattr(user_obj, 'id', None)
+                    print(f"[DEBUG] user_id récupéré via UserController : {user_id}")
+                else:
+                    print(f"[DEBUG] Aucun utilisateur connecté dans UserController")
+                    return False, "Impossible de déterminer l'utilisateur connecté pour le transfert."
             
             compte_credit = self.session.query(CompteComptable).get(compte_credit_id)
             classe_credit = self.session.query(ClasseComptable).get(compte_credit.classe_comptable_id)
@@ -402,7 +412,8 @@ class ComptabiliteController:
                 libelle=libelle,
                 montant=montant,
                 type_operation="transfert",
-                enterprise_id=entreprise_id
+                enterprise_id=entreprise_id,
+                user_id=user_id
             )
             self.session.add(journal)
             self.session.flush()  # Pour obtenir l'ID du journal

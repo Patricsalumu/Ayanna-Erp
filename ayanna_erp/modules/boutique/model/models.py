@@ -12,7 +12,7 @@ import os
 
 # Import du gestionnaire de base de données principal
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
-from ayanna_erp.database.database_manager import Base
+from ayanna_erp.database.base import Base
 
 
 class ShopClient(Base):

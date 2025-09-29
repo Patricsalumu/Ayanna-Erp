@@ -27,10 +27,11 @@ from ayanna_erp.core.controllers.entreprise_controller import EntrepriseControll
 class ProduitIndex(QWidget):
     """Onglet pour la gestion des produits"""
     
-    def __init__(self, main_controller, current_user):
+    def __init__(self, main_controller, current_user, user_controller=None):
         super().__init__()
         self.main_controller = main_controller
         self.current_user = current_user
+        self.user_controller = user_controller
         
         # Initialiser le contrôleur produit
         self.produit_controller = ProduitController(pos_id=getattr(main_controller, 'pos_id', 1))
@@ -605,7 +606,7 @@ class ProduitIndex(QWidget):
                 try:
                     # Importer ici pour éviter les imports circulaires
                     from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
-                    comptabilite_controller = ComptabiliteController()
+                    comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
                     compte = comptabilite_controller.get_compte_by_id(product.account_id)
                     if compte:
                         account_text = f"{compte.numero} - {compte.nom}"
