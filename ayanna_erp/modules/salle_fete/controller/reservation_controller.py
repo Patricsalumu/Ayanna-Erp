@@ -162,14 +162,16 @@ class ReservationController(QObject):
                 else:
                     # Créer la ligne de journal comptable
                     libelle = f"Paiement Accompte Reservation: {reservation.client_nom} {reservation.client_prenom}"
+                    from ayanna_erp.core.entreprise_controller import EntrepriseController
+                    entreprise_ctrl = EntrepriseController()
                     journal = JournalComptable(
-                        enterprise_id=1,  # TODO: Récupérer l'ID de l'entreprise du POS
+                        enterprise_id=entreprise_ctrl.get_connected_enterprise_id(),
                         libelle=libelle,
                         montant=deposit_amount,
                         type_operation="entree",  # 'entree' pour un paiement
                         reference=f"PAY-{payment.id}",
                         description=f"Acompte réservation ID: {reservation.id}",
-                        user_id=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
+                        user_id=entreprise_ctrl.get_connected_user_id(),
                         date_operation=datetime.now()
                     )
                     session.add(journal)

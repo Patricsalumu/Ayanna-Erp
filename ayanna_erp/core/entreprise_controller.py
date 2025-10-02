@@ -512,3 +512,31 @@ class EntrepriseController(QObject):
     def refresh_cache(self):
         """Rafraîchir le cache de l'entreprise courante"""
         self._current_enterprise = None
+
+    def get_connected_enterprise_id(self):
+        """
+        Retourne l'ID de l'entreprise connectée (en session)
+        Returns:
+            int: ID de l'entreprise connectée
+        Raises:
+            Exception: Si la récupération échoue
+        """
+        from ayanna_erp.core.session_manager import SessionManager
+        enterprise_id = SessionManager.get_current_enterprise_id()
+        if enterprise_id:
+            return enterprise_id
+        raise Exception("Impossible de récupérer l'ID de l'entreprise connectée")
+
+    def get_connected_user_id(self):
+        """
+        Retourne l'ID de l'utilisateur connecté (en session)
+        Returns:
+            int: ID de l'utilisateur connecté
+        Raises:
+            Exception: Si la récupération échoue
+        """
+        from ayanna_erp.core.session_manager import SessionManager
+        user = SessionManager.get_current_user()
+        if user and hasattr(user, 'id'):
+            return user.id
+        raise Exception("Impossible de récupérer l'ID de l'utilisateur connecté")

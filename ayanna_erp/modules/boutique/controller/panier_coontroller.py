@@ -3,6 +3,36 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from datetime import datetime
 
 class PanierController:
+    def __init__(self, db_manager=None):
+        self.db_manager = db_manager or DatabaseManager()
+
+    def remove_product_from_panier(self, panier_id, product_id):
+        """
+        Supprime un produit du panier spécifié.
+        """
+        session = self.db_manager.get_session()
+        from ayanna_erp.modules.boutique.model.models import ShopPanierProduct
+        panier_product = session.query(ShopPanierProduct).filter_by(panier_id=panier_id, product_id=product_id).first()
+        if panier_product:
+            session.delete(panier_product)
+            session.commit()
+            return True
+        return False
+
+    def update_product_quantity(self, panier_id, product_id, new_quantity):
+        """
+        Met à jour la quantité d'un produit dans le panier spécifié.
+        """
+        session = self.db_manager.get_session()
+        from ayanna_erp.modules.boutique.model.models import ShopPanierProduct
+        panier_product = session.query(ShopPanierProduct).filter_by(panier_id=panier_id, product_id=product_id).first()
+        if panier_product:
+            panier_product.quantity = new_quantity
+            panier_product.total_price = float(new_quantity) * float(panier_product.price_unit)
+            session.commit()
+            return panier_product
+        return None
+
     def update_panier_status(self, panier_id, new_status):
         """
         Met à jour le statut du panier (ex: 'valide', 'annule').

@@ -70,6 +70,11 @@ class NouveauPanierDialog(QDialog):
         self.validate_btn.clicked.connect(self.valider_panier)
         btn_layout.addWidget(self.validate_btn)
         layout.addLayout(btn_layout)
+        
+        
+        self.print_btn = QPushButton("Imprimer facture")
+        self.print_btn.setStyleSheet("background-color: #F1C40F; color: black; font-weight: bold;")
+        btn_layout.addWidget(self.print_btn)
 
     def annuler_panier(self):
         reply = QMessageBox.question(
@@ -182,7 +187,6 @@ class NouveauPanierDialog(QDialog):
             empty_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             empty_lbl.setStyleSheet("color: #7F8C8D; font-size: 16px; margin: 40px;")
             self.catalog_display_layout.addWidget(empty_lbl)
-            return
 
         if self.catalog_mode == 'card':
             grid = QGridLayout()
@@ -291,13 +295,20 @@ class NouveauPanierDialog(QDialog):
 
         if not product:
             return
-
-        # Demander la quantité à l’utilisateur
-        qty, ok = QInputDialog.getInt(self, "Quantité", f"Quantité pour {product.name} :", 1, 1, 1000, 1)
-
-        if ok:
-            self.panier_controller.add_product_to_panier(self.panier.id, product_id, qty, product.price_unit)
-            self.refresh_panier()
+        # Vérifier si le produit existe déjà dans le panier
+        panier_product = session.query(type(product).panier_products.property.mapper.class_).filter_by(panier_id=self.panier.id, product_id=product_id).first()
+        if panier_product:
+            # Demander la quantité à ajouter
+            qty, ok = QInputDialog.getInt(self, "Quantité supplémentaire", f"Ajouter combien à {product.name} ?", 1, 1, 1000, 1)
+            if ok:
+                new_qty = float(panier_product.quantity) + qty
+                self.panier_controller.update_product_quantity(self.panier.id, product_id, new_qty)
+                self.refresh_panier()
+        else:
+            qty, ok = QInputDialog.getInt(self, "Quantité", f"Quantité pour {product.name} :", 1, 1, 1000, 1)
+            if ok:
+                self.panier_controller.add_product_to_panier(self.panier.id, product_id, qty, product.price_unit)
+                self.refresh_panier()
 
     def toggle_catalog_mode(self):
         if self.catalog_mode == 'card':
@@ -315,6 +326,27 @@ class NouveauPanierDialog(QDialog):
         panier_group = QGroupBox("🛒 Panier")
         panier_group_layout = QVBoxLayout(panier_group)
 
+        # --- Sélection client en haut ---
+        client_layout = QHBoxLayout()
+        client_layout.addWidget(QLabel("Client :"))
+        self.client_combo = QComboBox()
+        self.client_combo.setMinimumWidth(180)
+        self.client_combo.setEditable(True)
+        self.client_combo.setPlaceholderText("Sélectionner ou rechercher client")
+        self.client_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.client_combo.setMaxVisibleItems(10)
+        self.client_combo.setStyleSheet("QComboBox { font-size: 12px; }")
+        client_layout.addWidget(self.client_combo)
+        self.add_client_btn = QPushButton("Ajouter client")
+        client_layout.addWidget(self.add_client_btn)
+        self.add_client_btn.clicked.connect(self.open_add_client_dialog)
+        client_layout.addStretch()
+        panier_layout.addLayout(client_layout)
+
+        # Initialisation du combo client et recherche
+        self.load_clients_for_combo()
+        self.client_combo.lineEdit().textChanged.connect(self.on_client_search)
+
         self.panier_table = QTableWidget()
         self.panier_table.setColumnCount(5)
         self.panier_table.setHorizontalHeaderLabels(["Article", "Prix unit.", "Qté", "Sous-total", "Action"])
@@ -327,22 +359,175 @@ class NouveauPanierDialog(QDialog):
 
         self.panier_table.setMaximumHeight(300)
         panier_group_layout.addWidget(self.panier_table)
+
+        # --- Champ remise ---
+        remise_layout = QHBoxLayout()
+        remise_layout.addWidget(QLabel("Remise (€) :"))
+        self.remise_input = QLineEdit()
+        self.remise_input.setPlaceholderText("0.00")
+        self.remise_input.setFixedWidth(80)
+        self.remise_input.setText("0.00")
+        self.remise_input.textChanged.connect(self.refresh_panier)
+        remise_layout.addWidget(self.remise_input)
+        remise_layout.addStretch()
+        panier_group_layout.addLayout(remise_layout)
+
+        # --- Total panier ---
+        total_layout = QHBoxLayout()
+        total_layout.addStretch()
+        self.total_label = QLabel("Total : 0.00 €")
+        self.total_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #27AE60;")
+        total_layout.addWidget(self.total_label)
+        panier_group_layout.addLayout(total_layout)
+
         panier_layout.addWidget(panier_group)
+
+        # --- Options de paiement en bas ---
+        paiement_group = QGroupBox("Options de paiement")
+        paiement_layout = QHBoxLayout(paiement_group)
+        self.paiement_espece_radio = QRadioButton("Espèce")
+        self.paiement_banque_radio = QRadioButton("Banque")
+        self.paiement_compte_radio = QRadioButton("Compte client")
+        self.paiement_espece_radio.setChecked(True)
+        paiement_layout.addWidget(self.paiement_espece_radio)
+        paiement_layout.addWidget(self.paiement_banque_radio)
+        paiement_layout.addWidget(self.paiement_compte_radio)
+        paiement_layout.addStretch()
+        panier_layout.addWidget(paiement_group)
+
+        self.refresh_panier()
+        return panier_widget
+
+    def load_clients_for_combo(self, search_term=None):
+        from ayanna_erp.modules.boutique.model.models import ShopClient
+        session = self.panier_controller.db_manager.get_session()
+        query = session.query(ShopClient)
+        if search_term is not None and str(search_term).strip() != "":
+            safe_text = str(search_term)
+            query = query.filter(ShopClient.nom.ilike(':search_term')).params(search_term=f'%{safe_text}%')
+        clients = query.order_by(ShopClient.nom.asc()).all()
+        current_text = self.client_combo.currentText() if self.client_combo.isEditable() else None
+        self.client_combo.clear()
+        for client in clients:
+            display = f"{client.nom} {client.prenom or ''} - {client.telephone or ''}"
+            self.client_combo.addItem(display, client.id)
+        if current_text:
+            self.client_combo.setEditText(current_text)
+        else:
+            self.client_combo.setCurrentIndex(-1)
+
+    def on_client_search(self, text):
+        self.load_clients_for_combo(text)
+
+    def open_add_client_dialog(self):
+        from ayanna_erp.modules.boutique.view.client_index import ClientFormDialog
+        dialog = ClientFormDialog(self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self.load_clients_for_combo()
+
+
+        self.panier_table = QTableWidget()
+        self.panier_table.setColumnCount(5)
+        self.panier_table.setHorizontalHeaderLabels(["Article", "Prix unit.", "Qté", "Sous-total", "Action"])
+        panier_header = self.panier_table.horizontalHeader()
+        panier_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        panier_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        panier_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        panier_header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        panier_header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+
+        self.panier_table.setMaximumHeight(300)
+        # Define panier_layout before using it
+        panier_widget = QWidget()
+        panier_layout = QVBoxLayout(panier_widget)
+
+        panier_group = QGroupBox("🛒 Panier")
+        panier_group_layout = QVBoxLayout()
+        panier_group.setLayout(panier_group_layout)
+        panier_group_layout.addWidget(self.panier_table)
+
+        # --- Champ remise ---
+        remise_layout = QHBoxLayout()
+        remise_layout.addWidget(QLabel("Remise (€) :"))
+        self.remise_input = QLineEdit()
+        self.remise_input.setPlaceholderText("0.00")
+        self.remise_input.setFixedWidth(80)
+        self.remise_input.setText("0.00")
+        self.remise_input.textChanged.connect(self.refresh_panier)
+        remise_layout.addWidget(self.remise_input)
+        remise_layout.addStretch()
+        panier_group_layout.addLayout(remise_layout)
+
+        # --- Total panier ---
+        total_layout = QHBoxLayout()
+        total_layout.addStretch()
+        self.total_label = QLabel("Total : 0.00 €")
+        self.total_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #27AE60;")
+        total_layout.addWidget(self.total_label)
+        panier_group_layout.addLayout(total_layout)
+
+        panier_layout.addWidget(panier_group)
+
+        # --- Options de paiement en bas ---
+        paiement_group = QGroupBox("Options de paiement")
+        paiement_layout = QHBoxLayout(paiement_group)
+        self.paiement_espece_radio = QRadioButton("Espèce")
+        self.paiement_banque_radio = QRadioButton("Banque")
+        self.paiement_compte_radio = QRadioButton("Compte client")
+        self.paiement_espece_radio.setChecked(True)
+        paiement_layout.addWidget(self.paiement_espece_radio)
+        paiement_layout.addWidget(self.paiement_banque_radio)
+        paiement_layout.addWidget(self.paiement_compte_radio)
+        paiement_layout.addStretch()
+        panier_layout.addWidget(paiement_group)
 
         self.refresh_panier()
         return panier_widget
 
     def refresh_panier(self):
-        session = self.panier_controller.db_manager.get_session()
-        panier_obj = session.get(type(self.panier), self.panier.id)
-        products = panier_obj.products if panier_obj else []
+        if not hasattr(self, "panier_table") or self.panier_table is None:
+            return
+        try:
+            session = self.panier_controller.db_manager.get_session()
+            panier_obj = session.get(type(self.panier), self.panier.id)
+            products = panier_obj.products if panier_obj else []
 
-        self.panier_table.setRowCount(len(products))
-        for row, panier_product in enumerate(products):
-            self.panier_table.setItem(row, 0, QTableWidgetItem(str(panier_product.product_id)))
-            self.panier_table.setItem(row, 1, QTableWidgetItem(str(panier_product.price_unit)))
-            self.panier_table.setItem(row, 2, QTableWidgetItem(str(panier_product.quantity)))
-            self.panier_table.setItem(row, 3, QTableWidgetItem(str(panier_product.total_price)))
+            self.panier_table.setRowCount(len(products))
+            total = 0.0
+            for row, panier_product in enumerate(products):
+                # Récupérer le nom du produit
+                product_name = ""
+                if hasattr(panier_product, "product_id"):
+                    from ayanna_erp.modules.boutique.model.models import ShopProduct
+                    prod = session.get(ShopProduct, panier_product.product_id)
+                    product_name = prod.name if prod and hasattr(prod, "name") else str(panier_product.product_id)
+                else:
+                    product_name = str(panier_product.product_id)
 
-            remove_btn = QPushButton("🗑️")
-            self.panier_table.setCellWidget(row, 4, remove_btn)
+                self.panier_table.setItem(row, 0, QTableWidgetItem(product_name))
+                self.panier_table.setItem(row, 1, QTableWidgetItem(str(panier_product.price_unit)))
+                self.panier_table.setItem(row, 2, QTableWidgetItem(str(panier_product.quantity)))
+                self.panier_table.setItem(row, 3, QTableWidgetItem(str(panier_product.total_price)))
+
+                total += float(panier_product.total_price)
+
+                remove_btn = QPushButton("🗑️")
+                remove_btn.clicked.connect(lambda checked, pid=panier_product.product_id: self.remove_product_from_panier(pid))
+                self.panier_table.setCellWidget(row, 4, remove_btn)
+
+            # Calculer le total avec remise
+            try:
+                remise = float(self.remise_input.text()) if hasattr(self, "remise_input") else 0.0
+            except Exception:
+                remise = 0.0
+            total_final = max(total - remise, 0.0)
+            if hasattr(self, "total_label"):
+                self.total_label.setText(f"Total : {total_final:.2f} €")
+        except RuntimeError:
+            # Le widget a été supprimé, on ignore l’appel
+            pass
+
+    def remove_product_from_panier(self, product_id):
+        self.panier_controller.remove_product_from_panier(self.panier.id, product_id)
+        self.refresh_panier()
+

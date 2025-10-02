@@ -441,7 +441,7 @@ class PaiementController(QObject):
             
             # Vérifier que le montant du paiement ne dépasse pas le solde
             if payment_data['amount'] > balance:
-                self.error_occurred.emit(f"Le montant du paiement ({payment_data['amount']:.2f} €) dépasse le solde restant ({balance:.2f} €)")
+                self.error_occurred.emit(f"Le montant du paiement ({payment_data['amount']:.2f} $) dépasse le solde restant ({balance:.2f} €)")
                 session.close()
                 return False
             
@@ -474,14 +474,16 @@ class PaiementController(QObject):
             else:
                 # Créer la ligne de journal comptable
                 libelle = f"Paiement Réservation: {reservation.get_client_name()}"
+                from ayanna_erp.core.entreprise_controller import EntrepriseController
+                entreprise_ctrl = EntrepriseController()
                 journal = JournalComptable(
-                    enterprise_id=1,  # TODO: Récupérer l'ID de l'entreprise du POS
+                    enterprise_id=entreprise_ctrl.get_connected_enterprise_id(),
                     libelle=libelle,
                     montant=payment_data['amount'],
                     type_operation="entree",  # 'entree' pour un paiement
                     reference=f"PAY-{payment.id}",
                     description=f"Paiement réservation ID: {reservation.id}",
-                    user_id=payment_data.get('user_id', 1),
+                    user_id=entreprise_ctrl.get_connected_user_id(),
                     date_operation=payment_data.get('payment_date', datetime.now())
                 )
                 session.add(journal)
