@@ -22,12 +22,13 @@ class CategorieIndex(QWidget):
     # Signaux
     category_updated = pyqtSignal()
     
-    def __init__(self, boutique_controller, current_user):
+    def __init__(self, pos_id, current_user):
         super().__init__()
-        self.boutique_controller = boutique_controller
+        from ayanna_erp.modules.boutique.controller.categorie_controller import CategorieController
+        self.categorie_controller = CategorieController(pos_id)
         self.current_user = current_user
         self.db_manager = DatabaseManager()
-        
+
         self.setup_ui()
         self.load_categories()
     
@@ -113,12 +114,9 @@ class CategorieIndex(QWidget):
         """Charger et afficher les catégories"""
         try:
             with self.db_manager.get_session() as session:
-                # Récupérer toutes les catégories (actives et inactives)
-                categories = session.query(ShopCategory).order_by(ShopCategory.name).all()
-                
+                categories = self.categorie_controller.get_categories(session)
                 self.populate_categories_table(categories)
                 self.update_statistics(categories)
-                
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des catégories: {str(e)}")
     
@@ -239,110 +237,87 @@ class CategorieIndex(QWidget):
         self.inactive_categories_label.setText(f"Inactives: {inactive}")
     
     def create_new_category(self):
-        """Créer une nouvelle catégorie"""
-        dialog = CategoryFormDialog(self, self.boutique_controller)
-        
+        dialog = CategoryFormDialog(self, self.categorie_controller)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             category_data = dialog.get_category_data()
-            
             try:
                 with self.db_manager.get_session() as session:
-                    new_category = self.boutique_controller.create_category(
+                    new_category = self.categorie_controller.create_category(
                         session,
                         nom=category_data["nom"],
-                        description=category_data.get("description")
+                        description=category_data.get("description"),
+                        is_active=category_data.get("is_active", True)
                     )
-                    
                     QMessageBox.information(self, "Succès", f"Catégorie '{new_category.name}' créée avec succès!")
                     self.load_categories()
                     self.category_updated.emit()
-                    
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la création de la catégorie: {str(e)}")
     
-    def edit_category(self, category: ShopCategory):
-        """Modifier une catégorie existante"""
-        dialog = CategoryFormDialog(self, self.boutique_controller, category)
-        
+    def edit_category(self, category):
+        dialog = CategoryFormDialog(self, self.categorie_controller, category)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             category_data = dialog.get_category_data()
-            
             try:
                 with self.db_manager.get_session() as session:
-                    updated_category = self.boutique_controller.update_category(
+                    updated_category = self.categorie_controller.update_category(
                         session,
                         category.id,
-                        nom=category_data["nom"],
-                        description=category_data.get("description")
+                        name=category_data["nom"],
+                        description=category_data.get("description"),
+                        is_active=category_data.get("is_active", category.is_active)
                     )
-                    
                     QMessageBox.information(self, "Succès", f"Catégorie '{updated_category.name}' mise à jour avec succès!")
                     self.load_categories()
                     self.category_updated.emit()
-                    
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la mise à jour de la catégorie: {str(e)}")
     
-    def toggle_category_status(self, category: ShopCategory):
-        """Activer/Désactiver une catégorie"""
+    def toggle_category_status(self, category):
         new_status = not category.is_active
         action = "activer" if new_status else "désactiver"
-        
-        # Vérifier s'il y a des produits dans cette catégorie
         products_count = len(category.products) if category.products else 0
-        
         warning_text = f"Êtes-vous sûr de vouloir {action} la catégorie '{category.name}' ?"
         if not new_status and products_count > 0:
             warning_text += f"\n\nAttention: Cette catégorie contient {products_count} produit(s). "
             warning_text += "Les produits ne seront pas supprimés mais pourraient ne plus être visibles dans certains filtres."
-        
         reply = QMessageBox.question(
-            self, "Confirmation", 
+            self, "Confirmation",
             warning_text,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
-        
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with self.db_manager.get_session() as session:
-                    updated_category = self.boutique_controller.update_category(
+                    updated_category = self.categorie_controller.update_category(
                         session, category.id, is_active=new_status
                     )
-                    
                     QMessageBox.information(self, "Succès", f"Catégorie {action}ée avec succès!")
                     self.load_categories()
                     self.category_updated.emit()
-                    
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification du statut: {str(e)}")
     
-    def view_category_products(self, category: ShopCategory):
-        """Afficher les produits d'une catégorie"""
+    def view_category_products(self, category):
         try:
             with self.db_manager.get_session() as session:
-                products = self.boutique_controller.get_products(session, category_id=category.id)
-                
+                products = self.categorie_controller.get_category_products(session, category_id=category.id)
                 if not products:
                     QMessageBox.information(
-                        self, "Aucun produit", 
+                        self, "Aucun produit",
                         f"Aucun produit trouvé dans la catégorie '{category.name}'."
                     )
                     return
-                
-                # Créer une liste des produits pour affichage
                 products_list = []
                 for product in products:
                     status = "Actif" if product.is_active else "Inactif"
                     products_list.append(f"• {product.name} - {product.price_unit:.2f}€ ({status})")
-                
                 products_text = "\n".join(products_list)
-                
                 QMessageBox.information(
-                    self, f"Produits - {category.name}", 
+                    self, f"Produits - {category.name}",
                     f"Produits dans la catégorie '{category.name}':\n\n{products_text}"
                 )
-                
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'affichage des produits: {str(e)}")
 
@@ -350,21 +325,17 @@ class CategorieIndex(QWidget):
 class CategoryFormDialog(QDialog):
     """Dialog pour créer/modifier une catégorie"""
     
-    def __init__(self, parent=None, boutique_controller=None, category: ShopCategory = None):
+    def __init__(self, parent=None, categorie_controller=None, category=None):
         super().__init__(parent)
-        self.boutique_controller = boutique_controller
+        self.categorie_controller = categorie_controller
         self.category = category
-        
-        # Mode édition ou création
+
         self.is_editing = category is not None
-        
         title = "Modifier la Catégorie" if self.is_editing else "Nouvelle Catégorie"
         self.setWindowTitle(title)
         self.setModal(True)
         self.setMinimumSize(400, 300)
-        
         self.setup_ui()
-        
         if self.is_editing:
             self.load_category_data()
     

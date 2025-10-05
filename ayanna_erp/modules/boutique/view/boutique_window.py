@@ -33,10 +33,10 @@ class BoutiqueWindow(QMainWindow):
         super().__init__()
         self.current_user = current_user
         self.pos_id = pos_id
-        
+
         # Initialiser le contrôleur principal
-        self.boutique_controller = BoutiqueController()
-        
+        self.boutique_controller = BoutiqueController(self.pos_id)
+
         # Connecter les signaux du contrôleur
         self.boutique_controller.panier_updated.connect(self.on_panier_updated)
         self.boutique_controller.payment_completed.connect(self.on_payment_completed)
@@ -115,11 +115,12 @@ class BoutiqueWindow(QMainWindow):
             self.panier_widget.product_selected.connect(self.on_product_selected_from_catalog)
             
             # Onglet Produits - Gestion des produits
-            self.produits_widget = ProduitIndex(self.boutique_controller, self.current_user)
+            pos_id = getattr(self.boutique_controller, 'pos_id', 1)
+            self.produits_widget = ProduitIndex(pos_id, self.current_user)
             self.tab_widget.addTab(self.produits_widget, "📦 Produits")
             
             # Onglet Catégories - Gestion des catégories
-            self.categories_widget = CategorieIndex(self.boutique_controller, self.current_user)
+            self.categories_widget = CategorieIndex(self.boutique_controller.pos_id, self.current_user)
             self.tab_widget.addTab(self.categories_widget, "📂 Catégories")
             
             # Onglet Clients - Gestion des clients

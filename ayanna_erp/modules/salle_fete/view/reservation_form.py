@@ -286,7 +286,7 @@ class ReservationForm(QDialog):
         
         self.tax_rate_spinbox = QDoubleSpinBox()
         self.tax_rate_spinbox.setRange(0, 30)
-        self.tax_rate_spinbox.setValue(0)  # TVA à 20% par défaut
+        self.tax_rate_spinbox.setValue(16)  # TVA à 16% par défaut
         self.tax_rate_spinbox.setSuffix(" %")
         self.tax_rate_spinbox.valueChanged.connect(self.calculate_totals)
         
@@ -314,14 +314,14 @@ class ReservationForm(QDialog):
         # Ligne 1: Sous-total HT et TVA
         totals_layout.addWidget(QLabel("Sous-total HT:"), 0, 0)
         totals_layout.addWidget(self.subtotal_label, 0, 1)
-        # totals_layout.addWidget(QLabel("Taux de TVA:"), 0, 2)
-        # totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
+        totals_layout.addWidget(QLabel("Taux de TVA:"), 0, 2)
+        totals_layout.addWidget(self.tax_rate_spinbox, 0, 3)
         
         # Ligne 2: Total TTC (avant remise) et Montant TVA
         totals_layout.addWidget(QLabel("Total TTC brut:"), 1, 0)
         totals_layout.addWidget(self.total_before_discount_label, 1, 1)
-        # totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
-        # totals_layout.addWidget(self.tax_amount_label, 1, 3)
+        totals_layout.addWidget(QLabel("Montant TVA:"), 1, 2)
+        totals_layout.addWidget(self.tax_amount_label, 1, 3)
         
         # Ligne 3: Remise et montant de remise
         totals_layout.addWidget(QLabel("Remise:"), 2, 0)

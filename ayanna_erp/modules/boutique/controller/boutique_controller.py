@@ -24,11 +24,12 @@ class BoutiqueController(QObject):
     payment_completed = pyqtSignal(int)  # ID du paiement
     stock_updated = pyqtSignal(int)  # ID du produit
     
-    def __init__(self):
+    def __init__(self, pos_id: int = None):
         super().__init__()
         self.db_manager = DatabaseManager()
         self._panier_actuel: Optional[ShopPanier] = None
         self._initialized = False
+        self.pos_id = pos_id
     
     def _ensure_initialized(self, session: Session) -> bool:
         """Garantit que le module Boutique est initialisé (tables et données de base)."""
