@@ -80,6 +80,7 @@ class BoutiqueController(QObject):
     def create_category(self, session: Session, nom: str, description: str = None) -> ShopCategory:
         """Crée une nouvelle catégorie."""
         category = ShopCategory(
+            pos_id=self.pos_id,  # Ajouter le pos_id manquant
             name=nom,
             description=description,
             is_active=True
@@ -147,6 +148,7 @@ class BoutiqueController(QObject):
             raise ValueError(f"Catégorie avec l'ID {category_id} introuvable")
         
         product = ShopProduct(
+            pos_id=self.pos_id,  # Ajouter le pos_id manquant
             nom=nom,
             description=description,
             prix=prix,
@@ -199,6 +201,7 @@ class BoutiqueController(QObject):
                       description: str = None, duree_estimee: int = None) -> ShopService:
         """Crée un nouveau service."""
         service = ShopService(
+            pos_id=self.pos_id,  # Ajouter le pos_id manquant
             nom=nom,
             description=description,
             prix=prix,
@@ -215,6 +218,7 @@ class BoutiqueController(QObject):
     def create_panier(self, session: Session, client_id: Optional[int] = None) -> ShopPanier:
         """Crée un nouveau panier."""
         panier = ShopPanier(
+            pos_id=self.pos_id,  # Ajouter le pos_id manquant
             client_id=client_id,
             status="ouvert",
             total=Decimal('0.00')
@@ -570,6 +574,7 @@ class BoutiqueController(QObject):
                      adresse: str = None) -> ShopClient:
         """Crée un nouveau client."""
         client = ShopClient(
+            pos_id=self.pos_id,  # Ajouter le pos_id manquant
             nom=nom,
             prenom=prenom,
             email=email,

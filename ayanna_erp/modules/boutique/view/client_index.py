@@ -32,23 +32,30 @@ class ClientIndex(QWidget):
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # === HEADER ET ACTIONS ===
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(5, 5, 5, 5)  # Marges minimales
+        main_layout.setSpacing(5)  # Espacement minimal entre les zones
+
+        # === PARTIE GAUCHE : TABLEAU CLIENTS ===
+        left_widget = QWidget()
+        left_layout = QVBoxLayout(left_widget)
+        left_layout.setContentsMargins(0, 0, 0, 0)  # Pas de marges internes
+
         header_group = QGroupBox("👥 Gestion des Clients")
         header_layout = QVBoxLayout(header_group)
-        
+        header_layout.setContentsMargins(5, 5, 5, 5)  # Marges minimales
+
         # Actions principales
         actions_layout = QHBoxLayout()
-        
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(5)
         self.new_client_btn = QPushButton("➕ Nouveau Client")
         self.new_client_btn.setStyleSheet("""
             QPushButton {
                 background-color: #27AE60;
                 color: white;
                 font-weight: bold;
-                padding: 8px 15px;
+                padding: 2px 2px;
                 border: none;
                 border-radius: 5px;
             }
@@ -58,52 +65,136 @@ class ClientIndex(QWidget):
         """)
         self.new_client_btn.clicked.connect(self.create_new_client)
         actions_layout.addWidget(self.new_client_btn)
-        
         actions_layout.addStretch()
-        
-        # Recherche
-        actions_layout.addWidget(QLabel("Recherche:"))
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Nom, téléphone, email...")
-        self.search_input.textChanged.connect(self.search_clients)
-        actions_layout.addWidget(self.search_input)
-        
         refresh_btn = QPushButton("🔄 Actualiser")
         refresh_btn.clicked.connect(self.load_clients)
         actions_layout.addWidget(refresh_btn)
-        
         header_layout.addLayout(actions_layout)
-        
-        # Statistiques
-        stats_layout = QHBoxLayout()
-        self.total_clients_label = QLabel("Total: 0 clients")
-        self.total_clients_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        stats_layout.addWidget(self.total_clients_label)
-        stats_layout.addStretch()
-        header_layout.addLayout(stats_layout)
-        
-        main_layout.addWidget(header_group)
-        
-        # === TABLEAU DES CLIENTS ===
+
+        # Filtres de recherche
+        filter_layout = QHBoxLayout()
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setSpacing(5)
+        filter_layout.addWidget(QLabel("Recherche:"))
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Nom, téléphone, email...")
+        self.search_input.textChanged.connect(self.search_clients)
+        filter_layout.addWidget(self.search_input)
+        header_layout.addLayout(filter_layout)
+        left_layout.addWidget(header_group)
+
+        # Tableau des clients
         self.clients_table = QTableWidget()
         self.clients_table.setColumnCount(6)
         self.clients_table.setHorizontalHeaderLabels([
             "ID", "Nom", "Prénom", "Téléphone", "Email", "Actions"
         ])
-        
-        # Configuration des colonnes
         header = self.clients_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)  # Nom
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)  # Prénom
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Téléphone
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)  # Email
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Actions
-        
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         self.clients_table.setAlternatingRowColors(True)
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.clients_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Désactiver l'édition directe
+        left_layout.addWidget(self.clients_table)
+
+        # === PARTIE DROITE : DÉTAILS CLIENT ===
+        self.detail_widget = QGroupBox("Détails du client")
+        self.detail_layout = QVBoxLayout(self.detail_widget)
+        self.detail_layout.setContentsMargins(5, 5, 5, 5)
         
-        main_layout.addWidget(self.clients_table)
+        # Statistiques
+        stats_container = QVBoxLayout()
+        stats_title = QLabel("Statistiques")
+        stats_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        stats_title.setStyleSheet("font-weight: bold; color: #2C3E50; margin-bottom: 5px;")
+        stats_container.addWidget(stats_title)
+        
+        self.total_clients_label = QLabel("Total: 0 clients")
+        self.total_clients_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        self.total_clients_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.total_clients_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #3498DB;
+                border-radius: 8px;
+                background-color: #EBF5FF;
+                padding: 10px;
+                color: #2C3E50;
+            }
+        """)
+        stats_container.addWidget(self.total_clients_label)
+        stats_container.addStretch()
+        
+        self.detail_layout.addLayout(stats_container)
+        
+        # Zone de détails du client sélectionné
+        self.detail_label = QLabel("Sélectionnez un client pour voir les détails.")
+        self.detail_label.setWordWrap(True)
+        self.detail_label.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.detail_layout.addWidget(self.detail_label, stretch=1)
+
+        # Ajout au layout principal avec proportions 70/30
+        main_layout.addWidget(left_widget, stretch=7)
+        main_layout.addWidget(self.detail_widget, stretch=3)
+
+        # Connexion du clic sur le tableau
+        self.clients_table.cellClicked.connect(self.on_client_selected)
+        # Connexion du double-clic pour édition
+        self.clients_table.cellDoubleClicked.connect(self.on_client_double_clicked)
+
+    def on_client_selected(self, row, column):
+        """Gestionnaire de sélection d'un client"""
+        client_id_item = self.clients_table.item(row, 0)
+        if not client_id_item:
+            self.detail_label.setText("Aucun client sélectionné.")
+            return
+        
+        client_id = int(client_id_item.text())
+        try:
+            with self.db_manager.get_session() as session:
+                client = session.query(ShopClient).filter(ShopClient.id == client_id).first()
+                if not client:
+                    self.detail_label.setText("Client introuvable.")
+                    return
+                
+                # Affichage des détails du client
+                details = f"<b>Nom complet :</b> {client.nom} {client.prenom or ''}<br>"
+                details += f"<b>ID :</b> {client.id}<br>"
+                details += f"<b>Téléphone :</b> {client.telephone or 'Non renseigné'}<br>"
+                details += f"<b>Email :</b> {client.email or 'Non renseigné'}<br>"
+                details += f"<b>Adresse :</b> {client.adresse or 'Non renseignée'}<br>"
+                details += f"<b>Ville :</b> {client.ville or 'Non renseignée'}<br>"
+                details += f"<b>Type :</b> {client.type_client or 'Particulier'}<br>"
+                details += f"<b>Limite crédit :</b> {client.credit_limit or 0} €<br>"
+                details += f"<b>Solde compte :</b> {client.balance or 0} €<br>"
+                details += f"<b>Statut :</b> {'Actif' if client.is_active else 'Inactif'}<br>"
+                if client.created_at:
+                    details += f"<b>Créé le :</b> {client.created_at.strftime('%d/%m/%Y')}<br>"
+                if client.notes:
+                    details += f"<b>Notes :</b> {client.notes}<br>"
+                
+                self.detail_label.setText(details)
+                
+        except Exception as e:
+            self.detail_label.setText(f"Erreur lors du chargement des détails: {str(e)}")
+
+    def on_client_double_clicked(self, row, column):
+        """Gestionnaire du double-clic pour ouvrir la fenêtre d'édition"""
+        client_id_item = self.clients_table.item(row, 0)
+        if not client_id_item:
+            return
+        
+        client_id = int(client_id_item.text())
+        try:
+            with self.db_manager.get_session() as session:
+                client = session.query(ShopClient).filter(ShopClient.id == client_id).first()
+                if client:
+                    self.edit_client(client)
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement du client: {str(e)}")
     
     def load_clients(self):
         """Charger et afficher les clients"""
@@ -202,6 +293,12 @@ class ClientIndex(QWidget):
         """Mettre à jour les statistiques"""
         total = len(clients)
         self.total_clients_label.setText(f"Total: {total} clients")
+        
+        # Si aucun client sélectionné, remettre le message par défaut
+        if total == 0:
+            self.detail_label.setText("Aucun client disponible.")
+        elif self.clients_table.currentRow() == -1:  # Aucune sélection
+            self.detail_label.setText("Sélectionnez un client pour voir les détails.")
     
     def create_new_client(self):
         """Créer un nouveau client"""
