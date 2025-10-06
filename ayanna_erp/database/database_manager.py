@@ -179,8 +179,54 @@ class DatabaseManager:
             
             session.flush()  # S'assurer que les POS sont persistés
             
+            # Créer automatiquement les entrepôts par défaut pour chaque POS
+            self._create_default_warehouses_for_enterprise(session, enterprise_id)
+            
         except Exception as e:
             print(f"❌ Erreur lors de la création des POS: {e}")
+            raise
+    
+    def _create_default_warehouses_for_enterprise(self, session, enterprise_id):
+        """Créer automatiquement les entrepôts par défaut pour une entreprise"""
+        try:
+            from ayanna_erp.modules.boutique.model.models import ShopWarehouse
+            
+            # Récupérer tous les POS de l'entreprise
+            pos_points = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
+            
+            for pos in pos_points:
+                # Créer entrepôt principal pour chaque POS
+                main_warehouse = ShopWarehouse(
+                    pos_id=pos.id,
+                    code=f"MAIN_{pos.id}",
+                    name=f"Entrepôt Principal - {pos.name}",
+                    type="Principal",
+                    description="Entrepôt principal - Point d'entrée pour tous les produits",
+                    is_default=True,
+                    is_active=True
+                )
+                session.add(main_warehouse)
+                
+                # Créer entrepôt point de vente pour chaque POS
+                pos_warehouse = ShopWarehouse(
+                    pos_id=pos.id,
+                    code=f"POS_{pos.id}",
+                    name=f"Entrepôt Point de Vente - {pos.name}",
+                    type="Point de Vente",
+                    description="Entrepôt point de vente - Produits destinés à la vente",
+                    is_default=False,
+                    is_active=True
+                )
+                session.add(pos_warehouse)
+                
+                print(f"✅ Entrepôts créés pour {pos.name}:")
+                print(f"   • Entrepôt Principal: {main_warehouse.name}")
+                print(f"   • Entrepôt POS: {pos_warehouse.name}")
+            
+            session.flush()  # S'assurer que les entrepôts sont persistés
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de la création des entrepôts par défaut: {e}")
             raise
     
     def _insert_default_accounting_data(self, session, enterprise_id):
