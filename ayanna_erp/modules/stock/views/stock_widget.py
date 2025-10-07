@@ -146,9 +146,9 @@ class ProductStockDetailDialog(QDialog):
         
         # Tableau des entrepôts
         self.warehouses_table = QTableWidget()
-        self.warehouses_table.setColumnCount(8)
+        self.warehouses_table.setColumnCount(7)
         self.warehouses_table.setHorizontalHeaderLabels([
-            "Entrepôt", "Type", "Quantité", "Réservé", "Disponible", "Min", "Max", "Statut"
+            "Entrepôt", "Type", "Quantité", "Réservé", "Disponible", "Min", "Statut"
         ])
         self.warehouses_table.setAlternatingRowColors(True)
         layout.addWidget(self.warehouses_table)
@@ -217,11 +217,6 @@ class ProductStockDetailDialog(QDialog):
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 5, min_item)
             
-            # Max
-            max_item = QTableWidgetItem(f"{stock['maximum_stock']:.2f}")
-            max_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.warehouses_table.setItem(row, 6, max_item)
-            
             # Statut
             status = stock['status']
             status_icons = {
@@ -242,7 +237,7 @@ class ProductStockDetailDialog(QDialog):
             if status in status_colors:
                 status_item.setBackground(status_colors[status])
             
-            self.warehouses_table.setItem(row, 7, status_item)
+            self.warehouses_table.setItem(row, 6, status_item)
         
         # Ajuster les colonnes
         self.warehouses_table.resizeColumnsToContents()
@@ -354,10 +349,10 @@ class StockWidget(QWidget):
         
         # Tableau principal des stocks
         self.stocks_table = QTableWidget()
-        self.stocks_table.setColumnCount(11)
+        self.stocks_table.setColumnCount(10)
         self.stocks_table.setHorizontalHeaderLabels([
             "Produit", "Code", "Entrepôt", "Quantité", "Réservé", "Disponible", 
-            "Min", "Max", "Coût Unit.", "Valeur", "Statut"
+            "Min", "Coût Unit.", "Valeur", "Statut"
         ])
         self.stocks_table.setAlternatingRowColors(True)
         self.stocks_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -475,20 +470,15 @@ class StockWidget(QWidget):
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 6, min_item)
             
-            # Max
-            max_item = QTableWidgetItem(f"{stock['maximum_stock']:.2f}")
-            max_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 7, max_item)
-            
             # Coût unitaire
             cost_item = QTableWidgetItem(f"{stock['unit_cost']:.2f}")
             cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 8, cost_item)
+            self.stocks_table.setItem(row, 7, cost_item)
             
             # Valeur
             value_item = QTableWidgetItem(f"{stock['stock_value']:.2f}")
             value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 9, value_item)
+            self.stocks_table.setItem(row, 8, value_item)
             
             # Statut
             status = stock['status']
@@ -510,7 +500,7 @@ class StockWidget(QWidget):
             if status in status_colors:
                 status_item.setBackground(status_colors[status])
             
-            self.stocks_table.setItem(row, 10, status_item)
+            self.stocks_table.setItem(row, 9, status_item)
         
         # Ajuster les colonnes
         self.stocks_table.resizeColumnsToContents()
@@ -598,7 +588,7 @@ class StockWidget(QWidget):
             warehouse_id=stock['warehouse_id'],
             product_id=stock['product_id'],
             current_min=stock['minimum_stock'],
-            current_max=stock['maximum_stock']
+            current_max=0  # Pas de maximum stock
         )
         
         if dialog.exec() == QDialog.DialogCode.Accepted:
@@ -704,7 +694,6 @@ class StockWidget(QWidget):
                         'Réservé': warehouse_stock['reserved_quantity'],
                         'Disponible': warehouse_stock['available_quantity'],
                         'Minimum': warehouse_stock['minimum_stock'],
-                        'Maximum': warehouse_stock['maximum_stock'],
                         'Coût Unitaire': warehouse_stock['unit_cost'],
                         'Statut': warehouse_stock['status']
                     })

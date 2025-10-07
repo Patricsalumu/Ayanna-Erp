@@ -203,18 +203,6 @@ class InventaireController:
             print(f"Erreur lors de la récupération des inventaires: {e}")
             return []
 
-    def get_all_inventories(self, session=None) -> List[Dict[str, Any]]:
-        """
-        Récupérer tous les inventaires (alias pour get_inventories)
-        
-        Args:
-            session: Session SQLAlchemy (ignorée pour compatibilité)
-            
-        Returns:
-            Liste de tous les inventaires
-        """
-        return self.get_inventories()
-
     def validate_inventory(self, inventory_id: int) -> bool:
         """
         Valider un inventaire (ajuster les stocks)

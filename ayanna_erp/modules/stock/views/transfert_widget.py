@@ -5,6 +5,7 @@ Widget pour la gestion des transferts entre entrepôts
 from typing import List, Optional, Dict, Any
 from decimal import Decimal
 from datetime import datetime, date
+from sqlalchemy import text
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, 
@@ -25,9 +26,21 @@ class TransferFormDialog(QDialog):
     def __init__(self, parent=None, pos_id=None):
         super().__init__(parent)
         self.pos_id = pos_id
-        self.controller = TransfertController(pos_id)
+        # Récupérer entreprise_id depuis pos_id
+        self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
+        self.controller = TransfertController(self.entreprise_id)
         self.db_manager = DatabaseManager()
         self.transfer_items = []
+
+    def get_entreprise_id_from_pos(self, pos_id):
+        """Récupérer l'entreprise_id depuis le pos_id"""
+        try:
+            with self.db_manager.get_session() as session:
+                result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
+                row = result.fetchone()
+                return row[0] if row else 1  # Par défaut entreprise 1
+        except:
+            return 1  # Par défaut entreprise 1
         
         self.setWindowTitle("Nouveau Transfert entre Entrepôts")
         self.setFixedSize(700, 600)
@@ -182,8 +195,12 @@ class TransferFormDialog(QDialog):
             return
         
         try:
-            with self.db_manager.get_session() as session:
-                from ayanna_erp.modules.boutique.model.models import ShopWarehouseStock, ShopProduct
+            # TODO: Adapter à la nouvelle architecture
+            self.product_combo.addItem("-- Fonction en cours d'adaptation --", None)
+            return
+            
+            # Code temporairement désactivé - à adapter à la nouvelle architecture
+            """
                 
                 # Récupérer les produits avec stock > 0 dans l'entrepôt source
                 stocks = session.query(ShopWarehouseStock).join(ShopProduct).filter(
@@ -205,6 +222,7 @@ class TransferFormDialog(QDialog):
                                 'available_qty': available_qty
                             }
                         )
+            """
                         
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des produits:\n{str(e)}")
@@ -618,12 +636,24 @@ class TransfertWidget(QWidget):
         super().__init__()
         self.pos_id = pos_id
         self.current_user = current_user
-        self.controller = TransfertController(pos_id)
+        # Récupérer entreprise_id depuis pos_id
+        self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
+        self.controller = TransfertController(self.entreprise_id)
         self.db_manager = DatabaseManager()
         self.current_transfers = []
         
         self.setup_ui()
         self.load_data()
+
+    def get_entreprise_id_from_pos(self, pos_id):
+        """Récupérer l'entreprise_id depuis le pos_id"""
+        try:
+            with self.db_manager.get_session() as session:
+                result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
+                row = result.fetchone()
+                return row[0] if row else 1  # Par défaut entreprise 1
+        except:
+            return 1  # Par défaut entreprise 1
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""

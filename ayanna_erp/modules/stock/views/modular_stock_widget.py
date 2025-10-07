@@ -24,7 +24,7 @@ from ayanna_erp.modules.stock.views.rapport_widget import RapportWidget
 
 # Import des contrôleurs pour les statistiques globales
 from ayanna_erp.modules.stock.controllers.stock_controller import StockController
-from ayanna_erp.modules.stock.controllers.alerte_controller import AlerteController
+# from ayanna_erp.modules.stock.controllers.alerte_controller import AlerteController
 
 
 class ModularStockManagementWidget(QWidget):
@@ -38,9 +38,9 @@ class ModularStockManagementWidget(QWidget):
     alert_generated = pyqtSignal(str, str)  # Type, message
     navigation_requested = pyqtSignal(str)  # Module de destination
     
-    def __init__(self, pos_id: int, current_user: dict = None):
+    def __init__(self, entreprise_id: int, current_user: dict = None):
         super().__init__()
-        self.pos_id = pos_id
+        self.entreprise_id = entreprise_id  # Utiliser entreprise_id au lieu de pos_id
         self.current_user = current_user or {"id": 1, "name": "Utilisateur"}
         self.db_manager = DatabaseManager()
         
@@ -161,27 +161,27 @@ class ModularStockManagementWidget(QWidget):
         """Charger tous les widgets modulaires"""
         try:
             # Onglet 1: Entrepôts
-            self.entrepot_widget = EntrepotWidget(self.pos_id, self.current_user)
+            self.entrepot_widget = EntrepotWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.entrepot_widget, "🏪 Entrepôts")
             
             # Onglet 2: Stocks
-            self.stock_widget = StockWidget(self.pos_id, self.current_user)
+            self.stock_widget = StockWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.stock_widget, "📦 Stocks")
             
             # Onglet 3: Transferts
-            self.transfert_widget = TransfertWidget(self.pos_id, self.current_user)
+            self.transfert_widget = TransfertWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.transfert_widget, "🔄 Transferts")
             
             # Onglet 4: Alertes
-            self.alerte_widget = AlerteWidget(self.pos_id, self.current_user)
+            self.alerte_widget = AlerteWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.alerte_widget, "🚨 Alertes")
             
             # Onglet 5: Inventaires
-            self.inventaire_widget = InventaireWidget(self.pos_id, self.current_user)
+            self.inventaire_widget = InventaireWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.inventaire_widget, "📋 Inventaires")
             
             # Onglet 6: Rapports
-            self.rapport_widget = RapportWidget(self.pos_id, self.current_user)
+            self.rapport_widget = RapportWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.rapport_widget, "📊 Rapports")
             
             self.update_status("✅ Tous les modules chargés avec succès")

@@ -174,31 +174,6 @@ class TransfertController:
             print(f"Erreur lors de la récupération des transferts: {e}")
             return []
 
-    def get_all_transfers(self, session=None) -> List[Dict[str, Any]]:
-        """
-        Récupérer tous les transferts (alias pour get_transfers)
-        
-        Args:
-            session: Session SQLAlchemy (ignorée pour compatibilité)
-            
-        Returns:
-            Liste de tous les transferts
-        """
-        return self.get_transfers()
-
-    def get_recent_transfers(self, session=None, limit: int = 10) -> List[Dict[str, Any]]:
-        """
-        Récupérer les transferts récents
-        
-        Args:
-            session: Session SQLAlchemy (ignorée pour compatibilité)
-            limit: Nombre maximum de transferts à récupérer
-            
-        Returns:
-            Liste des transferts récents
-        """
-        return self.get_transfers(limit=limit)
-
     def get_transfer_by_id(self, transfer_id: int) -> Optional[Dict[str, Any]]:
         """
         Récupérer un transfert par son ID

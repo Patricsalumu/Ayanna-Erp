@@ -5,6 +5,7 @@ Widget pour l'analyse des alertes de stock et la gestion des quantités par entr
 from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, date, timedelta
+from sqlalchemy import text
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, 
@@ -246,7 +247,9 @@ class AlerteWidget(QWidget):
         super().__init__()
         self.pos_id = pos_id
         self.current_user = current_user
-        self.controller = AlerteController(pos_id)
+        # Récupérer entreprise_id depuis pos_id
+        self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
+        self.controller = AlerteController(self.entreprise_id)
         self.db_manager = DatabaseManager()
         self.current_alerts = []
         self.analysis_data = {}
@@ -257,6 +260,16 @@ class AlerteWidget(QWidget):
         # Timer pour actualisation automatique
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.auto_refresh)
+
+    def get_entreprise_id_from_pos(self, pos_id):
+        """Récupérer l'entreprise_id depuis le pos_id"""
+        try:
+            with self.db_manager.get_session() as session:
+                result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
+                row = result.fetchone()
+                return row[0] if row else 1  # Par défaut entreprise 1
+        except:
+            return 1  # Par défaut entreprise 1
         self.refresh_timer.start(300000)  # 5 minutes
     
     def setup_ui(self):

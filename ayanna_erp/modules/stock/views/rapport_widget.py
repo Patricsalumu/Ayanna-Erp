@@ -5,6 +5,7 @@ Widget pour la génération et visualisation des rapports de stock
 from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from datetime import datetime, date, timedelta
+from sqlalchemy import text
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, 
@@ -694,12 +695,24 @@ class RapportWidget(QWidget):
         super().__init__()
         self.pos_id = pos_id
         self.current_user = current_user
-        self.controller = RapportController(pos_id)
+        # Récupérer entreprise_id depuis pos_id
+        self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
+        self.controller = RapportController(self.entreprise_id)
         self.db_manager = DatabaseManager()
         self.recent_reports = []
         
         self.setup_ui()
         self.load_recent_reports()
+
+    def get_entreprise_id_from_pos(self, pos_id):
+        """Récupérer l'entreprise_id depuis le pos_id"""
+        try:
+            with self.db_manager.get_session() as session:
+                result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
+                row = result.fetchone()
+                return row[0] if row else 1  # Par défaut entreprise 1
+        except:
+            return 1  # Par défaut entreprise 1
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""

@@ -1,286 +1,322 @@
 """
-Contrôleur pour la gestion des entrepôts
+Contrôleur pour la gestion des entrepôts avec nouvelle structure simplifiée
 """
 
 from typing import List, Optional, Dict, Any
 from decimal import Decimal
 from datetime import datetime
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, func
+from sqlalchemy import and_, or_, func, text
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ayanna_erp.modules.boutique.model.models import ShopWarehouse, ShopProduct, ShopWarehouseStock
 
 
 class EntrepotController:
     """Contrôleur pour la gestion des entrepôts"""
     
-    def __init__(self, pos_id: int):
-        self.pos_id = pos_id
+    def __init__(self, entreprise_id: int):
+        self.entreprise_id = entreprise_id
         self.db_manager = DatabaseManager()
     
-    def get_all_warehouses(self, session: Session) -> List[ShopWarehouse]:
-        """Récupérer tous les entrepôts du point de vente"""
-        return session.query(ShopWarehouse).filter(
-            ShopWarehouse.pos_id == self.pos_id
-        ).order_by(ShopWarehouse.is_default.desc(), ShopWarehouse.name).all()
+    def get_all_warehouses(self, session: Session) -> List[Dict[str, Any]]:
+        """Récupérer tous les entrepôts de l'entreprise"""
+        result = session.execute(text("""
+            SELECT id, code, name, type, description, address, 
+                   contact_person, contact_phone, contact_email,
+                   is_default, is_active, capacity_limit, created_at
+            FROM stock_warehouses 
+            WHERE entreprise_id = :entreprise_id 
+            ORDER BY is_default DESC, name
+        """), {"entreprise_id": self.entreprise_id})
+        
+        warehouses = []
+        for row in result:
+            warehouses.append({
+                'id': row[0],
+                'code': row[1],
+                'name': row[2],
+                'type': row[3],
+                'description': row[4],
+                'address': row[5],
+                'contact_person': row[6],
+                'contact_phone': row[7],
+                'contact_email': row[8],
+                'is_default': bool(row[9]),
+                'is_active': bool(row[10]),
+                'capacity_limit': float(row[11]) if row[11] else None,
+                'created_at': row[12]
+            })
+        
+        return warehouses
     
-    def get_warehouse_by_id(self, session: Session, warehouse_id: int) -> Optional[ShopWarehouse]:
+    def get_warehouse_by_id(self, session: Session, warehouse_id: int) -> Optional[Dict[str, Any]]:
         """Récupérer un entrepôt par son ID"""
-        return session.query(ShopWarehouse).filter(
-            and_(
-                ShopWarehouse.id == warehouse_id,
-                ShopWarehouse.pos_id == self.pos_id
-            )
-        ).first()
+        result = session.execute(text("""
+            SELECT id, code, name, type, description, address,
+                   contact_person, contact_phone, contact_email,
+                   is_default, is_active, capacity_limit, created_at
+            FROM stock_warehouses 
+            WHERE id = :warehouse_id AND entreprise_id = :entreprise_id
+        """), {"warehouse_id": warehouse_id, "entreprise_id": self.entreprise_id})
+        
+        row = result.first()
+        if row:
+            return {
+                'id': row[0],
+                'code': row[1],
+                'name': row[2],
+                'type': row[3],
+                'description': row[4],
+                'address': row[5],
+                'contact_person': row[6],
+                'contact_phone': row[7],
+                'contact_email': row[8],
+                'is_default': bool(row[9]),
+                'is_active': bool(row[10]),
+                'capacity_limit': float(row[11]) if row[11] else None,
+                'created_at': row[12]
+            }
+        return None
     
-    def get_warehouse_by_code(self, session: Session, code: str) -> Optional[ShopWarehouse]:
+    def get_warehouse_by_code(self, session: Session, code: str) -> Optional[Dict[str, Any]]:
         """Récupérer un entrepôt par son code"""
-        return session.query(ShopWarehouse).filter(
-            and_(
-                ShopWarehouse.code == code,
-                ShopWarehouse.pos_id == self.pos_id
-            )
-        ).first()
+        result = session.execute(text("""
+            SELECT id, code, name, type, description, address,
+                   contact_person, contact_phone, contact_email,
+                   is_default, is_active, capacity_limit, created_at
+            FROM stock_warehouses 
+            WHERE code = :code AND entreprise_id = :entreprise_id
+        """), {"code": code, "entreprise_id": self.entreprise_id})
+        
+        row = result.first()
+        if row:
+            return {
+                'id': row[0],
+                'code': row[1],
+                'name': row[2],
+                'type': row[3],
+                'description': row[4],
+                'address': row[5],
+                'contact_person': row[6],
+                'contact_phone': row[7],
+                'contact_email': row[8],
+                'is_default': bool(row[9]),
+                'is_active': bool(row[10]),
+                'capacity_limit': float(row[11]) if row[11] else None,
+                'created_at': row[12]
+            }
+        return None
     
-    def create_warehouse(self, session: Session, warehouse_data: Dict[str, Any]) -> ShopWarehouse:
+    def create_warehouse(self, session: Session, warehouse_data: Dict[str, Any]) -> Dict[str, Any]:
         """Créer un nouvel entrepôt"""
         # Vérifier que le code n'existe pas déjà
         existing = self.get_warehouse_by_code(session, warehouse_data['code'])
         if existing:
-            raise ValueError(f"Un entrepôt avec le code '{warehouse_data['code']}' existe déjà.")
+            raise ValueError(f"Un entrepôt avec le code '{warehouse_data['code']}' existe déjà")
         
-        # Si c'est l'entrepôt par défaut, retirer le statut des autres
-        if warehouse_data.get('is_default', False):
-            session.query(ShopWarehouse).filter(
-                ShopWarehouse.pos_id == self.pos_id
-            ).update({'is_default': False})
+        # Si c'est le premier entrepôt, le mettre par défaut
+        warehouses_count = session.execute(text("""
+            SELECT COUNT(*) FROM stock_warehouses WHERE entreprise_id = :entreprise_id
+        """), {"entreprise_id": self.entreprise_id}).scalar()
         
-        # Créer le nouvel entrepôt
-        warehouse = ShopWarehouse(
-            pos_id=self.pos_id,
-            code=warehouse_data['code'],
-            name=warehouse_data['name'],
-            type=warehouse_data.get('type', 'Principal'),
-            description=warehouse_data.get('description'),
-            address=warehouse_data.get('address'),
-            capacity_limit=warehouse_data.get('capacity_limit'),
-            contact_person=warehouse_data.get('contact_person'),
-            contact_phone=warehouse_data.get('contact_phone'),
-            contact_email=warehouse_data.get('contact_email'),
-            is_default=warehouse_data.get('is_default', False),
-            is_active=True
-            # created_at=datetime.now()  # Colonne pas encore créée en DB
-        )
+        is_default = warehouse_data.get('is_default', warehouses_count == 0)
         
-        session.add(warehouse)
-        session.flush()  # Pour obtenir l'ID
+        # Si défini par défaut, désactiver les autres
+        if is_default:
+            session.execute(text("""
+                UPDATE stock_warehouses 
+                SET is_default = 0 
+                WHERE entreprise_id = :entreprise_id
+            """), {"entreprise_id": self.entreprise_id})
         
-        return warehouse
+        # Insérer le nouvel entrepôt
+        result = session.execute(text("""
+            INSERT INTO stock_warehouses 
+            (entreprise_id, code, name, type, description, address,
+             contact_person, contact_phone, contact_email, is_default, 
+             is_active, capacity_limit, created_at, updated_at)
+            VALUES (:entreprise_id, :code, :name, :type, :description, :address,
+                    :contact_person, :contact_phone, :contact_email, :is_default,
+                    :is_active, :capacity_limit, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+        """), {
+            "entreprise_id": self.entreprise_id,
+            "code": warehouse_data['code'],
+            "name": warehouse_data['name'],
+            "type": warehouse_data.get('type', 'Principal'),
+            "description": warehouse_data.get('description'),
+            "address": warehouse_data.get('address'),
+            "contact_person": warehouse_data.get('contact_person'),
+            "contact_phone": warehouse_data.get('contact_phone'),
+            "contact_email": warehouse_data.get('contact_email'),
+            "is_default": is_default,
+            "is_active": warehouse_data.get('is_active', True),
+            "capacity_limit": warehouse_data.get('capacity_limit')
+        })
+        
+        warehouse_id = result.lastrowid
+        session.commit()
+        
+        # Retourner l'entrepôt créé
+        return self.get_warehouse_by_id(session, warehouse_id)
     
-    def update_warehouse(self, session: Session, warehouse_id: int, warehouse_data: Dict[str, Any]) -> ShopWarehouse:
+    def update_warehouse(self, session: Session, warehouse_id: int, warehouse_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Mettre à jour un entrepôt"""
         warehouse = self.get_warehouse_by_id(session, warehouse_id)
         if not warehouse:
-            raise ValueError(f"Entrepôt avec l'ID {warehouse_id} non trouvé.")
+            return None
         
-        # Vérifier que le code n'existe pas déjà (si changé)
-        if 'code' in warehouse_data and warehouse_data['code'] != warehouse.code:
+        # Vérifier unicité du code si modifié
+        if 'code' in warehouse_data and warehouse_data['code'] != warehouse['code']:
             existing = self.get_warehouse_by_code(session, warehouse_data['code'])
-            if existing:
-                raise ValueError(f"Un entrepôt avec le code '{warehouse_data['code']}' existe déjà.")
+            if existing and existing['id'] != warehouse_id:
+                raise ValueError(f"Un entrepôt avec le code '{warehouse_data['code']}' existe déjà")
         
-        # Si c'est l'entrepôt par défaut, retirer le statut des autres
-        if warehouse_data.get('is_default', False) and not warehouse.is_default:
-            session.query(ShopWarehouse).filter(
-                and_(
-                    ShopWarehouse.pos_id == self.pos_id,
-                    ShopWarehouse.id != warehouse_id
-                )
-            ).update({'is_default': False})
+        # Si défini par défaut, désactiver les autres
+        if warehouse_data.get('is_default'):
+            session.execute(text("""
+                UPDATE stock_warehouses 
+                SET is_default = 0 
+                WHERE entreprise_id = :entreprise_id AND id != :warehouse_id
+            """), {"entreprise_id": self.entreprise_id, "warehouse_id": warehouse_id})
         
-        # Mettre à jour les champs
-        for key, value in warehouse_data.items():
-            if hasattr(warehouse, key):
-                setattr(warehouse, key, value)
+        # Construire la requête de mise à jour
+        update_fields = []
+        params = {"warehouse_id": warehouse_id}
         
-        warehouse.updated_at = datetime.now()
+        for field in ['code', 'name', 'type', 'description', 'address', 
+                     'contact_person', 'contact_phone', 'contact_email', 
+                     'is_default', 'is_active', 'capacity_limit']:
+            if field in warehouse_data:
+                update_fields.append(f"{field} = :{field}")
+                params[field] = warehouse_data[field]
         
-        return warehouse
+        if update_fields:
+            update_fields.append("updated_at = CURRENT_TIMESTAMP")
+            session.execute(text(f"""
+                UPDATE stock_warehouses 
+                SET {', '.join(update_fields)}
+                WHERE id = :warehouse_id
+            """), params)
+            
+            session.commit()
+        
+        return self.get_warehouse_by_id(session, warehouse_id)
     
     def delete_warehouse(self, session: Session, warehouse_id: int) -> bool:
-        """Supprimer un entrepôt (vérifier qu'il n'a pas de stock)"""
+        """Supprimer un entrepôt (vérifier qu'il n'a pas de stocks)"""
         warehouse = self.get_warehouse_by_id(session, warehouse_id)
         if not warehouse:
-            raise ValueError(f"Entrepôt avec l'ID {warehouse_id} non trouvé.")
+            return False
         
-        # Vérifier qu'il n'y a pas de stock
-        stock_count = session.query(ShopWarehouseStock).filter(
-            and_(
-                ShopWarehouseStock.warehouse_id == warehouse_id,
-                ShopWarehouseStock.quantity > 0
-            )
-        ).count()
+        # Vérifier s'il y a des stocks
+        stock_count = session.execute(text("""
+            SELECT COUNT(*) FROM stock_produits_entrepot 
+            WHERE warehouse_id = :warehouse_id AND quantity > 0
+        """), {"warehouse_id": warehouse_id}).scalar()
         
         if stock_count > 0:
-            raise ValueError("Impossible de supprimer un entrepôt contenant du stock.")
+            raise ValueError("Impossible de supprimer un entrepôt qui contient des stocks")
         
-        # Supprimer les enregistrements de stock à 0
-        session.query(ShopWarehouseStock).filter(
-            ShopWarehouseStock.warehouse_id == warehouse_id
-        ).delete()
+        # Vérifier s'il y a des configurations POS liées
+        config_count = session.execute(text("""
+            SELECT COUNT(*) FROM stock_config 
+            WHERE warehouse_id = :warehouse_id AND is_active = 1
+        """), {"warehouse_id": warehouse_id}).scalar()
         
-        # Supprimer l'entrepôt
-        session.delete(warehouse)
+        if config_count > 0:
+            raise ValueError("Impossible de supprimer un entrepôt utilisé par des points de vente")
         
+        # Supprimer
+        session.execute(text("""
+            DELETE FROM stock_warehouses WHERE id = :warehouse_id
+        """), {"warehouse_id": warehouse_id})
+        
+        session.commit()
         return True
     
-    def get_warehouse_statistics(self, session: Session, warehouse_id: int) -> Dict[str, Any]:
+    def get_warehouse_stats(self, session: Session, warehouse_id: int) -> Dict[str, Any]:
         """Obtenir les statistiques d'un entrepôt"""
         warehouse = self.get_warehouse_by_id(session, warehouse_id)
         if not warehouse:
-            raise ValueError(f"Entrepôt avec l'ID {warehouse_id} non trouvé.")
+            return {}
         
-        # Compter les produits et les quantités
-        stats = session.query(
-            func.count(ShopWarehouseStock.id).label('total_products'),
-            func.sum(ShopWarehouseStock.quantity).label('total_quantity'),
-            func.sum(ShopWarehouseStock.quantity * ShopWarehouseStock.unit_cost).label('total_value')
-        ).filter(
-            ShopWarehouseStock.warehouse_id == warehouse_id
-        ).first()
+        # Nombre de produits
+        product_count = session.execute(text("""
+            SELECT COUNT(*) FROM stock_produits_entrepot 
+            WHERE warehouse_id = :warehouse_id
+        """), {"warehouse_id": warehouse_id}).scalar()
         
-        # Produits avec stock > 0
-        products_with_stock = session.query(ShopWarehouseStock).filter(
-            and_(
-                ShopWarehouseStock.warehouse_id == warehouse_id,
-                ShopWarehouseStock.quantity > 0
-            )
-        ).count()
+        # Produits avec stock
+        stocked_products = session.execute(text("""
+            SELECT COUNT(*) FROM stock_produits_entrepot 
+            WHERE warehouse_id = :warehouse_id AND quantity > 0
+        """), {"warehouse_id": warehouse_id}).scalar()
         
-        # Produits en rupture (stock = 0)
-        out_of_stock = session.query(ShopWarehouseStock).filter(
-            and_(
-                ShopWarehouseStock.warehouse_id == warehouse_id,
-                ShopWarehouseStock.quantity == 0
-            )
-        ).count()
+        # Valeur totale du stock
+        total_value = session.execute(text("""
+            SELECT COALESCE(SUM(total_cost), 0) FROM stock_produits_entrepot 
+            WHERE warehouse_id = :warehouse_id
+        """), {"warehouse_id": warehouse_id}).scalar()
+        
+        # Produits en rupture
+        low_stock_products = session.execute(text("""
+            SELECT COUNT(*) FROM stock_produits_entrepot 
+            WHERE warehouse_id = :warehouse_id 
+            AND quantity <= min_stock_level AND min_stock_level > 0
+        """), {"warehouse_id": warehouse_id}).scalar()
         
         return {
             'warehouse': warehouse,
-            'total_products': stats.total_products or 0,
-            'products_with_stock': products_with_stock,
-            'out_of_stock': out_of_stock,
-            'total_quantity': float(stats.total_quantity or 0),
-            'total_value': float(stats.total_value or 0),
-            'capacity_used_percentage': self._calculate_capacity_percentage(warehouse, stats.total_quantity or 0)
+            'total_products': product_count or 0,
+            'stocked_products': stocked_products or 0,
+            'total_value': float(total_value or 0),
+            'low_stock_products': low_stock_products or 0
         }
     
-    def _calculate_capacity_percentage(self, warehouse: ShopWarehouse, current_quantity: Decimal) -> Optional[float]:
-        """Calculer le pourcentage de capacité utilisée"""
-        if not warehouse.capacity_limit or warehouse.capacity_limit <= 0:
-            return None
+    def get_active_warehouses(self, session: Session) -> List[Dict[str, Any]]:
+        """Récupérer uniquement les entrepôts actifs"""
+        result = session.execute(text("""
+            SELECT id, code, name, type, is_default
+            FROM stock_warehouses 
+            WHERE entreprise_id = :entreprise_id AND is_active = 1
+            ORDER BY is_default DESC, name
+        """), {"entreprise_id": self.entreprise_id})
         
-        return min(100.0, (float(current_quantity) / warehouse.capacity_limit) * 100)
-    
-    def link_all_products_to_warehouses(self, session: Session) -> Dict[str, int]:
-        """Lier tous les produits à tous les entrepôts avec quantité 0"""
-        # Récupérer tous les produits et entrepôts
-        products = session.query(ShopProduct).filter(ShopProduct.pos_id == self.pos_id).all()
-        warehouses = self.get_all_warehouses(session)
+        warehouses = []
+        for row in result:
+            warehouses.append({
+                'id': row[0],
+                'code': row[1],
+                'name': row[2],
+                'type': row[3],
+                'is_default': bool(row[4])
+            })
         
-        created_count = 0
-        updated_count = 0
-        
-        for product in products:
-            for warehouse in warehouses:
-                # Vérifier si l'association existe déjà
-                existing_stock = session.query(ShopWarehouseStock).filter(
-                    and_(
-                        ShopWarehouseStock.product_id == product.id,
-                        ShopWarehouseStock.warehouse_id == warehouse.id
-                    )
-                ).first()
-                
-                if not existing_stock:
-                    # Créer une nouvelle association avec quantité 0
-                    stock = ShopWarehouseStock(
-                        product_id=product.id,
-                        warehouse_id=warehouse.id,
-                        quantity=Decimal('0.00'),
-                        reserved_quantity=Decimal('0.00'),
-                        unit_cost=product.cost_price or Decimal('0.00'),
-                        minimum_stock=product.minimum_stock or Decimal('0.00'),
-                        maximum_stock=product.maximum_stock or Decimal('0.00')
-                        # created_at=datetime.now()  # Colonne pas encore créée en DB
-                    )
-                    session.add(stock)
-                    created_count += 1
-                else:
-                    # Mettre à jour les informations si nécessaire
-                    if existing_stock.unit_cost != (product.cost_price or Decimal('0.00')):
-                        existing_stock.unit_cost = product.cost_price or Decimal('0.00')
-                        existing_stock.updated_at = datetime.now()
-                        updated_count += 1
-        
-        return {
-            'products_count': len(products),
-            'warehouses_count': len(warehouses),
-            'associations_created': created_count,
-            'associations_updated': updated_count
-        }
+        return warehouses
     
     def get_warehouse_configuration_by_pos(self, session: Session) -> Dict[str, Any]:
-        """Obtenir la configuration des entrepôts pour ce point de vente"""
+        """Obtenir la configuration des entrepôts pour cette entreprise"""
         warehouses = self.get_all_warehouses(session)
         
         default_warehouse = None
         for warehouse in warehouses:
-            if warehouse.is_default:
+            if warehouse['is_default']:
                 default_warehouse = warehouse
                 break
         
         return {
             'total_warehouses': len(warehouses),
-            'active_warehouses': len([w for w in warehouses if w.is_active]),
+            'active_warehouses': len([w for w in warehouses if w['is_active']]),
             'default_warehouse': default_warehouse,
             'warehouses_by_type': self._group_warehouses_by_type(warehouses)
         }
     
-    def _group_warehouses_by_type(self, warehouses: List[ShopWarehouse]) -> Dict[str, List[ShopWarehouse]]:
+    def _group_warehouses_by_type(self, warehouses: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         """Grouper les entrepôts par type"""
         groups = {}
         for warehouse in warehouses:
-            warehouse_type = warehouse.type or 'Autre'
+            warehouse_type = warehouse['type'] or 'Autre'
             if warehouse_type not in groups:
                 groups[warehouse_type] = []
             groups[warehouse_type].append(warehouse)
         return groups
-    
-    def set_default_warehouse(self, session: Session, warehouse_id: int) -> ShopWarehouse:
-        """Définir un entrepôt comme étant celui par défaut"""
-        # Retirer le statut par défaut de tous les entrepôts
-        session.query(ShopWarehouse).filter(
-            ShopWarehouse.pos_id == self.pos_id
-        ).update({'is_default': False})
-        
-        # Définir le nouvel entrepôt par défaut
-        warehouse = self.get_warehouse_by_id(session, warehouse_id)
-        if not warehouse:
-            raise ValueError(f"Entrepôt avec l'ID {warehouse_id} non trouvé.")
-        
-        warehouse.is_default = True
-        warehouse.updated_at = datetime.now()
-        
-        return warehouse
-    
-    def toggle_warehouse_status(self, session: Session, warehouse_id: int) -> ShopWarehouse:
-        """Activer/désactiver un entrepôt"""
-        warehouse = self.get_warehouse_by_id(session, warehouse_id)
-        if not warehouse:
-            raise ValueError(f"Entrepôt avec l'ID {warehouse_id} non trouvé.")
-        
-        warehouse.is_active = not warehouse.is_active
-        warehouse.updated_at = datetime.now()
-        
-        return warehouse
