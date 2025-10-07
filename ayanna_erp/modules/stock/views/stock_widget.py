@@ -5,6 +5,7 @@ Widget pour la gestion des stocks par entrepôt
 from typing import List, Optional, Dict, Any
 from decimal import Decimal
 from datetime import datetime
+from sqlalchemy import text
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, 
@@ -17,6 +18,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.stock_controller import StockController
+from ayanna_erp.modules.stock.models import StockWarehouse
 
 
 class StockLevelsDialog(QDialog):
@@ -253,13 +255,26 @@ class StockWidget(QWidget):
         super().__init__()
         self.pos_id = pos_id
         self.current_user = current_user
-        self.controller = StockController(pos_id)
         self.db_manager = DatabaseManager()
+        # Récupérer entreprise_id depuis pos_id
+        self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
+        self.controller = StockController(pos_id)
         self.current_stocks = []
         self.current_warehouse_id = None
         
         self.setup_ui()
         self.load_data()
+    
+    def get_entreprise_id_from_pos(self, pos_id):
+        """Récupérer l'entreprise_id depuis le pos_id"""
+        try:
+            with self.db_manager.get_session() as session:
+                result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
+                row = result.fetchone()
+                return row[0] if row else None
+        except Exception as e:
+            print(f"Erreur lors de la récupération de l'entreprise_id: {e}")
+            return None
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -397,11 +412,10 @@ class StockWidget(QWidget):
         try:
             # Charger les entrepôts pour le filtre
             with self.db_manager.get_session() as session:
-                from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-                warehouses = session.query(ShopWarehouse).filter(
-                    ShopWarehouse.pos_id == self.pos_id,
-                    ShopWarehouse.is_active == True
-                ).order_by(ShopWarehouse.name).all()
+                warehouses = session.query(StockWarehouse).filter(
+                    StockWarehouse.entreprise_id == self.entreprise_id,
+                    StockWarehouse.is_active == True
+                ).order_by(StockWarehouse.name).all()
                 
                 self.warehouse_combo.clear()
                 self.warehouse_combo.addItem("-- Tous les entrepôts --", None)

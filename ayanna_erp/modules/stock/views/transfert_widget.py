@@ -18,6 +18,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.transfert_controller import TransfertController
+from ayanna_erp.modules.stock.models import StockWarehouse
 
 
 class TransferFormDialog(QDialog):
@@ -167,11 +168,10 @@ class TransferFormDialog(QDialog):
         """Charger la liste des entrepôts"""
         try:
             with self.db_manager.get_session() as session:
-                from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-                warehouses = session.query(ShopWarehouse).filter(
-                    ShopWarehouse.pos_id == self.pos_id,
-                    ShopWarehouse.is_active == True
-                ).order_by(ShopWarehouse.name).all()
+                warehouses = session.query(StockWarehouse).filter(
+                    StockWarehouse.entreprise_id == self.entreprise_id,
+                    StockWarehouse.is_active == True
+                ).order_by(StockWarehouse.name).all()
                 
                 for combo in [self.source_warehouse_combo, self.dest_warehouse_combo]:
                     combo.clear()

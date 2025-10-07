@@ -26,6 +26,7 @@ except ImportError:
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.rapport_controller import RapportController
+from ayanna_erp.modules.stock.models import StockWarehouse
 
 
 class ReportGenerationThread(QThread):
@@ -245,11 +246,10 @@ class ReportConfigDialog(QDialog):
         """Charger la liste des entrepôts"""
         try:
             with self.db_manager.get_session() as session:
-                from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-                warehouses = session.query(ShopWarehouse).filter(
-                    ShopWarehouse.pos_id == self.pos_id,
-                    ShopWarehouse.is_active == True
-                ).order_by(ShopWarehouse.name).all()
+                warehouses = session.query(StockWarehouse).filter(
+                    StockWarehouse.entreprise_id == self.entreprise_id,
+                    StockWarehouse.is_active == True
+                ).order_by(StockWarehouse.name).all()
                 
                 self.warehouses_combo.clear()
                 self.warehouses_combo.addItem("Tous les entrepôts", None)

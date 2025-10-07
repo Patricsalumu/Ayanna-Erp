@@ -11,7 +11,6 @@ from .models import (
     ShopPanierProduct,
     ShopPanierService,
     ShopPayment,
-    ShopStock,
     ShopExpense,
     ShopComptesConfig
 )
@@ -25,7 +24,6 @@ __all__ = [
     'ShopPanierProduct', 
     'ShopPanierService',
     'ShopPayment',
-    'ShopStock',
     'ShopExpense',
     'ShopComptesConfig'
 ]

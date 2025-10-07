@@ -19,6 +19,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon, QPalette
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.alerte_controller import AlerteController
+from ayanna_erp.modules.stock.models import StockWarehouse
 
 
 class AlertConfigDialog(QDialog):
@@ -630,11 +631,10 @@ class AlerteWidget(QWidget):
     def load_warehouses_for_filters(self, session):
         """Charger les entrepôts pour les filtres"""
         try:
-            from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-            warehouses = session.query(ShopWarehouse).filter(
-                ShopWarehouse.pos_id == self.pos_id,
-                ShopWarehouse.is_active == True
-            ).order_by(ShopWarehouse.name).all()
+            warehouses = session.query(StockWarehouse).filter(
+                StockWarehouse.entreprise_id == self.entreprise_id,
+                StockWarehouse.is_active == True
+            ).order_by(StockWarehouse.name).all()
             
             # Mettre à jour les combos
             for combo in [self.warehouse_filter, self.analysis_warehouse_combo]:

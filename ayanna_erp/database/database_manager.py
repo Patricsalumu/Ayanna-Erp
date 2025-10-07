@@ -22,6 +22,13 @@ except ImportError:
     # Les modèles comptables ne sont pas encore disponibles
     pass
 
+# Import des modèles stock pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.stock.models import StockWarehouse, StockConfig, StockProduitEntrepot, StockMovement
+except ImportError:
+    # Les modèles stock ne sont pas encore disponibles
+    pass
+
 
 class DatabaseManager:
     """Gestionnaire principal de la base de données"""
@@ -189,15 +196,15 @@ class DatabaseManager:
     def _create_default_warehouses_for_enterprise(self, session, enterprise_id):
         """Créer automatiquement les entrepôts par défaut pour une entreprise"""
         try:
-            from ayanna_erp.modules.boutique.model.models import ShopWarehouse
+            from ayanna_erp.modules.stock.models import StockWarehouse
             
             # Récupérer tous les POS de l'entreprise
             pos_points = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
             
             for pos in pos_points:
                 # Créer entrepôt principal pour chaque POS
-                main_warehouse = ShopWarehouse(
-                    pos_id=pos.id,
+                main_warehouse = StockWarehouse(
+                    entreprise_id=enterprise_id,
                     code=f"MAIN_{pos.id}",
                     name=f"Entrepôt Principal - {pos.name}",
                     type="Principal",
@@ -208,8 +215,8 @@ class DatabaseManager:
                 session.add(main_warehouse)
                 
                 # Créer entrepôt point de vente pour chaque POS
-                pos_warehouse = ShopWarehouse(
-                    pos_id=pos.id,
+                pos_warehouse = StockWarehouse(
+                    entreprise_id=enterprise_id,
                     code=f"POS_{pos.id}",
                     name=f"Entrepôt Point de Vente - {pos.name}",
                     type="Point de Vente",

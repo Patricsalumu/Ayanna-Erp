@@ -18,6 +18,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.inventaire_controller import InventaireController
+from ayanna_erp.modules.stock.models import StockWarehouse
 
 
 class InventorySessionDialog(QDialog):
@@ -141,11 +142,10 @@ class InventorySessionDialog(QDialog):
         """Charger la liste des entrepôts"""
         try:
             with self.db_manager.get_session() as session:
-                from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-                warehouses = session.query(ShopWarehouse).filter(
-                    ShopWarehouse.pos_id == self.pos_id,
-                    ShopWarehouse.is_active == True
-                ).order_by(ShopWarehouse.name).all()
+                warehouses = session.query(StockWarehouse).filter(
+                    StockWarehouse.entreprise_id == self.entreprise_id,
+                    StockWarehouse.is_active == True
+                ).order_by(StockWarehouse.name).all()
                 
                 self.warehouse_combo.clear()
                 self.warehouse_combo.addItem("-- Sélectionner un entrepôt --", None)
@@ -624,11 +624,10 @@ class InventaireWidget(QWidget):
     def load_warehouses_for_filters(self, session):
         """Charger les entrepôts pour les filtres"""
         try:
-            from ayanna_erp.modules.boutique.model.models import ShopWarehouse
-            warehouses = session.query(ShopWarehouse).filter(
-                ShopWarehouse.pos_id == self.pos_id,
-                ShopWarehouse.is_active == True
-            ).order_by(ShopWarehouse.name).all()
+            warehouses = session.query(StockWarehouse).filter(
+                StockWarehouse.entreprise_id == self.entreprise_id,
+                StockWarehouse.is_active == True
+            ).order_by(StockWarehouse.name).all()
             
             current_value = self.warehouse_filter.currentData()
             self.warehouse_filter.clear()

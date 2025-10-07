@@ -26,7 +26,7 @@ def init_boutique_data(db_session):
         from ayanna_erp.modules.boutique.model.models import (
             ShopClient, ShopCategory, ShopProduct, ShopService, 
             ShopPanier, ShopPanierProduct, ShopPanierService,
-            ShopPayment, ShopStock, ShopExpense, ShopComptesConfig
+            ShopPayment, ShopExpense, ShopComptesConfig
         )
         from ayanna_erp.database.base import Base
         from ayanna_erp.database.database_manager import DatabaseManager

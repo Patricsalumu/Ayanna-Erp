@@ -12,8 +12,9 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ..model.models import (
     ShopClient, ShopCategory, ShopProduct, ShopService,
     ShopPanier, ShopPanierProduct, ShopPanierService,
-    ShopPayment, ShopStock, ShopExpense, ShopComptesConfig
+    ShopPayment, ShopExpense, ShopComptesConfig
 )
+from ..helpers.stock_helper import BoutiqueStockHelper
 
 
 class BoutiqueController(QObject):
@@ -24,12 +25,14 @@ class BoutiqueController(QObject):
     payment_completed = pyqtSignal(int)  # ID du paiement
     stock_updated = pyqtSignal(int)  # ID du produit
     
-    def __init__(self, pos_id: int = None):
+    def __init__(self, pos_id: int = None, entreprise_id: int = None):
         super().__init__()
         self.db_manager = DatabaseManager()
         self._panier_actuel: Optional[ShopPanier] = None
         self._initialized = False
         self.pos_id = pos_id
+        self.entreprise_id = entreprise_id or self.db_manager.get_current_enterprise_id()
+        self.stock_helper = BoutiqueStockHelper(pos_id=pos_id, entreprise_id=self.entreprise_id)
     
     def _ensure_initialized(self, session: Session) -> bool:
         """Garantit que le module Boutique est initialisé (tables et données de base)."""
@@ -149,9 +152,9 @@ class BoutiqueController(QObject):
         
         product = ShopProduct(
             pos_id=self.pos_id,  # Ajouter le pos_id manquant
-            nom=nom,
+            name=nom,
             description=description,
-            prix=prix,
+            price_unit=prix,
             unit=unit,
             category_id=category_id,
             is_active=True
@@ -159,15 +162,12 @@ class BoutiqueController(QObject):
         session.add(product)
         session.flush()  # Pour obtenir l'ID
         
-        # Créer le stock initial si nécessaire
-        if stock_initial > 0:
-            stock = ShopStock(
-                product_id=product.id,
-                quantite=stock_initial,
-                prix_unitaire=prix,
-                date_entree=session.execute('SELECT CURRENT_TIMESTAMP').scalar()
-            )
-            session.add(stock)
+        # Créer les entrées stock dans TOUS les entrepôts de l'entreprise
+        self.stock_helper.create_product_stock_in_all_warehouses(
+            session=session,
+            product_id=product.id,
+            initial_stock=stock_initial
+        )
         
         session.commit()
         session.refresh(product)
@@ -175,8 +175,8 @@ class BoutiqueController(QObject):
     
     def get_product_stock_total(self, session: Session, product_id: int) -> int:
         """Calcule le stock total disponible pour un produit."""
-        stocks = session.query(ShopStock).filter(ShopStock.product_id == product_id).all()
-        return sum(stock.quantite for stock in stocks)
+        stock_total = self.stock_helper.get_product_stock_total(session, product_id)
+        return int(stock_total)
     
     # =================== GESTION DES SERVICES ===================
     
@@ -528,26 +528,14 @@ class BoutiqueController(QObject):
     
     def _decrement_stock(self, session: Session, product_id: int, quantite: int):
         """Décrémente le stock d'un produit."""
-        # Récupérer les entrées de stock par ordre FIFO
-        stocks = session.query(ShopStock).filter(
-            ShopStock.product_id == product_id,
-            ShopStock.quantite > 0
-        ).order_by(ShopStock.date_entree).all()
+        success = self.stock_helper.decrement_stock(
+            session=session,
+            product_id=product_id,
+            quantite=quantite,
+            description="Vente boutique"
+        )
         
-        quantite_restante = quantite
-        
-        for stock in stocks:
-            if quantite_restante <= 0:
-                break
-            
-            if stock.quantite >= quantite_restante:
-                stock.quantite -= quantite_restante
-                quantite_restante = 0
-            else:
-                quantite_restante -= stock.quantite
-                stock.quantite = 0
-        
-        if quantite_restante > 0:
+        if not success:
             raise ValueError(f"Stock insuffisant pour le produit {product_id}")
         
         self.stock_updated.emit(product_id)
