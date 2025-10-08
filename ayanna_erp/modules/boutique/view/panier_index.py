@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from ayanna_erp.modules.boutique.model.models import ShopProduct, ShopService, ShopPanier
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 
 # ...existing code...
 
@@ -37,7 +37,8 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ..model.models import ShopClient, ShopCategory, ShopProduct, ShopService, ShopComptesConfig
+from ..model.models import ShopClient, ShopService, ShopPanier, ShopComptesConfig
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 
 
 class PanierIndex(QWidget):
@@ -348,9 +349,9 @@ class PanierIndex(QWidget):
     def add_product_card_to_panier(self, prod):
         """Ajoute le produit au panier depuis une card, ajoute ou incrémente dans la BDD et rafraîchit le panier."""
         # Recherche du vrai produit en BDD par nom (à adapter selon l'ID réel)
-        from ayanna_erp.modules.boutique.model.models import ShopProduct
+        from ayanna_erp.modules.core.models import CoreProduct
         with self.db_manager.get_session() as session:
-            product_obj = session.query(ShopProduct).filter(ShopProduct.name == prod['name']).first()
+            product_obj = session.query(CoreProduct).filter(CoreProduct.name == prod['name']).first()
             if not product_obj:
                 QMessageBox.warning(self, "Erreur", f"Produit '{prod['name']}' introuvable en BDD.")
                 return
@@ -669,7 +670,7 @@ class PanierIndex(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement du catalogue: {str(e)}")
     
-    def populate_catalog_with_products(self, products: List[ShopProduct]):
+    def populate_catalog_with_products(self, products: List[CoreProduct]):
         """Peupler le catalogue avec les produits"""
         self.catalog_table.setRowCount(len(products))
         

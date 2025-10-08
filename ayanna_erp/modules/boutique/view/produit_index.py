@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QColor, QPixmap
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ..model.models import ShopProduct, ShopCategory
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
 import os
 import shutil
@@ -197,8 +197,9 @@ class ProduitIndex(QWidget):
             details += f"<b>Catégorie :</b> {product.category_id}<br>"
             details += f"<b>Prix :</b> {product.price_unit} €<br>"
             details += f"<b>Coût :</b> {product.cost} €<br>"
-            details += f"<b>Stock :</b> {product.stock_quantity}<br>"
-            details += f"<b>Stock min :</b> {product.stock_min}<br>"
+            # Récupérer le stock depuis le module stock
+            stock_info = self._get_product_stock_info(product.id)
+            details += f"<b>Stock :</b> {stock_info['total_stock']}<br>"
             details += f"<b>Unité :</b> {product.unit}<br>"
             details += f"<b>Code-barres :</b> {product.barcode}<br>"
             details += f"<b>Compte comptable :</b> {product.account_id}<br>"
@@ -208,6 +209,51 @@ class ProduitIndex(QWidget):
             
             # Affichage de l'image
             self.load_product_image(product.image)
+
+    def _get_product_stock_info(self, product_id):
+        """Récupérer les informations de stock d'un produit depuis l'entrepôt POS Boutique"""
+        try:
+            from ayanna_erp.modules.stock.models import StockProduitEntrepot, StockWarehouse
+            session = self.db_manager.get_session()
+            
+            # Récupérer l'entrepôt POS Boutique
+            pos_warehouse = session.query(StockWarehouse).filter_by(code='POS_2').first()
+            
+            if not pos_warehouse:
+                session.close()
+                return {
+                    'total_stock': 0,
+                    'min_stock': 0,
+                    'warehouse_name': 'Entrepôt introuvable'
+                }
+            
+            # Récupérer le stock pour ce produit dans l'entrepôt POS Boutique
+            stock_entry = session.query(StockProduitEntrepot).filter_by(
+                product_id=product_id, 
+                warehouse_id=pos_warehouse.id
+            ).first()
+            
+            if stock_entry:
+                total_stock = float(stock_entry.quantity)
+                min_stock = float(stock_entry.min_stock_level)
+            else:
+                total_stock = 0
+                min_stock = 0
+            
+            session.close()
+            
+            return {
+                'total_stock': total_stock,
+                'min_stock': min_stock,
+                'warehouse_name': pos_warehouse.name
+            }
+        except Exception as e:
+            print(f"Erreur lors de la récupération du stock: {e}")
+            return {
+                'total_stock': 0,
+                'min_stock': 0,
+                'warehouse_name': 'Erreur'
+            }
 
     def load_product_image(self, image_path):
         """Charger et afficher l'image du produit"""
@@ -350,7 +396,7 @@ class ProduitIndex(QWidget):
             category_name = "Non assignée"
             if product.category_id:
                 with self.db_manager.get_session() as session:
-                    cat = session.query(ShopCategory).get(product.category_id)
+                    cat = session.query(CoreProductCategory).get(product.category_id)
                     if cat:
                         category_name = cat.name
             self.products_table.setItem(row, 2, QTableWidgetItem(category_name))
@@ -521,7 +567,7 @@ class ProduitIndex(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la modification du statut: {str(e)}")
     
-    def manage_product_stock(self, product: ShopProduct):
+    def manage_product_stock(self, product: CoreProduct):
         """Gérer le stock d'un produit"""
         # TODO: Ouvrir une interface de gestion de stock
         QMessageBox.information(
@@ -899,6 +945,7 @@ class ProductFormDialog(QDialog):
             if self.produit_controller and hasattr(self.produit_controller, 'pos_id'):
                 # Récupérer l'entreprise depuis le pos_id
                 from ayanna_erp.database.database_manager import POSPoint
+                from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
                 
                 with self.db_manager.get_session() as session:
                     # Récupérer le POS et son entreprise

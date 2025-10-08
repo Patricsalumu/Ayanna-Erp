@@ -1,5 +1,4 @@
 from ayanna_erp.database.base import Base
-from ayanna_erp.modules.boutique.model.models import ShopCategory
 """
 Gestionnaire de base de données pour Ayanna ERP
 Utilise SQLAlchemy pour la gestion des modèles et des connexions
@@ -22,12 +21,42 @@ except ImportError:
     # Les modèles comptables ne sont pas encore disponibles
     pass
 
+# Import des modèles core pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory, POSProductAccess
+except ImportError:
+    # Les modèles core ne sont pas encore disponibles
+    pass
+
 # Import des modèles stock pour qu'ils soient inclus dans Base.metadata
 try:
     from ayanna_erp.modules.stock.models import StockWarehouse, StockConfig, StockProduitEntrepot, StockMovement
 except ImportError:
     # Les modèles stock ne sont pas encore disponibles
     pass
+
+# Import des modèles boutique pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.boutique.model.models import (
+        ShopClient, ShopService, ShopPanier, ShopPanierProduct, ShopPanierService,
+        ShopPayment, ShopExpense, ShopComptesConfig, ShopWarehouse, ShopWarehouseStock,
+        ShopStockMovement, ShopStockTransfer
+    )
+except ImportError:
+    # Les modèles boutique ne sont pas encore disponibles
+    pass
+
+# Import des modèles salle de fête pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.salle_fete.model.salle_fete import (
+        EventClient, EventService, EventReservation, EventReservationService,
+        EventReservationProduct, EventPayment, EventStockMovement, EventExpense
+    )
+    print("✅ Import des modèles salle de fête réussi dans database_manager.py")
+except ImportError as e:
+    print(f"⚠️ Import des modèles salle de fête échoué: {e}")
+except Exception as e:
+    print(f"❌ Erreur inattendue lors de l'import salle de fête: {e}")
 
 
 class DatabaseManager:
@@ -466,9 +495,10 @@ class DatabaseManager:
                         print(f"✅ Service boutique créé: {service.name} - {service.price}€")
                 
                 # Récupérer ou créer la catégorie par défaut "Général"
-                default_category = session.query(ShopCategory).filter_by(name="Général", pos_id=boutique_pos.id).first()
+                from ayanna_erp.modules.core.models.core_products import CoreProductCategory
+                default_category = session.query(CoreProductCategory).filter_by(name="Général", entreprise_id=self.entreprise_id).first()
                 if not default_category:
-                    default_category = ShopCategory(name="Général", pos_id=boutique_pos.id, description="Catégorie par défaut")
+                    default_category = CoreProductCategory(name="Général", entreprise_id=self.entreprise_id, description="Catégorie par défaut")
                     session.add(default_category)
                     session.flush()  # Pour obtenir l'ID
                 default_category_id = default_category.id

@@ -138,9 +138,9 @@ class StockIndex(QWidget):
             # Catégorie (recharger l'objet dans la session)
             category_name = "Non assignée"
             if product.category_id:
-                from ayanna_erp.modules.boutique.model.models import ShopCategory
+                from ayanna_erp.modules.core.models.core_products import CoreProductCategory
                 with self.db_manager.get_session() as session:
-                    cat = session.query(ShopCategory).get(product.category_id)
+                    cat = session.query(CoreProductCategory).get(product.category_id)
                     if cat:
                         category_name = cat.name
             self.stock_table.setItem(row, 2, QTableWidgetItem(category_name))

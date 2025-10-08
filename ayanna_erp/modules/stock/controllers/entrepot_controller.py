@@ -134,10 +134,10 @@ class EntrepotController:
             INSERT INTO stock_warehouses 
             (entreprise_id, code, name, type, description, address,
              contact_person, contact_phone, contact_email, is_default, 
-             is_active, capacity_limit, created_at, updated_at)
+             is_active, capacity_limit, created_at)
             VALUES (:entreprise_id, :code, :name, :type, :description, :address,
                     :contact_person, :contact_phone, :contact_email, :is_default,
-                    :is_active, :capacity_limit, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    :is_active, :capacity_limit, CURRENT_TIMESTAMP)
         """), {
             "entreprise_id": self.entreprise_id,
             "code": warehouse_data['code'],
@@ -191,7 +191,6 @@ class EntrepotController:
                 params[field] = warehouse_data[field]
         
         if update_fields:
-            update_fields.append("updated_at = CURRENT_TIMESTAMP")
             session.execute(text(f"""
                 UPDATE stock_warehouses 
                 SET {', '.join(update_fields)}
@@ -217,15 +216,6 @@ class EntrepotController:
         if stock_count > 0:
             raise ValueError("Impossible de supprimer un entrepôt qui contient des stocks")
         
-        # Vérifier s'il y a des configurations POS liées
-        config_count = session.execute(text("""
-            SELECT COUNT(*) FROM stock_config 
-            WHERE warehouse_id = :warehouse_id AND is_active = 1
-        """), {"warehouse_id": warehouse_id}).scalar()
-        
-        if config_count > 0:
-            raise ValueError("Impossible de supprimer un entrepôt utilisé par des points de vente")
-        
         # Supprimer
         session.execute(text("""
             DELETE FROM stock_warehouses WHERE id = :warehouse_id
@@ -234,44 +224,79 @@ class EntrepotController:
         session.commit()
         return True
     
-    def get_warehouse_stats(self, session: Session, warehouse_id: int) -> Dict[str, Any]:
-        """Obtenir les statistiques d'un entrepôt"""
-        warehouse = self.get_warehouse_by_id(session, warehouse_id)
-        if not warehouse:
-            return {}
+    def get_warehouse_detailed_stats(self, session: Session, warehouse_id: int) -> Dict[str, Any]:
+        """Obtenir les statistiques détaillées d'un entrepôt avec valeurs d'achat et de vente"""
+        # Statistiques de base
+        result = session.execute(text("""
+            SELECT 
+                COUNT(*) as total_products,
+                COUNT(CASE WHEN spe.quantity > 0 THEN 1 END) as products_with_stock,
+                COUNT(CASE WHEN spe.quantity = 0 THEN 1 END) as out_of_stock,
+                COALESCE(SUM(spe.quantity), 0) as total_quantity,
+                COALESCE(SUM(spe.total_cost), 0) as total_cost_value
+            FROM stock_produits_entrepot spe
+            WHERE spe.warehouse_id = :warehouse_id
+        """), {"warehouse_id": warehouse_id}).fetchone()
         
-        # Nombre de produits
-        product_count = session.execute(text("""
-            SELECT COUNT(*) FROM stock_produits_entrepot 
-            WHERE warehouse_id = :warehouse_id
-        """), {"warehouse_id": warehouse_id}).scalar()
+        if result:
+            stats = {
+                'total_products': result[0] or 0,
+                'products_with_stock': result[1] or 0,
+                'out_of_stock': result[2] or 0,
+                'total_quantity': float(result[3] or 0),
+                'total_cost_value': float(result[4] or 0)  # Valeur d'achat
+            }
+        else:
+            stats = {
+                'total_products': 0,
+                'products_with_stock': 0,
+                'out_of_stock': 0,
+                'total_quantity': 0.0,
+                'total_cost_value': 0.0
+            }
         
-        # Produits avec stock
-        stocked_products = session.execute(text("""
-            SELECT COUNT(*) FROM stock_produits_entrepot 
-            WHERE warehouse_id = :warehouse_id AND quantity > 0
-        """), {"warehouse_id": warehouse_id}).scalar()
+        # Calculer la valeur de vente en joignant avec les produits boutique
+        sale_value_result = session.execute(text("""
+            SELECT COALESCE(SUM(spe.quantity * cp.price_unit), 0) as total_sale_value
+            FROM stock_produits_entrepot spe
+            JOIN core_products sp ON spe.product_id = cp.id
+            WHERE spe.warehouse_id = :warehouse_id
+        """), {"warehouse_id": warehouse_id}).fetchone()
         
-        # Valeur totale du stock
-        total_value = session.execute(text("""
-            SELECT COALESCE(SUM(total_cost), 0) FROM stock_produits_entrepot 
-            WHERE warehouse_id = :warehouse_id
-        """), {"warehouse_id": warehouse_id}).scalar()
+        stats['total_sale_value'] = float(sale_value_result[0] or 0) if sale_value_result else 0.0
         
-        # Produits en rupture
-        low_stock_products = session.execute(text("""
-            SELECT COUNT(*) FROM stock_produits_entrepot 
-            WHERE warehouse_id = :warehouse_id 
-            AND quantity <= min_stock_level AND min_stock_level > 0
-        """), {"warehouse_id": warehouse_id}).scalar()
+        return stats
+    
+    def get_warehouse_products_details(self, session: Session, warehouse_id: int) -> List[Dict[str, Any]]:
+        """Obtenir les détails des produits dans un entrepôt"""
+        result = session.execute(text("""
+            SELECT 
+                cp.name as product_name,
+                spe.quantity,
+                spe.reserved_quantity,
+                spe.unit_cost,
+                cp.price_unit,
+                (spe.quantity * spe.unit_cost) as cost_value,
+                (spe.quantity * cp.price_unit) as sale_value
+            FROM stock_produits_entrepot spe
+            JOIN core_products sp ON spe.product_id = cp.id
+            WHERE spe.warehouse_id = :warehouse_id
+            ORDER BY cp.name
+        """), {"warehouse_id": warehouse_id}).fetchall()
         
-        return {
-            'warehouse': warehouse,
-            'total_products': product_count or 0,
-            'stocked_products': stocked_products or 0,
-            'total_value': float(total_value or 0),
-            'low_stock_products': low_stock_products or 0
-        }
+        products = []
+        for row in result:
+            products.append({
+                'product_name': row[0],
+                'quantity': float(row[1] or 0),
+                'reserved_quantity': float(row[2] or 0),
+                'unit_cost': float(row[3] or 0),
+                'unit_price': float(row[4] or 0),
+                'cost_value': float(row[5] or 0),
+                'sale_value': float(row[6] or 0)
+            })
+        
+        return products
     
     def get_active_warehouses(self, session: Session) -> List[Dict[str, Any]]:
         """Récupérer uniquement les entrepôts actifs"""

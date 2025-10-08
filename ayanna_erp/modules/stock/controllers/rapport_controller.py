@@ -50,7 +50,7 @@ class RapportController:
                             sw.name as warehouse_name
                         FROM stock_produits_entrepot spe
                         JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                        LEFT JOIN shop_products p ON spe.product_id = p.id
+                        LEFT JOIN core_products p ON spe.product_id = p.id
                         WHERE spe.warehouse_id = :warehouse_id
                         AND sw.entreprise_id = :entreprise_id
                         ORDER BY spe.total_cost DESC
@@ -70,7 +70,7 @@ class RapportController:
                             SUM(spe.total_cost) as total_value
                         FROM stock_produits_entrepot spe
                         JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                        LEFT JOIN shop_products p ON spe.product_id = p.id
+                        LEFT JOIN core_products p ON spe.product_id = p.id
                         WHERE sw.entreprise_id = :entreprise_id
                         GROUP BY spe.product_id, p.name, p.code
                         ORDER BY total_value DESC

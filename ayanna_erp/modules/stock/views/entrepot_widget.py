@@ -104,10 +104,16 @@ class WarehouseFormDialog(QDialog):
         self.is_default_checkbox = QCheckBox("Définir comme entrepôt par défaut")
         self.is_default_checkbox.setToolTip("Les nouveaux produits seront automatiquement associés à cet entrepôt")
         
+        # Statut actif
+        self.is_active_checkbox = QCheckBox("Entrepôt actif")
+        self.is_active_checkbox.setChecked(True)  # Par défaut actif
+        self.is_active_checkbox.setToolTip("Décocher pour désactiver l'entrepôt sans le supprimer")
+        
         # Assemblage
         layout.addLayout(form_layout)
         layout.addWidget(contact_group)
         layout.addWidget(self.is_default_checkbox)
+        layout.addWidget(self.is_active_checkbox)
         layout.addSpacing(20)
         
         # Boutons
@@ -136,12 +142,16 @@ class WarehouseFormDialog(QDialog):
         self.address_edit.setPlainText(self.warehouse['address'] or "")
         
         if self.warehouse['capacity_limit']:
-            self.capacity_spinbox.setValue(self.warehouse['capacity_limit'])
+            try:
+                self.capacity_spinbox.setValue(int(self.warehouse['capacity_limit']))
+            except (ValueError, TypeError):
+                self.capacity_spinbox.setValue(0)
         
         self.contact_person_edit.setText(self.warehouse['contact_person'] or "")
         self.contact_phone_edit.setText(self.warehouse['contact_phone'] or "")
         self.contact_email_edit.setText(self.warehouse['contact_email'] or "")
         self.is_default_checkbox.setChecked(self.warehouse['is_default'] or False)
+        self.is_active_checkbox.setChecked(self.warehouse.get('is_active', True))
     
     def accept_if_valid(self):
         """Valider et accepter le formulaire"""
@@ -191,7 +201,8 @@ class WarehouseFormDialog(QDialog):
             "contact_person": self.contact_person_edit.text().strip() or None,
             "contact_phone": self.contact_phone_edit.text().strip() or None,
             "contact_email": self.contact_email_edit.text().strip() or None,
-            "is_default": self.is_default_checkbox.isChecked()
+            "is_default": self.is_default_checkbox.isChecked(),
+            "is_active": self.is_active_checkbox.isChecked()
         }
 
 
@@ -214,6 +225,7 @@ class EntrepotWidget(QWidget):
         self.current_warehouses = []
         
         self.setup_ui()
+        self.connect_signals()
         self.load_data()
     
     def get_entreprise_id_from_pos(self, pos_id):
@@ -259,24 +271,6 @@ class EntrepotWidget(QWidget):
         """)
         self.new_warehouse_btn.clicked.connect(self.create_new_warehouse)
         header_layout.addWidget(self.new_warehouse_btn)
-        
-        self.link_products_btn = QPushButton("🔗 Lier Produits")
-        self.link_products_btn.setToolTip("Associer tous les produits à tous les entrepôts")
-        self.link_products_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
-        self.link_products_btn.clicked.connect(self.link_all_products_to_warehouses)
-        header_layout.addWidget(self.link_products_btn)
         
         refresh_btn = QPushButton("🔄 Actualiser")
         refresh_btn.clicked.connect(self.load_data)
@@ -337,15 +331,17 @@ class EntrepotWidget(QWidget):
         search_layout.addWidget(self.search_input)
         left_layout.addLayout(search_layout)
         
-        # Tableau des entrepôts
+        # Tableau des entrepôts (colonnes simplifiées)
         self.warehouses_table = QTableWidget()
-        self.warehouses_table.setColumnCount(8)
+        self.warehouses_table.setColumnCount(4)
         self.warehouses_table.setHorizontalHeaderLabels([
-            "Code", "Nom", "Type", "Statut", "Défaut", "Capacité", "Stock Total", "Actions"
+            "Code", "Nom", "Stock Total Vente", "Stock Total Achat"
         ])
         self.warehouses_table.setAlternatingRowColors(True)
         self.warehouses_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.warehouses_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Désactiver l'édition directe
         self.warehouses_table.cellClicked.connect(self.on_warehouse_selected)
+        self.warehouses_table.cellDoubleClicked.connect(self.on_warehouse_double_clicked)  # Double-clic pour édition
         self.warehouses_table.horizontalHeader().setStretchLastSection(True)
         left_layout.addWidget(self.warehouses_table)
         
@@ -368,27 +364,6 @@ class EntrepotWidget(QWidget):
         self.capacity_progress.setVisible(False)
         capacity_layout.addWidget(self.capacity_progress)
         right_layout.addWidget(capacity_frame)
-        
-        # Actions rapides sur l'entrepôt sélectionné
-        actions_frame = QFrame()
-        actions_layout = QHBoxLayout(actions_frame)
-        
-        self.edit_warehouse_btn = QPushButton("✏️ Modifier")
-        self.edit_warehouse_btn.setEnabled(False)
-        self.edit_warehouse_btn.clicked.connect(self.edit_selected_warehouse)
-        actions_layout.addWidget(self.edit_warehouse_btn)
-        
-        self.toggle_status_btn = QPushButton("⏸️ Désactiver")
-        self.toggle_status_btn.setEnabled(False)
-        self.toggle_status_btn.clicked.connect(self.toggle_warehouse_status)
-        actions_layout.addWidget(self.toggle_status_btn)
-        
-        self.set_default_btn = QPushButton("⭐ Définir par défaut")
-        self.set_default_btn.setEnabled(False)
-        self.set_default_btn.clicked.connect(self.set_as_default_warehouse)
-        actions_layout.addWidget(self.set_default_btn)
-        
-        right_layout.addWidget(actions_frame)
         
         # Layout principal avec splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -428,38 +403,6 @@ class EntrepotWidget(QWidget):
         types_layout.addWidget(self.types_tree)
         
         layout.addWidget(types_group)
-        
-        # Configuration avancée
-        advanced_group = QGroupBox("Configuration Avancée")
-        advanced_layout = QVBoxLayout(advanced_group)
-        
-        # Boutons de configuration
-        config_buttons_layout = QHBoxLayout()
-        
-        auto_link_btn = QPushButton("🔗 Auto-liaison des produits")
-        auto_link_btn.setToolTip("Lier automatiquement tous les nouveaux produits à tous les entrepôts")
-        config_buttons_layout.addWidget(auto_link_btn)
-        
-        check_integrity_btn = QPushButton("🔍 Vérifier l'intégrité")
-        check_integrity_btn.setToolTip("Vérifier la cohérence des données d'entrepôt")
-        check_integrity_btn.clicked.connect(self.check_warehouse_integrity)
-        config_buttons_layout.addWidget(check_integrity_btn)
-        
-        optimize_btn = QPushButton("⚡ Optimiser")
-        optimize_btn.setToolTip("Optimiser la configuration des entrepôts")
-        config_buttons_layout.addWidget(optimize_btn)
-        
-        config_buttons_layout.addStretch()
-        advanced_layout.addLayout(config_buttons_layout)
-        
-        # Zone de résultats
-        self.config_results = QTextEdit()
-        self.config_results.setReadOnly(True)
-        self.config_results.setMaximumHeight(150)
-        self.config_results.setPlaceholderText("Les résultats des opérations de configuration apparaîtront ici...")
-        advanced_layout.addWidget(self.config_results)
-        
-        layout.addWidget(advanced_group)
         layout.addStretch()
         
         return widget
@@ -476,88 +419,68 @@ class EntrepotWidget(QWidget):
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des entrepôts:\n{str(e)}")
     
     def populate_warehouses_table(self):
-        """Peupler le tableau des entrepôts"""
+        """Peupler le tableau des entrepôts avec la structure simplifiée"""
         self.warehouses_table.setRowCount(len(self.current_warehouses))
         
         for row, warehouse in enumerate(self.current_warehouses):
             # Code
             self.warehouses_table.setItem(row, 0, QTableWidgetItem(warehouse['code']))
             
-            # Nom
+            # Nom (avec indicateur par défaut)
             name_item = QTableWidgetItem(warehouse['name'])
             if warehouse['is_default']:
                 name_item.setBackground(QColor("#E8F5E8"))
                 name_item.setText(f"⭐ {warehouse['name']}")
             self.warehouses_table.setItem(row, 1, name_item)
             
-            # Type
-            type_icons = {
-                'Principal': '🏢', 'Secondaire': '🏪', 'Transit': '🚚', 
-                'Retour': '↩️', 'Réparation': '🔧', 'Externe': '🌐', 
-                'Virtuel': '☁️', 'Autre': '📦'
-            }
-            type_text = f"{type_icons.get(warehouse['type'], '📦')} {warehouse['type']}"
-            self.warehouses_table.setItem(row, 2, QTableWidgetItem(type_text))
+            # Stock Total Vente (sera calculé)
+            self.warehouses_table.setItem(row, 2, QTableWidgetItem("Calcul..."))
             
-            # Statut
-            status_item = QTableWidgetItem("✅ Actif" if warehouse['is_active'] else "❌ Inactif")
-            status_item.setBackground(QColor("#27AE60" if warehouse['is_active'] else "#E74C3C"))
-            status_item.setForeground(QColor("white"))
-            self.warehouses_table.setItem(row, 3, status_item)
+            # Stock Total Achat (sera calculé)
+            self.warehouses_table.setItem(row, 3, QTableWidgetItem("Calcul..."))
             
-            # Par défaut
-            default_item = QTableWidgetItem("⭐ Oui" if warehouse['is_default'] else "")
-            self.warehouses_table.setItem(row, 4, default_item)
-            
-            # Capacité
-            capacity_text = f"{warehouse['capacity_limit']}" if warehouse['capacity_limit'] else "♾️ Illimitée"
-            self.warehouses_table.setItem(row, 5, QTableWidgetItem(capacity_text))
-            
-            # Stock Total (sera calculé plus tard)
-            self.warehouses_table.setItem(row, 6, QTableWidgetItem("Calcul..."))
-            
-            # Actions
-            actions_widget = QWidget()
-            actions_layout = QHBoxLayout(actions_widget)
-            actions_layout.setContentsMargins(5, 2, 5, 2)
-            
-            edit_btn = QPushButton("✏️")
-            edit_btn.setToolTip("Modifier l'entrepôt")
-            edit_btn.setMaximumWidth(30)
-            edit_btn.clicked.connect(lambda checked, w=warehouse: self.edit_warehouse(w))
-            actions_layout.addWidget(edit_btn)
-            
-            stats_btn = QPushButton("📊")
-            stats_btn.setToolTip("Voir les statistiques")
-            stats_btn.setMaximumWidth(30)
-            stats_btn.clicked.connect(lambda checked, w=warehouse: self.show_warehouse_stats(w))
-            actions_layout.addWidget(stats_btn)
-            
-            self.warehouses_table.setCellWidget(row, 7, actions_widget)
-            
-            # Calculer le stock total en arrière-plan
-            QTimer.singleShot(100 * row, lambda r=row, w=warehouse: self.update_stock_total(r, w))
+            # Calculer les valeurs en arrière-plan
+            QTimer.singleShot(100 * row, lambda r=row, w=warehouse: self.update_warehouse_values(r, w))
         
         # Ajuster les colonnes
         self.warehouses_table.resizeColumnsToContents()
     
-    def update_stock_total(self, row: int, warehouse):
-        """Mettre à jour le total du stock pour un entrepôt"""
+    def update_warehouse_values(self, row: int, warehouse):
+        """Mettre à jour les valeurs de stock pour un entrepôt"""
         try:
             with self.db_manager.get_session() as session:
-                stats = self.controller.get_warehouse_statistics(session, warehouse.id)
-                total_qty = stats['total_quantity']
-                total_value = stats['total_value']
+                stats = self.controller.get_warehouse_detailed_stats(session, warehouse['id'])
                 
-                stock_text = f"{total_qty:.0f} unités\n{total_value:.2f} €"
-                stock_item = QTableWidgetItem(stock_text)
-                stock_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-                self.warehouses_table.setItem(row, 6, stock_item)
+                # Stock Total Vente
+                sale_value_item = QTableWidgetItem(f"{stats['total_sale_value']:.2f} €")
+                sale_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.warehouses_table.setItem(row, 2, sale_value_item)
+                
+                # Stock Total Achat
+                cost_value_item = QTableWidgetItem(f"{stats['total_cost_value']:.2f} €")
+                cost_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.warehouses_table.setItem(row, 3, cost_value_item)
                 
         except Exception as e:
-            stock_item = QTableWidgetItem("Erreur")
-            self.warehouses_table.setItem(row, 6, stock_item)
+            # En cas d'erreur, afficher des valeurs par défaut
+            self.warehouses_table.setItem(row, 2, QTableWidgetItem("0.00 €"))
+            self.warehouses_table.setItem(row, 3, QTableWidgetItem("0.00 €"))
     
+    def on_warehouse_double_clicked(self, row: int, column: int):
+        """Gestionnaire de double-clic pour édition"""
+        if row < len(self.current_warehouses):
+            warehouse = self.current_warehouses[row]
+            self.edit_warehouse(warehouse)
+    
+    def update_stock_total(self, row: int, warehouse):
+        """Méthode dépréciée - utiliser update_warehouse_values"""
+        self.update_warehouse_values(row, warehouse)
+    
+    def connect_signals(self):
+        """Connecter tous les signaux"""
+        # Les signaux de base sont déjà connectés dans setup_ui
+        pass
+        
     def filter_warehouses(self):
         """Filtrer les entrepôts selon la recherche"""
         search_text = self.search_input.text().lower()
@@ -580,61 +503,43 @@ class EntrepotWidget(QWidget):
             warehouse = self.current_warehouses[row]
             self.show_warehouse_details(warehouse)
             self.warehouse_selected.emit(warehouse['id'])  # Utiliser dict au lieu d'attribut
-            
-            # Activer les boutons d'action
-            self.edit_warehouse_btn.setEnabled(True)
-            self.toggle_status_btn.setEnabled(True)
-            self.toggle_status_btn.setText("⏸️ Désactiver" if warehouse['is_active'] else "▶️ Activer")
-            self.set_default_btn.setEnabled(not warehouse['is_default'])
     
     def show_warehouse_details(self, warehouse):
         """Afficher les détails d'un entrepôt"""
         try:
-            with self.db_manager.get_session() as session:
-                stats = self.controller.get_warehouse_stats(session, warehouse['id'])  # Utiliser dict
-                
-                details_html = f"""
-                <h3>🏭 {warehouse['name']}</h3>
-                <p><b>Code:</b> {warehouse['code']}</p>
-                <p><b>Type:</b> {warehouse['type']}</p>
-                <p><b>Statut:</b> {"✅ Actif" if warehouse['is_active'] else "❌ Inactif"}</p>
-                <p><b>Par défaut:</b> {"⭐ Oui" if warehouse['is_default'] else "Non"}</p>
-                
-                <hr>
-                <h4>📊 Statistiques</h4>
-                <p><b>Total produits:</b> {stats['total_products']}</p>
-                <p><b>Produits en stock:</b> {stats['products_with_stock']}</p>
-                <p><b>Produits en rupture:</b> {stats['out_of_stock']}</p>
-                <p><b>Quantité totale:</b> {stats['total_quantity']:.2f}</p>
-                <p><b>Valeur totale:</b> {stats['total_value']:.2f} €</p>
-                
-                """
-                
-                if warehouse.description:
-                    details_html += f"<hr><h4>📝 Description</h4><p>{warehouse.description}</p>"
-                
-                if warehouse.address:
-                    details_html += f"<hr><h4>📍 Adresse</h4><p>{warehouse.address}</p>"
-                
-                if warehouse.contact_person or warehouse.contact_phone or warehouse.contact_email:
-                    details_html += "<hr><h4>👤 Contact</h4>"
-                    if warehouse.contact_person:
-                        details_html += f"<p><b>Responsable:</b> {warehouse.contact_person}</p>"
-                    if warehouse.contact_phone:
-                        details_html += f"<p><b>Téléphone:</b> {warehouse.contact_phone}</p>"
-                    if warehouse.contact_email:
-                        details_html += f"<p><b>Email:</b> {warehouse.contact_email}</p>"
-                
-                self.details_scroll_area.setHtml(details_html)
-                
-                # Mise à jour de la barre de capacité
-                if warehouse.capacity_limit and stats['capacity_used_percentage'] is not None:
-                    self.capacity_progress.setVisible(True)
-                    self.capacity_progress.setValue(int(stats['capacity_used_percentage']))
-                    self.capacity_progress.setFormat(f"{stats['capacity_used_percentage']:.1f}% utilisé")
-                else:
-                    self.capacity_progress.setVisible(False)
-                
+            # Affichage simplifié selon les colonnes de stock_warehouse
+            details_html = f"""
+            <h3>🏭 {warehouse['name']}</h3>
+            <p><b>Code:</b> {warehouse['code']}</p>
+            <p><b>Type:</b> {warehouse['type']}</p>
+            <p><b>Statut:</b> {"✅ Actif" if warehouse['is_active'] else "❌ Inactif"}</p>
+            <p><b>Par défaut:</b> {"⭐ Oui" if warehouse['is_default'] else "Non"}</p>
+            """
+            
+            # Informations optionnelles
+            if warehouse.get('description'):
+                details_html += f"<hr><h4>📝 Description</h4><p>{warehouse['description']}</p>"
+            
+            if warehouse.get('address'):
+                details_html += f"<hr><h4>📍 Adresse</h4><p>{warehouse['address']}</p>"
+            
+            if warehouse.get('contact_person') or warehouse.get('contact_phone') or warehouse.get('contact_email'):
+                details_html += "<hr><h4>👤 Contact</h4>"
+                if warehouse.get('contact_person'):
+                    details_html += f"<p><b>Responsable:</b> {warehouse['contact_person']}</p>"
+                if warehouse.get('contact_phone'):
+                    details_html += f"<p><b>Téléphone:</b> {warehouse['contact_phone']}</p>"
+                if warehouse.get('contact_email'):
+                    details_html += f"<p><b>Email:</b> {warehouse['contact_email']}</p>"
+            
+            if warehouse.get('capacity_limit'):
+                details_html += f"<hr><h4>📦 Capacité</h4><p><b>Limite:</b> {warehouse['capacity_limit']}</p>"
+            
+            if warehouse.get('created_at'):
+                details_html += f"<hr><h4>📅 Informations</h4><p><b>Créé le:</b> {warehouse['created_at']}</p>"
+            
+            self.details_scroll_area.setHtml(details_html)
+            
         except Exception as e:
             self.details_scroll_area.setPlainText(f"Erreur lors du chargement des détails:\n{str(e)}")
     
@@ -723,63 +628,6 @@ class EntrepotWidget(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la mise à jour de l'entrepôt:\n{str(e)}")
     
-    def edit_selected_warehouse(self):
-        """Modifier l'entrepôt sélectionné"""
-        selected_rows = self.warehouses_table.selectionModel().selectedRows()
-        if selected_rows:
-            row = selected_rows[0].row()
-            if row < len(self.current_warehouses):
-                self.edit_warehouse(self.current_warehouses[row])
-    
-    def toggle_warehouse_status(self):
-        """Activer/désactiver l'entrepôt sélectionné"""
-        selected_rows = self.warehouses_table.selectionModel().selectedRows()
-        if selected_rows:
-            row = selected_rows[0].row()
-            if row < len(self.current_warehouses):
-                warehouse = self.current_warehouses[row]
-                
-                try:
-                    with self.db_manager.get_session() as session:
-                        updated_warehouse = self.controller.toggle_warehouse_status(session, warehouse.id)
-                        session.commit()
-                        
-                        status = "activé" if updated_warehouse['is_active'] else "désactivé"
-                        QMessageBox.information(
-                            self, "Succès", 
-                            f"L'entrepôt '{updated_warehouse['name']}' a été {status}."
-                        )
-                        
-                        self.load_data()
-                        self.warehouse_updated.emit()
-                        
-                except Exception as e:
-                    QMessageBox.critical(self, "Erreur", f"Erreur lors du changement de statut:\n{str(e)}")
-    
-    def set_as_default_warehouse(self):
-        """Définir l'entrepôt sélectionné comme défaut"""
-        selected_rows = self.warehouses_table.selectionModel().selectedRows()
-        if selected_rows:
-            row = selected_rows[0].row()
-            if row < len(self.current_warehouses):
-                warehouse = self.current_warehouses[row]
-                
-                try:
-                    with self.db_manager.get_session() as session:
-                        updated_warehouse = self.controller.set_default_warehouse(session, warehouse.id)
-                        session.commit()
-                        
-                        QMessageBox.information(
-                            self, "Succès", 
-                            f"L'entrepôt '{updated_warehouse['name']}' est maintenant l'entrepôt par défaut."
-                        )
-                        
-                        self.load_data()
-                        self.warehouse_updated.emit()
-                        
-                except Exception as e:
-                    QMessageBox.critical(self, "Erreur", f"Erreur lors de la définition par défaut:\n{str(e)}")
-    
     def show_warehouse_stats(self, warehouse):
         """Afficher les statistiques détaillées d'un entrepôt"""
         try:
@@ -841,54 +689,3 @@ Statistiques détaillées pour: {warehouse['name']}
                     
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la liaison:\n{str(e)}")
-    
-    def check_warehouse_integrity(self):
-        """Vérifier l'intégrité des données d'entrepôt"""
-        self.config_results.clear()
-        self.config_results.append("🔍 Vérification de l'intégrité en cours...\n")
-        
-        try:
-            with self.db_manager.get_session() as session:
-                warehouses = self.controller.get_all_warehouses(session)
-                
-                issues = []
-                warnings = []
-                
-                # Vérifications
-                default_count = sum(1 for w in warehouses if w.is_default)
-                if default_count == 0:
-                    issues.append("❌ Aucun entrepôt défini par défaut")
-                elif default_count > 1:
-                    issues.append(f"❌ Plusieurs entrepôts définis par défaut ({default_count})")
-                
-                active_count = sum(1 for w in warehouses if w['is_active'])
-                if active_count == 0:
-                    issues.append("❌ Aucun entrepôt actif")
-                
-                # Codes dupliqués
-                codes = [w.code for w in warehouses]
-                duplicates = set([code for code in codes if codes.count(code) > 1])
-                if duplicates:
-                    issues.append(f"❌ Codes dupliqués: {', '.join(duplicates)}")
-                
-                # Avertissements
-                if len(warehouses) == 1:
-                    warnings.append("⚠️ Un seul entrepôt configuré - Considérer la création d'entrepôts multiples")
-                
-                # Affichage des résultats
-                if not issues and not warnings:
-                    self.config_results.append("✅ Aucun problème détecté - Configuration correcte!")
-                else:
-                    if issues:
-                        self.config_results.append("🚨 PROBLÈMES DÉTECTÉS:")
-                        for issue in issues:
-                            self.config_results.append(f"  {issue}")
-                        self.config_results.append("")
-                    
-                    if warnings:
-                        self.config_results.append("⚠️ AVERTISSEMENTS:")
-                        for warning in warnings:
-                            self.config_results.append(f"  {warning}")
-                
-        except Exception as e:
-            self.config_results.append(f"❌ Erreur lors de la vérification: {str(e)}")

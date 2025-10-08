@@ -90,7 +90,7 @@ class TransfertController:
                         sw.name as warehouse_name
                     FROM stock_produits_entrepot spe
                     JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                    LEFT JOIN shop_products p ON spe.product_id = p.id
+                    LEFT JOIN core_products p ON spe.product_id = p.id
                     WHERE spe.warehouse_id = :warehouse_id
                     AND sw.entreprise_id = :entreprise_id
                     AND spe.quantity > COALESCE(spe.reserved_quantity, 0)

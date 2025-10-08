@@ -47,7 +47,7 @@ class AlerteController:
                         (spe.quantity - COALESCE(spe.reserved_quantity, 0)) as available_quantity
                     FROM stock_produits_entrepot spe
                     JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                    LEFT JOIN shop_products p ON spe.product_id = p.id
+                    LEFT JOIN core_products p ON spe.product_id = p.id
                     WHERE sw.entreprise_id = :entreprise_id
                     AND spe.min_stock_level > 0
                     AND (spe.quantity - COALESCE(spe.reserved_quantity, 0)) <= spe.min_stock_level
@@ -120,7 +120,7 @@ class AlerteController:
                         sw.id as warehouse_id
                     FROM stock_produits_entrepot spe
                     JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                    LEFT JOIN shop_products p ON spe.product_id = p.id
+                    LEFT JOIN core_products p ON spe.product_id = p.id
                     WHERE sw.entreprise_id = :entreprise_id
                     AND spe.min_stock_level > 0
                     AND spe.quantity > (spe.min_stock_level * :threshold)

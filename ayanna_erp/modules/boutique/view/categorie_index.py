@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ..model.models import ShopCategory
+from ayanna_erp.modules.core.models import CoreProductCategory
 
 
 class CategorieIndex(QWidget):
@@ -25,6 +25,7 @@ class CategorieIndex(QWidget):
     def __init__(self, pos_id, current_user):
         super().__init__()
         from ayanna_erp.modules.boutique.controller.categorie_controller import CategorieController
+        from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
         self.categorie_controller = CategorieController(pos_id)
         self.current_user = current_user
         self.db_manager = DatabaseManager()
@@ -120,7 +121,7 @@ class CategorieIndex(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des catégories: {str(e)}")
     
-    def populate_categories_table(self, categories: List[ShopCategory]):
+    def populate_categories_table(self, categories: List[CoreProductCategory]):
         """Peupler le tableau des catégories"""
         self.categories_table.setRowCount(len(categories))
 
@@ -226,7 +227,7 @@ class CategorieIndex(QWidget):
             
             self.categories_table.setCellWidget(row, 5, actions_widget)
     
-    def update_statistics(self, categories: List[ShopCategory]):
+    def update_statistics(self, categories: List[CoreProductCategory]):
         """Mettre à jour les statistiques affichées"""
         total = len(categories)
         active = sum(1 for c in categories if c.is_active)

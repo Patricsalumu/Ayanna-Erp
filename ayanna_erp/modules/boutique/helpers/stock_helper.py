@@ -217,14 +217,14 @@ class BoutiqueStockHelper:
         if not warehouse_id:
             return []
         
-        # Jointure entre StockProduitEntrepot et ShopProduct pour avoir les infos produit
-        from ayanna_erp.modules.boutique.model.models import ShopProduct
+        # Jointure entre StockProduitEntrepot et CoreProduct pour avoir les infos produit
+        from ayanna_erp.modules.core.models import CoreProduct
         
-        query = session.query(StockProduitEntrepot, ShopProduct).join(
-            ShopProduct, StockProduitEntrepot.product_id == ShopProduct.id
+        query = session.query(StockProduitEntrepot, CoreProduct).join(
+            CoreProduct, StockProduitEntrepot.product_id == CoreProduct.id
         ).filter(
             StockProduitEntrepot.warehouse_id == warehouse_id,
-            ShopProduct.is_active == True
+            CoreProduct.is_active == True
         ).all()
         
         result = []
@@ -251,10 +251,10 @@ class BoutiqueStockHelper:
         if not warehouse_id:
             return []
         
-        from ayanna_erp.modules.boutique.model.models import ShopProduct
+        from ayanna_erp.modules.core.models import CoreProduct
         
         # Récupérer tous les produits actifs
-        products = session.query(ShopProduct).filter(ShopProduct.is_active == True).all()
+        products = session.query(CoreProduct).filter(CoreProduct.is_active == True).all()
         
         result = []
         for product in products:

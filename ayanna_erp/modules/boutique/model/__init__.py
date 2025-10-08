@@ -1,11 +1,10 @@
+
 """
 Module model pour la boutique
 """
 
 from .models import (
     ShopClient,
-    ShopCategory,
-    ShopProduct,
     ShopService,
     ShopPanier,
     ShopPanierProduct,
@@ -15,15 +14,19 @@ from .models import (
     ShopComptesConfig
 )
 
+# Import direct des modèles centralisés pour éviter les conflits SQLAlchemy
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+
 __all__ = [
     'ShopClient',
-    'ShopCategory',
-    'ShopProduct',
     'ShopService',
     'ShopPanier',
     'ShopPanierProduct', 
     'ShopPanierService',
     'ShopPayment',
     'ShopExpense',
-    'ShopComptesConfig'
+    'ShopComptesConfig',
+    # Modèles centralisés
+    'CoreProduct',
+    'CoreProductCategory'
 ]

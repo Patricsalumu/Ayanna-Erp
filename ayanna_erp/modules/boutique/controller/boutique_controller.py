@@ -9,8 +9,9 @@ from sqlalchemy.orm import Session
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ..model.models import (
-    ShopClient, ShopCategory, ShopProduct, ShopService,
+    ShopClient, ShopService,
     ShopPanier, ShopPanierProduct, ShopPanierService,
     ShopPayment, ShopExpense, ShopComptesConfig
 )
@@ -42,7 +43,7 @@ class BoutiqueController(QObject):
         try:
             # Essayer de compter les catégories pour vérifier si les tables existent
             try:
-                categories_count = session.query(ShopCategory).count()
+                categories_count = session.query(CoreProductCategory).count()
                 needs_initialization = (categories_count == 0)
             except Exception:
                 # Les tables n'existent pas encore
@@ -72,17 +73,17 @@ class BoutiqueController(QObject):
         
     # =================== GESTION DES CATÉGORIES ===================
     
-    def get_categories(self, session: Session) -> List[ShopCategory]:
+    def get_categories(self, session: Session) -> List[CoreProductCategory]:
         """Récupère toutes les catégories actives."""
         # Assurer l'initialisation du module au premier accès
         if not self._ensure_initialized(session):
             return []
             
-        return session.query(ShopCategory).filter(ShopCategory.is_active == True).order_by(ShopCategory.name).all()
+        return session.query(CoreProductCategory).filter(CoreProductCategory.is_active == True).order_by(CoreProductCategory.name).all()
     
-    def create_category(self, session: Session, nom: str, description: str = None) -> ShopCategory:
+    def create_category(self, session: Session, nom: str, description: str = None) -> CoreProductCategory:
         """Crée une nouvelle catégorie."""
-        category = ShopCategory(
+        category = CoreProductCategory(
             pos_id=self.pos_id,  # Ajouter le pos_id manquant
             name=nom,
             description=description,
@@ -94,9 +95,9 @@ class BoutiqueController(QObject):
         return category
     
     def update_category(self, session: Session, category_id: int, nom: str = None, 
-                       description: str = None, is_active: bool = None) -> ShopCategory:
+                       description: str = None, is_active: bool = None) -> CoreProductCategory:
         """Met à jour une catégorie."""
-        category = session.query(ShopCategory).filter(ShopCategory.id == category_id).first()
+        category = session.query(CoreProductCategory).filter(CoreProductCategory.id == category_id).first()
         if not category:
             raise ValueError(f"Catégorie avec l'ID {category_id} introuvable")
         
@@ -114,43 +115,43 @@ class BoutiqueController(QObject):
     # =================== GESTION DES PRODUITS ===================
     
     def get_products(self, session: Session, category_id: Optional[int] = None, 
-                    search_term: str = None, active_only: bool = True) -> List[ShopProduct]:
+                    search_term: str = None, active_only: bool = True) -> List[CoreProduct]:
         """Récupère les produits avec filtres optionnels."""
         # Assurer l'initialisation du module au premier accès
         if not self._ensure_initialized(session):
             return []
             
-        query = session.query(ShopProduct)
+        query = session.query(CoreProduct)
         
         if active_only:
-            query = query.filter(ShopProduct.is_active == True)
+            query = query.filter(CoreProduct.is_active == True)
         
         if category_id:
-            query = query.filter(ShopProduct.category_id == category_id)
+            query = query.filter(CoreProduct.category_id == category_id)
         
         if search_term:
             search_pattern = f"%{search_term}%"
             query = query.filter(
-                (ShopProduct.name.ilike(search_pattern)) |
-                (ShopProduct.description.ilike(search_pattern))
+                (CoreProduct.name.ilike(search_pattern)) |
+                (CoreProduct.description.ilike(search_pattern))
             )
         
-        return query.order_by(ShopProduct.name).all()
+        return query.order_by(CoreProduct.name).all()
     
-    def get_product_by_id(self, session: Session, product_id: int) -> Optional[ShopProduct]:
+    def get_product_by_id(self, session: Session, product_id: int) -> Optional[CoreProduct]:
         """Récupère un produit par son ID."""
-        return session.query(ShopProduct).filter(ShopProduct.id == product_id).first()
+        return session.query(CoreProduct).filter(CoreProduct.id == product_id).first()
     
     def create_product(self, session: Session, nom: str, prix: Decimal, category_id: int,
                       description: str = None, unit: str = "unité", 
-                      stock_initial: int = 0) -> ShopProduct:
+                      stock_initial: int = 0) -> CoreProduct:
         """Crée un nouveau produit avec stock initial."""
         # Vérifier que la catégorie existe
-        category = session.query(ShopCategory).filter(ShopCategory.id == category_id).first()
+        category = session.query(CoreProductCategory).filter(CoreProductCategory.id == category_id).first()
         if not category:
             raise ValueError(f"Catégorie avec l'ID {category_id} introuvable")
         
-        product = ShopProduct(
+        product = CoreProduct(
             pos_id=self.pos_id,  # Ajouter le pos_id manquant
             name=nom,
             description=description,

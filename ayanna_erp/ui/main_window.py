@@ -443,6 +443,73 @@ class MainWindow(QMainWindow):
         finally:
             session.close()
 
+    def ensure_salle_fete_module_registered(self):
+        """S'assurer que le module Salle de Fête est enregistré dans la base de données"""
+        try:
+            session = self.db_manager.get_session()
+            
+            # Vérifier si le module Salle de Fête existe déjà
+            existing_module = session.query(Module).filter(Module.name == "SalleFete").first()
+            
+            if not existing_module:
+                # Afficher un message de progression
+                progress = QProgressDialog("Initialisation du module Salle de Fête...", None, 0, 100, self)
+                progress.setWindowTitle("Première utilisation")
+                progress.setWindowModality(Qt.WindowModality.WindowModal)
+                progress.setMinimumDuration(0)
+                progress.setValue(10)
+                QApplication.processEvents()
+                
+                print("🚀 Enregistrement du module Salle de Fête...")
+                
+                # Initialiser les données par défaut de la salle de fête
+                try:
+                    from ayanna_erp.modules.salle_fete.init_salle_fete_data import initialize_salle_fete_data
+                    initialize_salle_fete_data()
+                    
+                    progress.setValue(90)
+                    progress.setLabelText("Finalisation...")
+                    QApplication.processEvents()
+                    
+                    print("✅ Données par défaut de la salle de fête initialisées!")
+                    
+                    # Afficher un message de succès
+                    progress.setValue(100)
+                    QApplication.processEvents()
+                    
+                    QTimer.singleShot(500, progress.close)
+                    
+                    QMessageBox.information(
+                        self,
+                        "Module Salle de Fête Initialisé",
+                        "🎉 Le module Salle de Fête a été configuré avec succès!\n\n"
+                        "Fonctionnalités disponibles :\n"
+                        "• 📂 6 catégories d'équipements\n"
+                        "• 📦 6 produits événementiels\n" 
+                        "• 🔧 3 services\n"
+                        "• 👥 2 clients de test\n\n"
+                        "L'interface va maintenant s'ouvrir..."
+                    )
+                    
+                except Exception as init_error:
+                    progress.close()
+                    print(f"⚠️ Erreur lors de l'initialisation des données: {init_error}")
+                    QMessageBox.warning(
+                        self,
+                        "Avertissement",
+                        f"Le module a été enregistré mais l'initialisation des données a échoué:\n{str(init_error)}\n\nVous pourrez créer vos données manuellement."
+                    )
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'enregistrement du module Salle de Fête: {e}")
+            QMessageBox.critical(
+                self,
+                "Erreur d'Initialisation",
+                f"Impossible d'initialiser le module Salle de Fête:\n{str(e)}"
+            )
+        finally:
+            session.close()
+
     def open_module(self, module_name):
         """Ouvrir un module spécifique"""
         try:
@@ -456,6 +523,9 @@ class MainWindow(QMainWindow):
             
             # Importer et ouvrir le module approprié
             if module_name == "SalleFete":
+                # Enregistrer le module s'il n'existe pas déjà
+                self.ensure_salle_fete_module_registered()
+                
                 from ..modules.salle_fete.view.salle_fete_window import SalleFeteWindow
                 # Récupérer le pos_id correct pour cette entreprise et ce module
                 pos_id = self.db_manager.get_pos_id_for_enterprise_module(

@@ -10,20 +10,21 @@ from ayanna_erp.modules.boutique.controller.panier_coontroller import PanierCont
 
 class NouveauPanierDialog(QDialog):
     def get_filtered_products(self):
-        from ayanna_erp.modules.boutique.model.models import ShopProduct, ShopCategory, ShopService
+        from ayanna_erp.modules.boutique.model.models import ShopService
+        from ayanna_erp.modules.core.models.core_products import CoreProduct, CoreProductCategory
         session = self.panier_controller.db_manager.get_session()
         pos_id = getattr(self.current_user, 'pos_id', 1)
         search_text = self.search_input.text().strip().lower()
         selected_cat = self.category_combo.currentText()
         # Si Produits sélectionné
         if hasattr(self, 'products_radio') and self.products_radio.isChecked():
-            query = session.query(ShopProduct).filter(ShopProduct.pos_id == pos_id)
+            query = session.query(CoreProduct).filter(CoreProduct.entreprise_id == pos_id)
             if search_text:
-                query = query.filter(ShopProduct.name.ilike(f'%{search_text}%'))
+                query = query.filter(CoreProduct.name.ilike(f'%{search_text}%'))
             if selected_cat and selected_cat != "Toutes":
-                cat_obj = session.query(ShopCategory).filter(ShopCategory.name == selected_cat).first()
+                cat_obj = session.query(CoreProductCategory).filter(CoreProductCategory.name == selected_cat).first()
                 if cat_obj:
-                    query = query.filter(ShopProduct.category_id == cat_obj.id)
+                    query = query.filter(CoreProduct.category_id == cat_obj.id)
             return query.all()
         # Si Services sélectionné
         elif hasattr(self, 'services_radio') and self.services_radio.isChecked():
@@ -33,6 +34,7 @@ class NouveauPanierDialog(QDialog):
             # Pas de filtre catégorie pour les services
             return query.all()
         return []
+        
     def __init__(self, parent=None, boutique_controller=None, current_user=None):
         super().__init__(parent)
         self.setWindowTitle("Nouveau panier de vente")
@@ -107,10 +109,10 @@ class NouveauPanierDialog(QDialog):
         self.category_combo = QComboBox()
         filter_layout.addWidget(self.category_combo)
         # Initialisation des catégories APRÈS la création du QComboBox
-        from ayanna_erp.modules.boutique.model.models import ShopCategory
+        from ayanna_erp.modules.core.models.core_products import CoreProductCategory
         session = self.panier_controller.db_manager.get_session()
         pos_id = getattr(self.current_user, 'pos_id', 1)
-        categories = session.query(ShopCategory).filter(ShopCategory.pos_id == pos_id).all()
+        categories = session.query(CoreProductCategory).filter(CoreProductCategory.entreprise_id == 1).all()
         self.category_combo.addItem("Toutes")
         for cat in categories:
             if cat.name:
@@ -229,7 +231,7 @@ class NouveauPanierDialog(QDialog):
                 name_lbl.setWordWrap(True)
                 name_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 vbox.addWidget(name_lbl)
-                # Prix : ShopProduct.price_unit ou ShopService.price
+                # Prix : CoreProduct.price_unit ou ShopService.price
                 price = getattr(item, "price_unit", None)
                 if price is None:
                     price = getattr(item, "price", 0)
@@ -289,9 +291,9 @@ class NouveauPanierDialog(QDialog):
 
     def handle_card_click(self, product_id):
         """Quand on clique sur une card, proposer la quantité ou incrémenter"""
-        from ayanna_erp.modules.boutique.model.models import ShopProduct
+        from ayanna_erp.modules.core.models import CoreProduct
         session = self.panier_controller.db_manager.get_session()
-        product = session.query(ShopProduct).get(product_id)
+        product = session.query(CoreProduct).get(product_id)
 
         if not product:
             return
@@ -498,8 +500,8 @@ class NouveauPanierDialog(QDialog):
                 # Récupérer le nom du produit
                 product_name = ""
                 if hasattr(panier_product, "product_id"):
-                    from ayanna_erp.modules.boutique.model.models import ShopProduct
-                    prod = session.get(ShopProduct, panier_product.product_id)
+                    from ayanna_erp.modules.core.models import CoreProduct
+                    prod = session.get(CoreProduct, panier_product.product_id)
                     product_name = prod.name if prod and hasattr(prod, "name") else str(panier_product.product_id)
                 else:
                     product_name = str(panier_product.product_id)

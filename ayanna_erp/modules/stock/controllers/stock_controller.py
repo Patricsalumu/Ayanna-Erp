@@ -36,7 +36,7 @@ class StockController:
                     sw.code as warehouse_code
                 FROM stock_produits_entrepot spe
                 JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                LEFT JOIN shop_products p ON spe.product_id = p.id
+                LEFT JOIN core_products p ON spe.product_id = p.id
                 WHERE spe.warehouse_id = :warehouse_id
                 AND sw.entreprise_id = :entreprise_id
                 ORDER BY spe.quantity DESC
@@ -56,7 +56,7 @@ class StockController:
                     COUNT(DISTINCT spe.warehouse_id) as warehouse_count
                 FROM stock_produits_entrepot spe
                 JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-                LEFT JOIN shop_products p ON spe.product_id = p.id
+                LEFT JOIN core_products p ON spe.product_id = p.id
                 WHERE sw.entreprise_id = :entreprise_id
                 GROUP BY spe.product_id, p.name, p.code
                 ORDER BY total_quantity DESC
@@ -177,7 +177,7 @@ class StockController:
                 p.code as product_code
             FROM stock_warehouses sw
             LEFT JOIN stock_produits_entrepot spe ON sw.id = spe.warehouse_id AND spe.product_id = :product_id
-            LEFT JOIN shop_products p ON spe.product_id = p.id
+            LEFT JOIN core_products p ON spe.product_id = p.id
             WHERE sw.entreprise_id = :entreprise_id AND sw.is_active = 1
             ORDER BY sw.is_default DESC, sw.name
         """), {"product_id": product_id, "entreprise_id": self.entreprise_id})
