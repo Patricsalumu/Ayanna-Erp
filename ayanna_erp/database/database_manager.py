@@ -55,17 +55,6 @@ except ImportError:
     # Les modèles achats ne sont pas encore disponibles
     pass
 
-# Import des modèles salle de fête pour qu'ils soient inclus dans Base.metadata
-try:
-    from ayanna_erp.modules.salle_fete.model.salle_fete import (
-        EventClient, EventService, EventReservation, EventReservationService,
-        EventReservationProduct, EventPayment, EventStockMovement, EventExpense
-    )
-    print("✅ Import des modèles salle de fête réussi dans database_manager.py")
-except ImportError as e:
-    print(f"ATTENTION Import des modeles salle de fete echoue: {e}")
-except Exception as e:
-    print(f"❌ Erreur inattendue lors de l'import salle de fête: {e}")
 
 
 class DatabaseManager:
@@ -184,7 +173,6 @@ class DatabaseManager:
             
         except Exception as e:
             session.rollback()
-            print(f"Erreur lors de l'insertion des données par défaut: {e}")
         finally:
             session.close()
     
@@ -228,7 +216,6 @@ class DatabaseManager:
             self._create_default_warehouses_for_enterprise(session, enterprise_id)
             
         except Exception as e:
-            print(f"❌ Erreur lors de la création des POS: {e}")
             raise
     
     def _create_default_warehouses_for_enterprise(self, session, enterprise_id):
@@ -273,9 +260,7 @@ class DatabaseManager:
                 )
                 session.add(pos_warehouse)
                 
-                print(f"✅ Entrepôts créés pour {pos.name} (Module: {module.name}):")
-                print(f"   • Entrepôt Principal: {main_warehouse.name}")
-                print(f"   • Entrepôt POS: {pos_warehouse.name}")
+   
             
             # Afficher les modules qui n'ont pas d'entrepôts
             all_pos_points = session.query(POSPoint).join(Module).filter(
@@ -285,12 +270,11 @@ class DatabaseManager:
             for pos in all_pos_points:
                 module = session.query(Module).filter_by(id=pos.module_id).first()
                 if module.name not in modules_with_warehouses:
-                    print(f"ℹ️  Aucun entrepôt créé pour {pos.name} (Module: {module.name}) - non requis")
+                    pass
             
             session.flush()  # S'assurer que les entrepôts sont persistés
             
         except Exception as e:
-            print(f"❌ Erreur lors de la création des entrepôts par défaut: {e}")
             raise
     
     def _insert_default_accounting_data(self, session, enterprise_id):

@@ -185,7 +185,7 @@ class LoginWindow(QWidget):
     
     def setup_footer(self, layout):
         """Configuration du pied de page"""
-        footer_label = QLabel("© 2024 Ayanna Solutions - Tous droits réservés")
+        footer_label = QLabel("© 2018 Congo Mémoire - Tous droits réservés")
         footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer_label.setStyleSheet("""
             color: #BDC3C7;

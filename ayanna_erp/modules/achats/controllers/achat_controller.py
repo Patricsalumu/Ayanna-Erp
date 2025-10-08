@@ -1,8 +1,3 @@
-"""
-Contrôleur principal pour le module Achats
-Gestion des fournisseurs, commandes, paiements et intégration stock
-"""
-
 from decimal import Decimal
 from datetime import datetime
 from typing import List, Optional, Dict, Any
@@ -96,16 +91,6 @@ class AchatController:
     def create_commande(self, session: Session, entrepot_id: int, 
                        fournisseur_id: int = None, lignes: List[Dict] = None,
                        remise_global: Decimal = Decimal('0')) -> AchatCommande:
-        """
-        Crée une nouvelle commande d'achat
-        
-        Args:
-            session: Session SQLAlchemy
-            entrepot_id: ID de l'entrepôt de destination
-            fournisseur_id: ID du fournisseur (optionnel)
-            lignes: Liste des lignes de commande [{produit_id, quantite, prix_unitaire, remise_ligne}]
-            remise_global: Remise globale sur la commande
-        """
         # Vérifier que l'entrepôt existe
         entrepot = session.query(StockWarehouse).get(entrepot_id)
         if not entrepot:
@@ -272,19 +257,6 @@ class AchatController:
     
     def process_paiement_commande(self, session: Session, commande_id: int,
                                  montant: Decimal, mode_paiement: str, reference: str = None) -> bool:
-        """
-        Traite le paiement d'une commande
-        
-        Args:
-            session: Session SQLAlchemy
-            commande_id: ID de la commande à payer
-            montant: Montant du paiement
-            mode_paiement: Mode de paiement (Espèces, Chèque, etc.)
-            reference: Référence du paiement
-        
-        Returns:
-            bool: True si le paiement a réussi
-        """
         try:
             commande = session.query(AchatCommande).get(commande_id)
             if not commande:

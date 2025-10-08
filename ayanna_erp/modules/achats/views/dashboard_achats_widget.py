@@ -164,40 +164,6 @@ class DashboardAchatsWidget(QWidget):
         tables_layout.addWidget(suppliers_group, 1)
         
         content_layout.addLayout(tables_layout)
-        
-        # Boutons d'action rapide
-        actions_group = QGroupBox("Actions Rapides")
-        actions_layout = QHBoxLayout(actions_group)
-        
-        new_order_btn = QPushButton("➕ Nouvelle Commande")
-        new_order_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27AE60;
-                color: white;
-                border: none;
-                padding: 12px 24px;
-                border-radius: 6px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #219A52;
-            }
-        """)
-        
-        refresh_btn = QPushButton("🔄 Actualiser")
-        refresh_btn.clicked.connect(self.refresh_data)
-        
-        export_btn = QPushButton("📊 Exporter Rapport")
-        
-        actions_layout.addWidget(new_order_btn)
-        actions_layout.addWidget(refresh_btn)
-        actions_layout.addWidget(export_btn)
-        actions_layout.addStretch()
-        
-        content_layout.addWidget(actions_group)
-        
-        # Espacement final
-        content_layout.addStretch()
     
     def refresh_data(self):
         """Actualise toutes les données du dashboard"""
