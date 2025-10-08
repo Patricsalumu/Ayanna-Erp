@@ -92,6 +92,8 @@ class AchatCommandeLigne(Base):
     
     # Relations
     commande = relationship("AchatCommande", back_populates="lignes")
+    # Relation vers le produit (référence string pour éviter imports circulaires)
+    product = relationship("CoreProduct", foreign_keys=[produit_id])
     
     def __repr__(self):
         return f"<AchatCommandeLigne(id={self.id}, produit_id={self.produit_id}, quantite={self.quantite})>"
@@ -109,11 +111,10 @@ class AchatDepense(Base):
     
     # Références
     bon_commande_id = Column(Integer, ForeignKey('achat_commandes.id'), nullable=False)
-    compte_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=False)  # Compte financier utilisé
-    utilisateur_id = Column(Integer, ForeignKey('core_users.id'), nullable=False)
     
     # Détails paiement
     montant = Column(DECIMAL(12, 2), nullable=False)
+    mode_paiement = Column(String(50), nullable=True)  # Espèces, Chèque, Virement, etc.
     date_paiement = Column(DateTime, default=func.now())
     reference = Column(String(100), nullable=True)
     
@@ -121,7 +122,7 @@ class AchatDepense(Base):
     commande = relationship("AchatCommande", back_populates="depenses")
     
     def __repr__(self):
-        return f"<AchatDepense(id={self.id}, montant={self.montant}, date_paiement={self.date_paiement})>"
+        return f"<AchatDepense(id={self.id}, montant={self.montant}, mode_paiement={self.mode_paiement})>"
 
 
 __all__ = [

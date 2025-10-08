@@ -271,54 +271,74 @@ class AchatController:
             return False
     
     def process_paiement_commande(self, session: Session, commande_id: int,
-                                 compte_id: int, reference: str = None) -> AchatDepense:
+                                 montant: Decimal, mode_paiement: str, reference: str = None) -> bool:
         """
         Traite le paiement d'une commande
         
         Args:
             session: Session SQLAlchemy
             commande_id: ID de la commande à payer
-            compte_id: ID du compte pour le paiement (caisse ou fournisseur)
+            montant: Montant du paiement
+            mode_paiement: Mode de paiement (Espèces, Chèque, etc.)
             reference: Référence du paiement
+        
+        Returns:
+            bool: True si le paiement a réussi
         """
-        commande = session.query(AchatCommande).get(commande_id)
-        if not commande:
-            raise ValueError("Commande introuvable")
-        
-        if commande.etat != EtatCommande.ENCOURS:
-            raise ValueError("Cette commande ne peut pas être payée")
-        
-        # Vérifier le solde si ce n'est pas un compte fournisseur
-        compte = session.query(ComptaComptes).get(compte_id)
-        if not compte:
-            raise ValueError("Compte introuvable")
-        
-        # Si c'est un compte de caisse, vérifier le solde
-        if compte.classe != '4':  # Classe 4 = comptes de tiers (fournisseurs)
-            if not self.verify_solde_compte(session, compte_id, commande.montant_total):
-                raise ValueError("Solde insuffisant sur le compte")
-        
-        # Créer l'enregistrement de dépense
-        depense = AchatDepense(
-            bon_commande_id=commande_id,
-            compte_id=compte_id,
-            utilisateur_id=1,  # TODO: utiliser l'utilisateur connecté
-            montant=commande.montant_total,
-            reference=reference
-        )
-        session.add(depense)
-        
-        # Créer l'écriture comptable
-        self.create_ecriture_comptable_achat(session, commande, depense)
-        
-        # Marquer la commande comme validée
-        commande.etat = EtatCommande.VALIDE
-        
-        # Créer les mouvements de stock
-        self.create_mouvements_stock(session, commande)
-        
-        session.commit()
-        return depense
+        try:
+            commande = session.query(AchatCommande).get(commande_id)
+            if not commande:
+                raise ValueError("Commande introuvable")
+            
+            if commande.etat == EtatCommande.VALIDE:
+                raise ValueError("Cette commande est déjà payée et validée")
+            
+            if commande.etat == EtatCommande.ANNULE:
+                raise ValueError("Impossible de payer une commande annulée")
+            
+            # Vérifier que le montant ne dépasse pas le montant total de la commande
+            try:
+                montant_deja_paye = sum(d.montant for d in commande.depenses)
+            except Exception as e:
+                print(f"Erreur lors du calcul des paiements existants: {e}")
+                # Si erreur de colonne, considérer qu'aucun paiement n'a été fait
+                montant_deja_paye = Decimal('0')
+                
+            montant_restant = commande.montant_total - montant_deja_paye
+            
+            if montant > montant_restant:
+                raise ValueError(f"Le montant du paiement ({montant}) dépasse le montant restant ({montant_restant})")
+            
+            # Créer l'enregistrement de dépense
+            depense = AchatDepense(
+                bon_commande_id=commande_id,
+                montant=montant,
+                mode_paiement=mode_paiement,
+                reference=reference,
+                date_paiement=datetime.now()
+            )
+            session.add(depense)
+            session.flush()  # Pour obtenir l'ID
+            
+            # Si le paiement couvre le montant total, valider la commande
+            nouveau_montant_paye = montant_deja_paye + montant
+            if nouveau_montant_paye >= commande.montant_total:
+                # Marquer la commande comme validée
+                commande.etat = EtatCommande.VALIDE
+                
+                # Créer les mouvements de stock
+                self.create_mouvements_stock(session, commande)
+                
+                # Créer l'écriture comptable
+                self.create_ecriture_comptable_achat(session, commande, depense)
+            
+            session.commit()
+            return True
+            
+        except Exception as e:
+            session.rollback()
+            print(f"Erreur lors du paiement: {e}")
+            raise e
     
     def create_ecriture_comptable_achat(self, session: Session, 
                                        commande: AchatCommande, depense: AchatDepense):
@@ -399,41 +419,49 @@ class AchatController:
         for ligne in commande.lignes:
             # Créer le mouvement d'entrée
             movement = StockMovement(
-                entreprise_id=self.entreprise_id,
-                produit_id=ligne.produit_id,
-                entrepot_id=commande.entrepot_id,
-                type_mouvement='entree',
-                origine='achat',
-                quantite=ligne.quantite,
-                prix_unitaire=ligne.prix_unitaire,
-                reference_doc=commande.numero,
-                date_mouvement=datetime.now(),
-                utilisateur_id=commande.utilisateur_id
+                product_id=ligne.produit_id,
+                warehouse_id=commande.entrepot_id,
+                movement_type='ENTREE',
+                quantity=ligne.quantite,
+                unit_cost=ligne.prix_unitaire,
+                total_cost=ligne.quantite * ligne.prix_unitaire,
+                reference=commande.numero,
+                description=f'Achat - Commande {commande.numero}',
+                movement_date=datetime.now(),
+                user_id=commande.utilisateur_id
             )
             session.add(movement)
             
             # Mettre à jour ou créer l'entrée stock produit-entrepôt
             stock_entry = session.query(StockProduitEntrepot).filter_by(
-                produit_id=ligne.produit_id,
-                entrepot_id=commande.entrepot_id
+                product_id=ligne.produit_id,
+                warehouse_id=commande.entrepot_id
             ).first()
             
             if stock_entry:
                 # Mettre à jour la quantité existante
-                stock_entry.quantite_stock += ligne.quantite
+                old_quantity = stock_entry.quantity
+                new_quantity = old_quantity + ligne.quantite
+                
                 # Mettre à jour le prix moyen pondéré
-                total_value = (stock_entry.quantite_stock * stock_entry.prix_unitaire_moyen) + \
-                             (ligne.quantite * ligne.prix_unitaire)
-                stock_entry.prix_unitaire_moyen = total_value / stock_entry.quantite_stock
+                if new_quantity > 0:
+                    total_value = (old_quantity * stock_entry.unit_cost) + (ligne.quantite * ligne.prix_unitaire)
+                    stock_entry.unit_cost = total_value / new_quantity
+                
+                stock_entry.quantity = new_quantity
+                stock_entry.total_cost = new_quantity * stock_entry.unit_cost
+                stock_entry.last_movement_date = datetime.now()
             else:
                 # Créer une nouvelle entrée stock
                 stock_entry = StockProduitEntrepot(
-                    produit_id=ligne.produit_id,
-                    entrepot_id=commande.entrepot_id,
-                    quantite_stock=ligne.quantite,
-                    quantite_reservee=Decimal('0'),
-                    seuil_alerte=Decimal('10'),  # Valeur par défaut
-                    prix_unitaire_moyen=ligne.prix_unitaire
+                    product_id=ligne.produit_id,
+                    warehouse_id=commande.entrepot_id,
+                    quantity=ligne.quantite,
+                    reserved_quantity=Decimal('0'),
+                    unit_cost=ligne.prix_unitaire,
+                    total_cost=ligne.quantite * ligne.prix_unitaire,
+                    min_stock_level=Decimal('10'),  # Valeur par défaut
+                    last_movement_date=datetime.now()
                 )
                 session.add(stock_entry)
     
@@ -454,10 +482,7 @@ class AchatController:
     def get_entrepots_disponibles(self, session: Session) -> List[StockWarehouse]:
         """Récupère la liste des entrepôts disponibles pour les achats"""
         return session.query(StockWarehouse).filter(
-            and_(
-                StockWarehouse.entreprise_id == self.entreprise_id,
-                StockWarehouse.is_active == True
-            )
+            StockWarehouse.is_active == True
         ).order_by(StockWarehouse.name).all()
     
     def get_produits_disponibles(self, session: Session, search: str = None) -> List[CoreProduct]:

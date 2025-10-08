@@ -88,7 +88,7 @@ class ProductSelectionDialog(QDialog):
             self.products_table.setItem(row, 1, QTableWidgetItem(product.name))
             
             # Prix
-            prix_str = f"{product.price:.2f} €" if product.price else "0.00 €"
+            prix_str = f"{product.price_unit:.2f} €" if product.price_unit else "0.00 €"
             self.products_table.setItem(row, 2, QTableWidgetItem(prix_str))
             
             # Checkbox pour sélection
@@ -316,11 +316,19 @@ class NouvelleCommandeWidget(QWidget):
     
     def load_entrepots(self, session):
         """Charge la liste des entrepôts"""
-        self.entrepot_combo.clear()
-        
-        entrepots = self.achat_controller.get_entrepots_disponibles(session)
-        for entrepot in entrepots:
-            self.entrepot_combo.addItem(f"{entrepot.name} ({entrepot.code})", entrepot.id)
+        try:
+            self.entrepot_combo.clear()
+            
+            entrepots = self.achat_controller.get_entrepots_disponibles(session)
+            
+            if not entrepots:
+                self.entrepot_combo.addItem("Aucun entrepôt disponible", None)
+            else:
+                for entrepot in entrepots:
+                    self.entrepot_combo.addItem(f"{entrepot.name} ({entrepot.code})", entrepot.id)
+        except Exception as e:
+            print(f"ERREUR load_entrepots: {e}")
+            self.entrepot_combo.addItem("Erreur de chargement", None)
     
     def refresh_fournisseurs(self):
         """Actualise la liste des fournisseurs"""
@@ -352,9 +360,9 @@ class NouvelleCommandeWidget(QWidget):
         line_data = {
             'product': product,
             'quantite': Decimal('1'),
-            'prix_unitaire': Decimal(str(product.price or 0)),
+            'prix_unitaire': Decimal(str(product.price_unit or 0)),
             'remise_ligne': Decimal('0'),
-            'total_ligne': Decimal(str(product.price or 0))
+            'total_ligne': Decimal(str(product.price_unit or 0))
         }
         
         self.current_lines.append(line_data)
