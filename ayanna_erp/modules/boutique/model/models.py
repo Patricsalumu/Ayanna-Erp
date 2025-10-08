@@ -23,8 +23,8 @@ class ShopClient(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     pos_id = Column(Integer, nullable=False)  # Référence au POS
     nom = Column(String(100), nullable=False)
-    prenom = Column(String(100), nullable=False)
-    telephone = Column(String(20), nullable=False)
+    prenom = Column(String(100), nullable=True)  # Prénom optionnel
+    telephone = Column(String(20), nullable=True)  # Téléphone optionnel
     email = Column(String(150))
     adresse = Column(Text)
     ville = Column(String(100))

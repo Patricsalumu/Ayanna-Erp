@@ -17,7 +17,6 @@ from ..controller.mainWindow_controller import MainWindowController
 # Import des différents onglets
 from .calendrier_index import CalendrierIndex
 from .reservation_index import ReservationIndex
-from .client_index import ClientIndex
 from .service_index import ServiceIndex
 from .produit_index import ProduitIndex
 from .paiement_index import PaiementIndex
