@@ -227,11 +227,20 @@ class DatabaseManager:
         try:
             from ayanna_erp.modules.stock.models import StockWarehouse
             
-            # Récupérer tous les POS de l'entreprise
-            pos_points = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
+            # Modules qui ont besoin d'entrepôts
+            modules_with_warehouses = {"Boutique", "Pharmacie", "Restaurant"}
+            
+            # Récupérer les POS de l'entreprise avec leurs modules
+            pos_points = session.query(POSPoint).join(Module).filter(
+                POSPoint.enterprise_id == enterprise_id,
+                Module.name.in_(modules_with_warehouses)
+            ).all()
             
             for pos in pos_points:
-                # Créer entrepôt principal pour chaque POS
+                # Récupérer le nom du module pour ce POS
+                module = session.query(Module).filter_by(id=pos.module_id).first()
+                
+                # Créer entrepôt principal pour chaque POS qui en a besoin
                 main_warehouse = StockWarehouse(
                     entreprise_id=enterprise_id,
                     code=f"MAIN_{pos.id}",
@@ -243,7 +252,7 @@ class DatabaseManager:
                 )
                 session.add(main_warehouse)
                 
-                # Créer entrepôt point de vente pour chaque POS
+                # Créer entrepôt point de vente pour chaque POS qui en a besoin
                 pos_warehouse = StockWarehouse(
                     entreprise_id=enterprise_id,
                     code=f"POS_{pos.id}",
@@ -255,9 +264,19 @@ class DatabaseManager:
                 )
                 session.add(pos_warehouse)
                 
-                print(f"✅ Entrepôts créés pour {pos.name}:")
+                print(f"✅ Entrepôts créés pour {pos.name} (Module: {module.name}):")
                 print(f"   • Entrepôt Principal: {main_warehouse.name}")
                 print(f"   • Entrepôt POS: {pos_warehouse.name}")
+            
+            # Afficher les modules qui n'ont pas d'entrepôts
+            all_pos_points = session.query(POSPoint).join(Module).filter(
+                POSPoint.enterprise_id == enterprise_id
+            ).all()
+            
+            for pos in all_pos_points:
+                module = session.query(Module).filter_by(id=pos.module_id).first()
+                if module.name not in modules_with_warehouses:
+                    print(f"ℹ️  Aucun entrepôt créé pour {pos.name} (Module: {module.name}) - non requis")
             
             session.flush()  # S'assurer que les entrepôts sont persistés
             
