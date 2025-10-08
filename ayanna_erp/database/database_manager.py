@@ -46,6 +46,15 @@ except ImportError:
     # Les modèles boutique ne sont pas encore disponibles
     pass
 
+# Import des modèles achats pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.achats.models import (
+        CoreFournisseur, AchatCommande, AchatCommandeLigne, AchatDepense
+    )
+except ImportError:
+    # Les modèles achats ne sont pas encore disponibles
+    pass
+
 # Import des modèles salle de fête pour qu'ils soient inclus dans Base.metadata
 try:
     from ayanna_erp.modules.salle_fete.model.salle_fete import (
@@ -54,7 +63,7 @@ try:
     )
     print("✅ Import des modèles salle de fête réussi dans database_manager.py")
 except ImportError as e:
-    print(f"⚠️ Import des modèles salle de fête échoué: {e}")
+    print(f"ATTENTION Import des modeles salle de fete echoue: {e}")
 except Exception as e:
     print(f"❌ Erreur inattendue lors de l'import salle de fête: {e}")
 
