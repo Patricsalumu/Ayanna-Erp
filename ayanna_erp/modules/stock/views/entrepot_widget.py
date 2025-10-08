@@ -50,6 +50,13 @@ class WarehouseFormDialog(QDialog):
         # Code entrepôt (obligatoire)
         self.code_edit = QLineEdit()
         self.code_edit.setPlaceholderText("Code unique de l'entrepôt (ex: ENT001)")
+        
+        # Bloquer le champ code si on édite un entrepôt existant
+        if self.warehouse is not None:
+            self.code_edit.setReadOnly(True)
+            self.code_edit.setStyleSheet("background-color: #f0f0f0; color: #666;")
+            self.code_edit.setToolTip("Le code ne peut pas être modifié après création")
+        
         form_layout.addRow("Code*:", self.code_edit)
         
         # Nom entrepôt (obligatoire)

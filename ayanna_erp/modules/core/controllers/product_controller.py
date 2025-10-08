@@ -21,9 +21,14 @@ class CoreProductController:
             pos = session.query(POSPoint).filter_by(id=pos_id).first()
             self.entreprise_id = pos.enterprise_id if pos else 1
             
-            # Mapping des codes POS basé sur l'ID
-            pos_code_mapping = {1: 'POS_1', 2: 'POS_2', 3: 'POS_3'}
-            self.pos_code = pos_code_mapping.get(pos_id, f'POS_{pos_id}')
+            # Mapping des codes POS basé sur l'ID - selon les entrepôts existants
+            pos_code_mapping = {
+                1: 'POS_2',  # Boutique → POS_2
+                2: 'POS_2',  # Boutique → POS_2  
+                3: 'POS_3',  # Pharmacie → POS_3
+                4: 'POS_4'   # Restaurant → POS_4
+            }
+            self.pos_code = pos_code_mapping.get(pos_id, 'POS_2')  # Par défaut boutique
         finally:
             session.close()
 
@@ -47,6 +52,7 @@ class CoreProductController:
     def create_product(self, session: Session, nom: str, prix, category_id: int, description: Optional[str] = None, unit: str = "pièce", stock_initial: float = 0.0, cost: float = 0.0, barcode: Optional[str] = None, image: Optional[str] = None, stock_min: float = 0.0, account_id: Optional[int] = None, is_active: bool = True) -> CoreProduct:
         """
         Créer un produit et initialiser son stock sur l'entrepôt correspondant au POS
+        Le stock initial est toujours 0 - l'approvisionnement vient des achats
         """
         product = CoreProduct(
             entreprise_id=self.entreprise_id,
@@ -64,17 +70,18 @@ class CoreProductController:
         session.add(product)
         session.commit()
         
-        # Initialiser les stocks dans le module stock sur l'entrepôt correspondant au POS
-        self._initialize_product_stock(session, product, stock_initial, stock_min)
+        # Initialiser le stock à 0 avec le seuil minimum
+        self._initialize_product_stock(session, product, 0.0, stock_min)
         
         return product
 
     def _initialize_product_stock(self, session: Session, product: CoreProduct, initial_quantity: float = 0.0, min_stock: float = 0.0):
         """
         Initialise le stock d'un produit sur l'entrepôt correspondant au POS
+        Stock initial toujours à 0 - l'approvisionnement vient des achats
         """
         try:
-            from ayanna_erp.modules.stock.models import StockWarehouse, StockProduitEntrepot, StockMovement
+            from ayanna_erp.modules.stock.models import StockWarehouse, StockProduitEntrepot
             from datetime import datetime
             from decimal import Decimal
             
@@ -84,8 +91,8 @@ class CoreProductController:
             if not pos_warehouse:
                 raise Exception(f"Entrepôt {self.pos_code} introuvable pour le POS {self.pos_id}")
             
-            # Créer l'entrée stock produit-entrepôt
-            stock_quantity = Decimal(str(initial_quantity))
+            # Créer l'entrée stock produit-entrepôt avec stock initial à 0
+            stock_quantity = Decimal('0.0')  # Toujours 0 au départ
             unit_cost = Decimal(str(product.cost)) if product.cost else Decimal('0.0')
             
             stock_entry = StockProduitEntrepot(
@@ -94,27 +101,14 @@ class CoreProductController:
                 quantity=stock_quantity,
                 reserved_quantity=Decimal('0.0'),
                 unit_cost=unit_cost,
-                total_cost=stock_quantity * unit_cost,
+                total_cost=Decimal('0.0'),  # Pas de coût initial
                 min_stock_level=Decimal(str(min_stock)),
                 last_movement_date=datetime.now()
             )
             session.add(stock_entry)
             
-            # Si il y a un stock initial, créer un mouvement d'entrée
-            if initial_quantity > 0:
-                movement = StockMovement(
-                    product_id=product.id,
-                    warehouse_id=pos_warehouse.id,
-                    movement_type='ENTREE',
-                    quantity=stock_quantity,
-                    unit_cost=unit_cost,
-                    total_cost=stock_quantity * unit_cost,
-                    reference=f'INIT-{product.id}',
-                    description=f'Stock initial pour {product.name}',
-                    movement_date=datetime.now(),
-                    user_id=1  # Utilisateur système
-                )
-                session.add(movement)
+            # Pas de mouvement de stock initial car toujours 0
+            # L'approvisionnement viendra des achats
             
             session.commit()
             
