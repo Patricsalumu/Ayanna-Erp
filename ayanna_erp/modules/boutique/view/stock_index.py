@@ -237,6 +237,14 @@ class StockIndex(QWidget):
     def refresh_product_stock(self, product_id: int):
         """Actualiser le stock d'un produit spécifique"""
         self.load_stock_data()
+    
+    def refresh_data(self):
+        """Actualiser les données de stock"""
+        self.load_stock_data()
+    
+    def refresh_stock_data(self):
+        """Alias pour actualiser les données de stock (compatibilité)"""
+        self.load_stock_data()
 
 
 class RapportIndex(QWidget):

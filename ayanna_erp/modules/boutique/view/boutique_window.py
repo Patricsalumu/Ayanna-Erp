@@ -210,7 +210,12 @@ class BoutiqueWindow(QMainWindow):
             
         # Actualiser le stock
         if hasattr(self, 'stock_widget'):
-            self.stock_widget.refresh_stock_data()
+            if hasattr(self.stock_widget, 'refresh_stock_data'):
+                self.stock_widget.refresh_stock_data()
+            elif hasattr(self.stock_widget, 'refresh_data'):
+                self.stock_widget.refresh_data()
+            else:
+                print("⚠️ Aucune méthode de rafraîchissement trouvée dans stock_widget")
     
     def switch_to_panier_tab(self):
         """Basculer vers l'onglet vente (moderne)"""

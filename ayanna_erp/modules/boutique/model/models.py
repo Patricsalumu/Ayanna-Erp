@@ -69,16 +69,16 @@ class ShopPanier(Base):
     client_id = Column(Integer, ForeignKey('shop_clients.id'))  # Client optionnel
     numero_commande = Column(String(50), unique=True)  # Numéro de commande auto-généré
     status = Column(String(50), default='en_cours')  # en_cours, validé, payé, annulé
+    payment_method = Column(String(50))  # Méthode de paiement principale utilisée
     
     # Totaux
     subtotal = Column(Numeric(15, 2), default=0.0)  # Sous-total HT
-    remise_percent = Column(Numeric(5, 2), default=0.0)  # Remise en %
     remise_amount = Column(Numeric(15, 2), default=0.0)  # Montant de la remise
     total_final = Column(Numeric(15, 2), default=0.0)  # Total final à payer
     
     # Informations de validation
     validated_at = Column(DateTime)  # Date de validation
-    validated_by = Column(String(100))  # Utilisateur qui a validé
+    user_id = Column(Integer, ForeignKey('core_users.id'))  # Utilisateur qui a validé
     
     # Dates
     created_at = Column(DateTime, default=func.current_timestamp())

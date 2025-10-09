@@ -3,6 +3,7 @@ Interface moderne de type supermarché pour le module Boutique
 Design épuré avec catalogue de produits et panier de vente
 """
 
+import os
 from decimal import Decimal
 from typing import List, Dict, Optional
 from PyQt6.QtWidgets import (
@@ -17,6 +18,7 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ..model.models import ShopClient, ShopPanier
 
 
@@ -34,6 +36,7 @@ class ModernSupermarketWidget(QWidget):
         self.current_user = current_user
         self.pos_id = pos_id
         self.db_manager = DatabaseManager()
+        self.enterprise_controller = EntrepriseController()
         
         # Variables d'état
         self.current_cart = []  # Liste des articles du panier
@@ -220,13 +223,11 @@ class ModernSupermarketWidget(QWidget):
         self.discount_spin = QDoubleSpinBox()
         self.discount_spin.setRange(0, 999999)
         self.discount_spin.setSuffix(" FC")
-        self.discount_spin.valueChanged.connect(self.update_totals)
+        # Application automatique de la remise lors du changement de valeur
+        self.discount_spin.valueChanged.connect(self.apply_discount_auto)
         
-        apply_discount_btn = QPushButton("Appliquer")
-        apply_discount_btn.clicked.connect(self.apply_discount)
-        
+        # Suppression du bouton "Appliquer" - remise automatique
         discount_layout.addWidget(self.discount_spin)
-        discount_layout.addWidget(apply_discount_btn)
         
         totals_layout.addRow("Remise:", discount_widget)
         
@@ -559,16 +560,13 @@ class ModernSupermarketWidget(QWidget):
                 self.product_added_to_cart.emit(product.id, quantity)
                 self.cart_updated.emit()
                 
-                # Message de confirmation
-                QMessageBox.information(
-                    self,
-                    "Produit ajouté",
-                    f"{product.name}\\nQuantité: {quantity}\\nAjouté au panier avec succès !"
-                )
+                # Feedback visuel discret - le produit apparaît dans le panier
+                print(f"✅ {product.name} ajouté au panier (quantité: {quantity})")
         
         except Exception as e:
-            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'ajout au panier: {e}")
-            print(f"Erreur add_to_cart: {e}")
+            # Garder seulement les erreurs critiques
+            print(f"❌ Erreur add_to_cart: {e}")
+            # QMessageBox.warning seulement pour les erreurs graves
     
     def get_available_stock(self, product_id):
         """Récupère le stock disponible pour un produit dans l'entrepôt POS_2"""
@@ -722,34 +720,27 @@ class ModernSupermarketWidget(QWidget):
         self.discount_amount_label.setText(f"{discount_amount:.0f} FC")
         self.total_label.setText(f"{total:.0f} FC")
     
-    def apply_discount(self):
-        """Applique la remise globale"""
+    def apply_discount_auto(self):
+        """Applique automatiquement la remise lors du changement de valeur"""
         discount_amount = self.discount_spin.value()
         self.global_discount = Decimal(str(discount_amount))
         self.update_totals()
-        
-        QMessageBox.information(
-            self, 
-            "Remise appliquée", 
-            f"Remise de {discount_amount:.0f} FC appliquée à la commande"
-        )
+        # Pas de feedback - application silencieuse et fluide
+    
+    def apply_discount(self):
+        """Applique la remise globale (méthode de compatibilité)"""
+        self.apply_discount_auto()
     
     def clear_cart(self):
-        """Vide le panier"""
-        reply = QMessageBox.question(
-            self, 
-            "Confirmer", 
-            "Êtes-vous sûr de vouloir vider le panier ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            self.current_cart = []
-            self.global_discount = Decimal('0.00')
-            self.discount_spin.setValue(0)
-            self.update_cart_display()
-            self.update_totals()
-            self.cart_updated.emit()
+        """Vide le panier sans confirmation"""
+        # Suppression de la confirmation - vider directement
+        self.current_cart = []
+        self.global_discount = Decimal('0.00')
+        self.discount_spin.setValue(0)
+        self.update_cart_display()
+        self.update_totals()
+        self.cart_updated.emit()
+        print("🗑️ Panier vidé")
     
     def validate_and_pay(self):
         """Valide la commande et procède au paiement"""
@@ -864,19 +855,21 @@ class ModernSupermarketWidget(QWidget):
                 
                 # Créer un panier temporaire pour tracer la vente
                 panier_result = session.execute(text("""
-                    INSERT INTO shop_panier 
-                    (pos_id, client_id, user_id, total_amount, discount_amount, 
-                     payment_method, status, created_at, updated_at)
-                    VALUES (:pos_id, :client_id, :user_id, :total_amount, :discount_amount,
-                            :payment_method, :status, :created_at, :updated_at)
+                    INSERT INTO shop_paniers 
+                    (pos_id, client_id, numero_commande, status, payment_method, 
+                     subtotal, remise_amount, total_final, user_id, created_at, updated_at)
+                    VALUES (:pos_id, :client_id, :numero_commande, :status, :payment_method,
+                            :subtotal, :remise_amount, :total_final, :user_id, :created_at, :updated_at)
                 """), {
                     'pos_id': self.pos_id,
                     'client_id': sale_data['client_id'],
-                    'user_id': sale_data['user_id'], 
-                    'total_amount': sale_data['total_amount'],
-                    'discount_amount': sale_data['discount_amount'],
-                    'payment_method': sale_data['payment_method'],
+                    'numero_commande': f"CMD-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
                     'status': 'completed',
+                    'payment_method': sale_data['payment_method'],
+                    'subtotal': sale_data['subtotal'],
+                    'remise_amount': sale_data['discount_amount'],
+                    'total_final': sale_data['total_amount'],
+                    'user_id': sale_data['user_id'],
                     'created_at': datetime.now(),
                     'updated_at': datetime.now()
                 })
@@ -896,22 +889,34 @@ class ModernSupermarketWidget(QWidget):
                     
                     # Créer la ligne de panier
                     session.execute(text("""
-                        INSERT INTO shop_panier_items 
-                        (panier_id, product_id, quantity, unit_price, total_price, created_at)
-                        VALUES (:panier_id, :product_id, :quantity, :unit_price, :total_price, :created_at)
+                        INSERT INTO shop_paniers_products 
+                        (panier_id, product_id, quantity, price_unit, total_price)
+                        VALUES (:panier_id, :product_id, :quantity, :price_unit, :total_price)
                     """), {
                         'panier_id': panier_id,
                         'product_id': product_id,
                         'quantity': quantity,
-                        'unit_price': float(unit_price),
-                        'total_price': float(line_total),
-                        'created_at': datetime.now()
+                        'price_unit': float(unit_price),
+                        'total_price': float(line_total)
                     })
                     
                     # 3. Gérer le stock POS (sortie de stock)
                     self._update_pos_stock(session, product_id, quantity)
                 
-                # 4. Créer les écritures comptables si le module comptabilité est configuré
+                # 4. Enregistrer le paiement
+                session.execute(text("""
+                    INSERT INTO shop_payments 
+                    (panier_id, amount, payment_method, payment_date, reference)
+                    VALUES (:panier_id, :amount, :payment_method, :payment_date, :reference)
+                """), {
+                    'panier_id': panier_id,
+                    'amount': sale_data['total_amount'],
+                    'payment_method': sale_data['payment_method'],
+                    'payment_date': datetime.now(),
+                    'reference': f"VENTE-{panier_id}"
+                })
+                
+                # 5. Créer les écritures comptables si le module comptabilité est configuré
                 self._create_sale_accounting_entries(session, sale_data, panier_id)
                 
                 # Valider la transaction
@@ -920,17 +925,11 @@ class ModernSupermarketWidget(QWidget):
                 # Afficher le reçu
                 self._show_sale_receipt(sale_data, payment_data)
                 
-                # Nettoyer le panier
+                # Nettoyer le panier automatiquement après le reçu
                 self.clear_cart()
                 
-                QMessageBox.information(
-                    self, 
-                    "Vente réussie", 
-                    f"Vente #{panier_id} enregistrée avec succès\\n"
-                    f"Total: {total_amount:.0f} FC\\n"
-                    f"Paiement: {payment_data['method']}"
-                )
-                
+                # Feedback discret - juste l'émission du signal
+                print(f"✅ Vente #{panier_id} complétée - {total_amount:.0f} FC")
                 self.sale_completed.emit(panier_id)
                 
         except Exception as e:
@@ -1108,52 +1107,99 @@ class ModernSupermarketWidget(QWidget):
             # Ne pas faire échouer la vente pour un problème comptable
     
     def _show_sale_receipt(self, sale_data, payment_data):
-        """Affiche le reçu de vente"""
-        receipt_text = f"""
-        ===== REÇU DE VENTE =====
+        """Affiche le reçu de vente avec en-tête d'entreprise"""
         
-        Date: {sale_data['sale_date'].strftime('%d/%m/%Y %H:%M')}
-        POS: #{self.pos_id}
-        Vendeur: {getattr(self.current_user, 'name', 'Utilisateur')}
+        # Récupérer les informations de l'entreprise
+        enterprise_info = self.enterprise_controller.get_current_enterprise()
         
-        --- DÉTAIL ---
-        """
+        # Générer un numéro de commande unique (basé sur timestamp + POS)
+        from datetime import datetime
+        order_number = f"CMD-{self.pos_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
         
+        # Construire l'en-tête d'entreprise avec logo
+        receipt_text = f"""===============================
+{enterprise_info['name']}
+===============================
+
+Adresse: {enterprise_info['address']}
+Téléphone: {enterprise_info['phone']}
+Email: {enterprise_info['email']}
+RCCM: {enterprise_info['rccm']}
+
+===== REÇU DE VENTE =====
+
+N° Commande: {order_number}
+Date: {sale_data['sale_date'].strftime('%d/%m/%Y %H:%M')}
+POS: #{self.pos_id}
+Vendeur: {getattr(self.current_user, 'name', 'Utilisateur')}
+
+--- DÉTAIL DES ARTICLES ---
+"""
+        
+        # Formater les produits avec alignement correct
         for item in self.current_cart:
-            receipt_text += f"\\n{item['product_name']}"
-            receipt_text += f"\\n  {item['quantity']} x {item['unit_price']:.0f} FC = {item['unit_price'] * item['quantity']:.0f} FC"
+            product_name = item['product_name'][:25] + '...' if len(item['product_name']) > 25 else item['product_name']
+            quantity = item['quantity']
+            unit_price = item['unit_price']
+            total_price = unit_price * quantity
+            
+            # Formatage aligné avec espaces
+            line = f"{product_name:<28} {quantity:>3} x {unit_price:>6.0f} = {total_price:>8.0f} FC\n"
+            receipt_text += line
         
         receipt_text += f"""
-        
-        --- TOTAUX ---
-        Sous-total: {sale_data['subtotal']:.0f} FC
-        Remise: -{sale_data['discount_amount']:.0f} FC
-        TOTAL: {sale_data['total_amount']:.0f} FC
-        
-        --- PAIEMENT ---
-        Méthode: {payment_data['method']}
-        Reçu: {payment_data['amount_received']:.0f} FC
-        Monnaie: {payment_data['change']:.0f} FC
-        
-        Merci pour votre achat !
-        =========================
-        """
+--- TOTAUX ---
+Sous-total:              {sale_data['subtotal']:>8.0f} FC
+Remise ({sale_data.get('discount_percent', 0)}%):             -{sale_data['discount_amount']:>8.0f} FC
+TOTAL À PAYER:           {sale_data['total_amount']:>8.0f} FC
+
+--- PAIEMENT ---
+Méthode:                 {payment_data['method']}
+Montant reçu:            {payment_data['amount_received']:>8.0f} FC
+Monnaie rendue:          {payment_data['change']:>8.0f} FC
+
+Merci pour votre achat !
+Bonne journée.
+
+===============================
+Généré par Ayanna ERP©
+Tous droits réservés
+===============================
+"""
         
         # Afficher dans un dialogue
         receipt_dialog = QDialog(self)
-        receipt_dialog.setWindowTitle("Reçu de vente")
-        receipt_dialog.setFixedSize(400, 600)
+        receipt_dialog.setWindowTitle("🧾 Reçu de vente")
+        receipt_dialog.setFixedSize(500, 700)
         
         layout = QVBoxLayout(receipt_dialog)
+        
+        # Tentative d'affichage du logo (optionnel)
+        try:
+            logo_path = enterprise_info.get('logo_path', '')
+            if logo_path and os.path.exists(logo_path):
+                logo_label = QLabel()
+                pixmap = QPixmap(logo_path)
+                if not pixmap.isNull():
+                    # Redimensionner le logo
+                    scaled_pixmap = pixmap.scaled(100, 50, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    logo_label.setPixmap(scaled_pixmap)
+                    logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                    layout.addWidget(logo_label)
+        except Exception as e:
+            print(f"⚠️ Logo non affiché: {e}")
         
         receipt_display = QTextEdit()
         receipt_display.setPlainText(receipt_text)
         receipt_display.setReadOnly(True)
         receipt_display.setStyleSheet("""
             QTextEdit {
-                font-family: 'Courier New', monospace;
-                font-size: 11px;
+                font-family: 'Courier New', 'Consolas', monospace;
+                font-size: 12px;
                 background-color: white;
+                line-height: 1.3;
+                padding: 10px;
+                border: 1px solid #ddd;
             }
         """)
         layout.addWidget(receipt_display)
@@ -1162,11 +1208,38 @@ class ModernSupermarketWidget(QWidget):
         buttons_layout = QHBoxLayout()
         
         print_btn = QPushButton("🖨️ Imprimer")
+        print_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
         print_btn.clicked.connect(lambda: self._print_receipt(receipt_text))
         buttons_layout.addWidget(print_btn)
         
-        close_btn = QPushButton("Fermer")
+        close_btn = QPushButton("✅ Fermer")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                padding: 10px 20px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         close_btn.clicked.connect(receipt_dialog.accept)
+        close_btn.setDefault(True)
         buttons_layout.addWidget(close_btn)
         
         layout.addLayout(buttons_layout)
