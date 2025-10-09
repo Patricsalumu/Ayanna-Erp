@@ -19,7 +19,7 @@ from .modern_supermarket_widget import ModernSupermarketWidget
 from .produit_index import ProduitIndex
 from .categorie_index import CategorieIndex
 from .client_index import ClientIndex
-from .stock_index import StockIndex
+from .commandes_index import CommandesIndexWidget
 from .rapport_index import RapportIndexWidget
 
 
@@ -121,23 +121,23 @@ class BoutiqueWindow(QMainWindow):
             self.modern_shop_widget.cart_updated.connect(self.on_cart_updated)
             self.modern_shop_widget.sale_completed.connect(self.on_sale_completed)
             
+            # Onglet Commandes - Suivi et gestion des commandes
+            self.commandes_widget = CommandesIndexWidget(self.boutique_controller, self.current_user)
+            self.tab_widget.addTab(self.commandes_widget, "📋 Commandes")
+
             # Onglet Produits - Gestion des produits
             pos_id = getattr(self.boutique_controller, 'pos_id', 1)
             self.produits_widget = ProduitIndex(pos_id, self.current_user)
             self.tab_widget.addTab(self.produits_widget, "📦 Produits")
-            
+
             # Onglet Catégories - Gestion des catégories
             self.categories_widget = CategorieIndex(self.boutique_controller.pos_id, self.current_user)
             self.tab_widget.addTab(self.categories_widget, "📂 Catégories")
-            
+
             # Onglet Clients - Gestion des clients
             self.clients_widget = ClientIndex(self.boutique_controller, self.current_user)
             self.tab_widget.addTab(self.clients_widget, "👥 Clients")
-            
-            # Onglet Stock - Entrées/Sorties et gestion du stock
-            self.stock_widget = StockIndex(self.boutique_controller, self.current_user)
-            self.tab_widget.addTab(self.stock_widget, "📊 Stock")
-            
+
             # Onglet Rapports - Analyses et rapports
             self.rapports_widget = RapportIndexWidget(self)
             self.tab_widget.addTab(self.rapports_widget, "📈 Rapports")
@@ -146,6 +146,7 @@ class BoutiqueWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(0)
             
             print("✅ Interface moderne de boutique créée avec succès")
+            print("🗑️ Onglet Stock supprimé - onglet Produits conservé avec onglet Commandes ajouté")
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur d'initialisation", 
@@ -172,13 +173,14 @@ class BoutiqueWindow(QMainWindow):
     
     def on_stock_updated(self, product_id: int):
         """Callback quand le stock est mis à jour"""
-        # Actualiser l'affichage du stock
-        if hasattr(self, 'stock_widget'):
-            self.stock_widget.refresh_product_stock(product_id)
-        
-        # Actualiser les produits si nécessaire
+        # Actualiser l'affichage des produits
         if hasattr(self, 'produits_widget'):
             self.produits_widget.refresh_product(product_id)
+        
+        # Actualiser l'onglet Commandes pour refléter les changements de stock
+        if hasattr(self, 'commandes_widget'):
+            self.commandes_widget.refresh_data()
+            print(f"📋 Onglet Commandes actualisé après mise à jour stock produit {product_id}")
     
     def on_product_selected_from_catalog(self, product_id: int, quantity: int = 1):
         """Callback quand un produit est sélectionné depuis le catalogue (ancien système)"""
@@ -208,18 +210,21 @@ class BoutiqueWindow(QMainWindow):
         if hasattr(self, 'rapports_widget'):
             self.rapports_widget.refresh_data()
             
-        # Actualiser le stock
-        if hasattr(self, 'stock_widget'):
-            if hasattr(self.stock_widget, 'refresh_stock_data'):
-                self.stock_widget.refresh_stock_data()
-            elif hasattr(self.stock_widget, 'refresh_data'):
-                self.stock_widget.refresh_data()
-            else:
-                print("⚠️ Aucune méthode de rafraîchissement trouvée dans stock_widget")
+        # Actualiser l'onglet Commandes
+        if hasattr(self, 'commandes_widget'):
+            self.commandes_widget.refresh_data()
+            print("📋 Onglet Commandes actualisé après vente")
     
     def switch_to_panier_tab(self):
         """Basculer vers l'onglet vente (moderne)"""
         self.tab_widget.setCurrentIndex(0)
+    
+    def switch_to_commandes_tab(self):
+        """Basculer vers l'onglet commandes"""
+        if hasattr(self, 'commandes_widget'):
+            index = self.tab_widget.indexOf(self.commandes_widget)
+            if index >= 0:
+                self.tab_widget.setCurrentIndex(index)
     
     def switch_to_products_tab(self):
         """Basculer vers l'onglet produits"""
