@@ -389,10 +389,13 @@ class AchatController:
     def create_mouvements_stock(self, session: Session, commande: AchatCommande):
         """Crée les mouvements de stock pour une commande validée"""
         for ligne in commande.lignes:
-            # Créer le mouvement d'entrée
+            # Créer le mouvement d'entrée (achat)
+            # Pour les achats (ENTREE) : warehouse_id = entrepôt de destination, destination_warehouse_id = NULL
+            # Cela permet de distinguer achats (destination_warehouse_id=NULL) des transferts (destination_warehouse_id!=NULL)
             movement = StockMovement(
                 product_id=ligne.produit_id,
-                warehouse_id=commande.entrepot_id,
+                warehouse_id=commande.entrepot_id,   # Entrepôt de destination (obligatoire)
+                destination_warehouse_id=None,      # NULL pour les achats (pas un transfert)
                 movement_type='ENTREE',
                 quantity=ligne.quantite,
                 unit_cost=ligne.prix_unitaire,

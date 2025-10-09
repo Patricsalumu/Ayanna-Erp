@@ -39,6 +39,7 @@ class StockController:
                 LEFT JOIN core_products p ON spe.product_id = p.id
                 WHERE spe.warehouse_id = :warehouse_id
                 AND sw.entreprise_id = :entreprise_id
+                AND sw.is_active = 1
                 ORDER BY spe.quantity DESC
             """), {"warehouse_id": warehouse_id, "entreprise_id": self.entreprise_id})
         else:
@@ -58,6 +59,7 @@ class StockController:
                 JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
                 LEFT JOIN core_products p ON spe.product_id = p.id
                 WHERE sw.entreprise_id = :entreprise_id
+                AND sw.is_active = 1
                 GROUP BY spe.product_id, p.name, p.code
                 ORDER BY total_quantity DESC
             """), {"entreprise_id": self.entreprise_id})
@@ -221,6 +223,25 @@ class StockController:
             'total_quantity': total_quantity,
             'total_value': total_value,
             'average_unit_cost': total_value / total_quantity if total_quantity > 0 else 0
+        }
+    
+    def get_product_stock_by_warehouses(self, session: Session, product_id: int) -> Dict[str, Any]:
+        """Méthode alias pour get_product_stock_details - retourne les détails de stock d'un produit par entrepôt"""
+        details = self.get_product_stock_details(session, product_id)
+        
+        # Reformater pour correspondre au format attendu par le widget
+        return {
+            'product': {
+                'id': details['product_id'],
+                'name': details['product_name'],
+                'code': details['product_code']
+            },
+            'warehouses': details['warehouses'],
+            'totals': {
+                'total_quantity': details['total_quantity'],
+                'total_value': details['total_value'],
+                'average_unit_cost': details['average_unit_cost']
+            }
         }
     
     def update_stock(self, session: Session, product_id: int, warehouse_id: int, 
@@ -467,7 +488,7 @@ class StockController:
     
     def get_low_stock_alerts(self, session: Session, warehouse_id: Optional[int] = None) -> List[Dict[str, Any]]:
         """Récupérer les alertes de stock faible"""
-        conditions = ["sw.entreprise_id = :entreprise_id"]
+        conditions = ["sw.entreprise_id = :entreprise_id", "sw.is_active = 1"]
         params = {"entreprise_id": self.entreprise_id}
         
         if warehouse_id:
@@ -515,7 +536,7 @@ class StockController:
             SELECT COALESCE(SUM(spe.total_cost), 0) 
             FROM stock_produits_entrepot spe
             JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-            WHERE sw.entreprise_id = :entreprise_id
+            WHERE sw.entreprise_id = :entreprise_id AND sw.is_active = 1
         """), {"entreprise_id": self.entreprise_id}).scalar()
         
         # Nombre de produits différents
@@ -523,7 +544,7 @@ class StockController:
             SELECT COUNT(DISTINCT spe.product_id) 
             FROM stock_produits_entrepot spe
             JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-            WHERE sw.entreprise_id = :entreprise_id
+            WHERE sw.entreprise_id = :entreprise_id AND sw.is_active = 1
         """), {"entreprise_id": self.entreprise_id}).scalar()
         
         # Produits en rupture
@@ -531,7 +552,7 @@ class StockController:
             SELECT COUNT(DISTINCT spe.product_id) 
             FROM stock_produits_entrepot spe
             JOIN stock_warehouses sw ON spe.warehouse_id = sw.id
-            WHERE sw.entreprise_id = :entreprise_id AND spe.quantity = 0
+            WHERE sw.entreprise_id = :entreprise_id AND sw.is_active = 1 AND spe.quantity = 0
         """), {"entreprise_id": self.entreprise_id}).scalar()
         
         # Alertes stock faible

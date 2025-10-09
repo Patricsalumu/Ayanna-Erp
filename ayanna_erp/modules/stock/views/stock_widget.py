@@ -148,9 +148,9 @@ class ProductStockDetailDialog(QDialog):
         
         # Tableau des entrepôts
         self.warehouses_table = QTableWidget()
-        self.warehouses_table.setColumnCount(7)
+        self.warehouses_table.setColumnCount(5)
         self.warehouses_table.setHorizontalHeaderLabels([
-            "Entrepôt", "Type", "Quantité", "Réservé", "Disponible", "Min", "Statut"
+            "Entrepôt", "Type", "Quantité", "Min", "Statut"
         ])
         self.warehouses_table.setAlternatingRowColors(True)
         layout.addWidget(self.warehouses_table)
@@ -202,22 +202,10 @@ class ProductStockDetailDialog(QDialog):
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 2, qty_item)
             
-            # Réservé
-            reserved_item = QTableWidgetItem(f"{stock['reserved_quantity']:.2f}")
-            reserved_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.warehouses_table.setItem(row, 3, reserved_item)
-            
-            # Disponible
-            available_item = QTableWidgetItem(f"{stock['available_quantity']:.2f}")
-            available_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if stock['available_quantity'] <= 0:
-                available_item.setBackground(QColor("#FFE6E6"))  # Rouge clair
-            self.warehouses_table.setItem(row, 4, available_item)
-            
             # Min
             min_item = QTableWidgetItem(f"{stock['minimum_stock']:.2f}")
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.warehouses_table.setItem(row, 5, min_item)
+            self.warehouses_table.setItem(row, 3, min_item)
             
             # Statut
             status = stock['status']
@@ -239,7 +227,7 @@ class ProductStockDetailDialog(QDialog):
             if status in status_colors:
                 status_item.setBackground(status_colors[status])
             
-            self.warehouses_table.setItem(row, 6, status_item)
+            self.warehouses_table.setItem(row, 4, status_item)
         
         # Ajuster les colonnes
         self.warehouses_table.resizeColumnsToContents()
@@ -364,9 +352,9 @@ class StockWidget(QWidget):
         
         # Tableau principal des stocks
         self.stocks_table = QTableWidget()
-        self.stocks_table.setColumnCount(10)
+        self.stocks_table.setColumnCount(8)
         self.stocks_table.setHorizontalHeaderLabels([
-            "Produit", "Code", "Entrepôt", "Quantité", "Réservé", "Disponible", 
+            "Produit", "Code", "Entrepôt", "Quantité", 
             "Min", "Coût Unit.", "Valeur", "Statut"
         ])
         self.stocks_table.setAlternatingRowColors(True)
@@ -467,32 +455,20 @@ class StockWidget(QWidget):
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 3, qty_item)
             
-            # Réservé
-            reserved_item = QTableWidgetItem(f"{stock['reserved_quantity']:.2f}")
-            reserved_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 4, reserved_item)
-            
-            # Disponible
-            available_item = QTableWidgetItem(f"{stock['available_quantity']:.2f}")
-            available_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            if stock['available_quantity'] <= 0:
-                available_item.setBackground(QColor("#FFE6E6"))  # Rouge clair
-            self.stocks_table.setItem(row, 5, available_item)
-            
             # Min
             min_item = QTableWidgetItem(f"{stock['minimum_stock']:.2f}")
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 6, min_item)
+            self.stocks_table.setItem(row, 4, min_item)
             
             # Coût unitaire
             cost_item = QTableWidgetItem(f"{stock['unit_cost']:.2f}")
             cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 7, cost_item)
+            self.stocks_table.setItem(row, 5, cost_item)
             
             # Valeur
             value_item = QTableWidgetItem(f"{stock['stock_value']:.2f}")
             value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.stocks_table.setItem(row, 8, value_item)
+            self.stocks_table.setItem(row, 6, value_item)
             
             # Statut
             status = stock['status']
@@ -514,7 +490,7 @@ class StockWidget(QWidget):
             if status in status_colors:
                 status_item.setBackground(status_colors[status])
             
-            self.stocks_table.setItem(row, 9, status_item)
+            self.stocks_table.setItem(row, 7, status_item)
         
         # Ajuster les colonnes
         self.stocks_table.resizeColumnsToContents()

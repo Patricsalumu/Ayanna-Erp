@@ -463,8 +463,8 @@ class EntrepotWidget(QWidget):
                 sale_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.warehouses_table.setItem(row, 2, sale_value_item)
                 
-                # Stock Total Achat
-                cost_value_item = QTableWidgetItem(f"{stats['total_cost_value']:.2f} €")
+                # Stock Total Achat (prix d'achat depuis core_products.cost)
+                cost_value_item = QTableWidgetItem(f"{stats['total_purchase_value']:.2f} €")
                 cost_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.warehouses_table.setItem(row, 3, cost_value_item)
                 

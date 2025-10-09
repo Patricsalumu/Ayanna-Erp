@@ -17,7 +17,7 @@ from ayanna_erp.database.database_manager import DatabaseManager
 # Import des widgets modulaires
 from ayanna_erp.modules.stock.views.entrepot_widget import EntrepotWidget
 from ayanna_erp.modules.stock.views.stock_widget import StockWidget
-from ayanna_erp.modules.stock.views.transfert_widget import TransfertWidget
+from ayanna_erp.modules.stock.views.movement_widget import MovementWidget as TransfertWidget
 from ayanna_erp.modules.stock.views.alerte_widget import AlerteWidget
 from ayanna_erp.modules.stock.views.inventaire_widget import InventaireWidget
 from ayanna_erp.modules.stock.views.rapport_widget import RapportWidget
@@ -168,9 +168,9 @@ class ModularStockManagementWidget(QWidget):
             self.stock_widget = StockWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.stock_widget, "📦 Stocks")
             
-            # Onglet 3: Transferts
+            # Onglet 3: Mouvements (ancien Transferts)
             self.transfert_widget = TransfertWidget(self.entreprise_id, self.current_user)
-            self.tab_widget.addTab(self.transfert_widget, "🔄 Transferts")
+            self.tab_widget.addTab(self.transfert_widget, "� Mouvements")
             
             # Onglet 4: Alertes
             self.alerte_widget = AlerteWidget(self.entreprise_id, self.current_user)
@@ -202,10 +202,10 @@ class ModularStockManagementWidget(QWidget):
             if self.stock_widget:
                 self.stock_widget.stock_updated.connect(self.on_stock_updated)
             
-            # Signaux des transferts
+            # Signaux des mouvements (ancien transferts)
             if self.transfert_widget:
-                self.transfert_widget.transfer_created.connect(self.on_transfer_created)
-                self.transfert_widget.transfer_updated.connect(self.on_transfer_updated)
+                self.transfert_widget.movement_created.connect(self.on_movement_created)
+                self.transfert_widget.movement_updated.connect(self.on_movement_updated)
             
             # Signaux des alertes
             if self.alerte_widget:
@@ -277,14 +277,14 @@ class ModularStockManagementWidget(QWidget):
         self.stock_updated.emit()
         self.update_status("📦 Stock mis à jour")
     
-    def on_transfer_created(self):
-        """Quand un transfert est créé"""
-        self.update_status("🔄 Nouveau transfert créé")
-        self.alert_generated.emit("INFO", "Nouveau transfert créé")
+    def on_movement_created(self):
+        """Quand un mouvement est créé"""
+        self.update_status("🔄 Nouveau mouvement créé")
+        self.alert_generated.emit("INFO", "Nouveau mouvement créé")
     
-    def on_transfer_updated(self):
-        """Quand un transfert est mis à jour"""
-        self.update_status("🔄 Transfert mis à jour")
+    def on_movement_updated(self):
+        """Quand un mouvement est mis à jour"""
+        self.update_status("🔄 Mouvement mis à jour")
     
     def on_alert_configured(self):
         """Quand une alerte est configurée"""

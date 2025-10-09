@@ -18,14 +18,18 @@ class EntrepotController:
         self.entreprise_id = entreprise_id
         self.db_manager = DatabaseManager()
     
-    def get_all_warehouses(self, session: Session) -> List[Dict[str, Any]]:
+    def get_all_warehouses(self, session: Session, active_only: bool = False) -> List[Dict[str, Any]]:
         """Récupérer tous les entrepôts de l'entreprise"""
-        result = session.execute(text("""
+        where_clause = "WHERE entreprise_id = :entreprise_id"
+        if active_only:
+            where_clause += " AND is_active = 1"
+            
+        result = session.execute(text(f"""
             SELECT id, code, name, type, description, address, 
                    contact_person, contact_phone, contact_email,
                    is_default, is_active, capacity_limit, created_at
             FROM stock_warehouses 
-            WHERE entreprise_id = :entreprise_id 
+            {where_clause}
             ORDER BY is_default DESC, name
         """), {"entreprise_id": self.entreprise_id})
         
@@ -255,15 +259,22 @@ class EntrepotController:
                 'total_cost_value': 0.0
             }
         
-        # Calculer la valeur de vente en joignant avec les produits boutique
-        sale_value_result = session.execute(text("""
-            SELECT COALESCE(SUM(spe.quantity * cp.price_unit), 0) as total_sale_value
+        # Calculer la valeur de vente et d'achat en joignant avec les produits
+        value_result = session.execute(text("""
+            SELECT 
+                COALESCE(SUM(spe.quantity * cp.price_unit), 0) as total_sale_value,
+                COALESCE(SUM(spe.quantity * cp.cost), 0) as total_purchase_value
             FROM stock_produits_entrepot spe
-            JOIN core_products sp ON spe.product_id = cp.id
+            LEFT JOIN core_products cp ON spe.product_id = cp.id
             WHERE spe.warehouse_id = :warehouse_id
         """), {"warehouse_id": warehouse_id}).fetchone()
         
-        stats['total_sale_value'] = float(sale_value_result[0] or 0) if sale_value_result else 0.0
+        if value_result:
+            stats['total_sale_value'] = float(value_result[0] or 0)
+            stats['total_purchase_value'] = float(value_result[1] or 0)
+        else:
+            stats['total_sale_value'] = 0.0
+            stats['total_purchase_value'] = 0.0
         
         return stats
     
