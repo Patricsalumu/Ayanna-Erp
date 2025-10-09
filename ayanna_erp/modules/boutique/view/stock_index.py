@@ -434,3 +434,8 @@ class RapportIndex(QWidget):
     def refresh_data(self):
         """Actualiser les données des rapports"""
         self.load_reports_data()
+    
+    def refresh_stock_data(self):
+        """Alias pour actualiser les données de stock (compatibilité)"""
+        self.load_stock_data()
+        self.load_reports_data()

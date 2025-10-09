@@ -491,6 +491,10 @@ class RapportIndexWidget(QWidget):
             
         except Exception as e:
             print(f"Erreur lors de l'actualisation des rapports: {e}")
+    
+    def refresh_data(self):
+        """Alias pour actualiser_rapports (compatibilité)"""
+        self.actualiser_rapports()
             
     def charger_top_produits(self):
         """Charge le top des produits"""

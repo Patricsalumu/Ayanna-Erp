@@ -322,7 +322,31 @@ class AchatController:
             ).first()
             
             if not config:
-                print("Aucune configuration comptable trouvée")
+                error_msg = "⚠️ CONFIGURATION COMPTABLE MANQUANTE ⚠️\n"
+                error_msg += f"Aucune configuration comptable trouvée pour l'entreprise {self.entreprise_id}.\n"
+                error_msg += "Veuillez configurer les comptes comptables dans le module Comptabilité avant de procéder aux achats.\n"
+                error_msg += "Configuration requise: compte d'achat, compte de caisse, compte fournisseur."
+                print(error_msg)
+                # Optionnel: lever une exception pour forcer l'utilisateur à configurer
+                # raise ValueError("Configuration comptable manquante")
+                return
+            
+            # Vérifier que les comptes configurés existent
+            missing_accounts = []
+            if config.compte_achat_id:
+                compte_achat = session.query(ComptaComptes).get(config.compte_achat_id)
+                if not compte_achat:
+                    missing_accounts.append(f"Compte achat (ID: {config.compte_achat_id})")
+            else:
+                missing_accounts.append("Compte achat non configuré")
+                
+            if missing_accounts:
+                error_msg = "⚠️ COMPTES COMPTABLES MANQUANTS ⚠️\n"
+                error_msg += "Les comptes suivants sont manquants ou mal configurés:\n"
+                for account in missing_accounts:
+                    error_msg += f"  - {account}\n"
+                error_msg += "Veuillez vérifier la configuration dans le module Comptabilité."
+                print(error_msg)
                 return
             
             # Créer le journal principal
@@ -350,6 +374,8 @@ class AchatController:
                     libelle=f"Achat - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
                 )
                 session.add(ecriture_debit)
+            else:
+                print("⚠️ Aucun compte d'achat configuré - écriture débit non créée")
             
             # Écriture de crédit : Compte de paiement
             compte = session.query(ComptaComptes).get(depense.compte_id)
@@ -377,10 +403,14 @@ class AchatController:
             
             session.add(ecriture_credit)
             
-            print(f"Écriture comptable créée dans le journal ID: {journal.id}")
+            session.flush()  # Pour s'assurer que les écritures sont en base
+            
+            print(f"✅ Écriture comptable créée - Journal ID: {journal.id} - Montant: {commande.montant_total}€")
             
         except Exception as e:
             print(f"Erreur lors de la création de l'écriture comptable: {e}")
+            import traceback
+            traceback.print_exc()
             # Ne pas faire échouer tout le processus si la comptabilité échoue
             pass
     

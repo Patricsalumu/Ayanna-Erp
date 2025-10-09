@@ -15,6 +15,7 @@ from ..controller.boutique_controller import BoutiqueController
 
 # Import des différents onglets
 from .panier_index import PanierIndex
+from .modern_supermarket_widget import ModernSupermarketWidget
 from .produit_index import ProduitIndex
 from .categorie_index import CategorieIndex
 from .client_index import ClientIndex
@@ -107,12 +108,18 @@ class BoutiqueWindow(QMainWindow):
         """Configuration de tous les onglets avec les contrôleurs"""
         
         try:
-            # Onglet Panier - Vue principale de vente
-            self.panier_widget = PanierIndex(self.boutique_controller, self.current_user)
-            self.tab_widget.addTab(self.panier_widget, "🛒 Panier")
+            # Onglet Vente - Interface moderne type supermarché
+            self.modern_shop_widget = ModernSupermarketWidget(
+                self.boutique_controller, 
+                self.current_user, 
+                self.pos_id
+            )
+            self.tab_widget.addTab(self.modern_shop_widget, "🛒 Vente")
             
-            # Connecter le signal d'ajout de produit
-            self.panier_widget.product_selected.connect(self.on_product_selected_from_catalog)
+            # Connecter les signaux de la nouvelle interface
+            self.modern_shop_widget.product_added_to_cart.connect(self.on_product_added_to_cart)
+            self.modern_shop_widget.cart_updated.connect(self.on_cart_updated)
+            self.modern_shop_widget.sale_completed.connect(self.on_sale_completed)
             
             # Onglet Produits - Gestion des produits
             pos_id = getattr(self.boutique_controller, 'pos_id', 1)
@@ -135,15 +142,15 @@ class BoutiqueWindow(QMainWindow):
             self.rapports_widget = RapportIndexWidget(self)
             self.tab_widget.addTab(self.rapports_widget, "📈 Rapports")
             
-            # Définir l'onglet par défaut (Panier)
+            # Définir l'onglet par défaut (Vente)
             self.tab_widget.setCurrentIndex(0)
             
-            print("✅ Tous les onglets de la boutique créés avec leurs contrôleurs")
+            print("✅ Interface moderne de boutique créée avec succès")
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur d'initialisation", 
-                               f"Erreur lors de la création des onglets: {str(e)}")
-            print(f"❌ Erreur lors de la création des onglets: {e}")
+                               f"Erreur lors de la création de l'interface: {str(e)}")
+            print(f"❌ Erreur lors de la création de l'interface: {e}")
     
     def on_panier_updated(self):
         """Callback quand le panier est mis à jour"""
@@ -174,13 +181,39 @@ class BoutiqueWindow(QMainWindow):
             self.produits_widget.refresh_product(product_id)
     
     def on_product_selected_from_catalog(self, product_id: int, quantity: int = 1):
-        """Callback quand un produit est sélectionné depuis le catalogue"""
-        # Ajouter le produit au panier
-        if hasattr(self, 'panier_widget'):
+        """Callback quand un produit est sélectionné depuis le catalogue (ancien système)"""
+        # Rediriger vers la nouvelle interface si elle existe
+        if hasattr(self, 'modern_shop_widget'):
+            # La nouvelle interface gère directement l'ajout au panier
+            pass
+        elif hasattr(self, 'panier_widget'):
             self.panier_widget.add_product_to_panier(product_id, quantity)
     
+    def on_product_added_to_cart(self, product_id: int, quantity: int):
+        """Callback pour le nouveau système moderne"""
+        print(f"Produit {product_id} ajouté au panier (quantité: {quantity})")
+        # Émettre signal vers l'application principale si nécessaire
+        self.product_added.emit(product_id)
+    
+    def on_cart_updated(self):
+        """Callback quand le panier est mis à jour (nouveau système)"""
+        print("Panier mis à jour")
+        self.panier_updated.emit()
+    
+    def on_sale_completed(self, sale_id: int):
+        """Callback quand une vente est complétée"""
+        print(f"Vente {sale_id} complétée avec succès")
+        
+        # Actualiser les rapports
+        if hasattr(self, 'rapports_widget'):
+            self.rapports_widget.refresh_data()
+            
+        # Actualiser le stock
+        if hasattr(self, 'stock_widget'):
+            self.stock_widget.refresh_stock_data()
+    
     def switch_to_panier_tab(self):
-        """Basculer vers l'onglet panier"""
+        """Basculer vers l'onglet vente (moderne)"""
         self.tab_widget.setCurrentIndex(0)
     
     def switch_to_products_tab(self):
