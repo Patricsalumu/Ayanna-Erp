@@ -20,7 +20,15 @@ class AchatController:
     def __init__(self, pos_id: int = None, entreprise_id: int = None):
         self.db_manager = DatabaseManager()
         self.pos_id = pos_id
-        self.entreprise_id = entreprise_id or self.db_manager.get_current_enterprise_id()
+        
+        # Récupérer l'ID de l'entreprise de l'utilisateur connecté
+        from ayanna_erp.core.session_manager import SessionManager
+        if entreprise_id:
+            self.entreprise_id = entreprise_id
+        else:
+            # Récupérer l'entreprise de l'utilisateur connecté
+            connected_enterprise_id = SessionManager.get_current_enterprise_id()
+            self.entreprise_id = connected_enterprise_id
     
     # ================== GESTION DES FOURNISSEURS ==================
     
@@ -378,13 +386,11 @@ class AchatController:
                 print("⚠️ Aucun compte d'achat configuré - écriture débit non créée")
             
             # Écriture de crédit : Compte de paiement
-            compte = session.query(ComptaComptes).get(depense.compte_id)
-            
-            if compte.numero.startswith('4'):  # Compte fournisseur - créance
+            if config.compte_caisse_id:  # Compte fournisseur - créance
                 # Crédit au compte fournisseur (augmentation de la dette)
                 ecriture_credit = ComptaEcritures(
                     journal_id=journal.id,
-                    compte_comptable_id=depense.compte_id,
+                    compte_comptable_id=config.compte_caisse_id,
                     debit=Decimal('0'),
                     credit=commande.montant_total,
                     ordre=2,

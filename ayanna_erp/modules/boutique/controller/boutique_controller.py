@@ -32,7 +32,16 @@ class BoutiqueController(QObject):
         self._panier_actuel: Optional[ShopPanier] = None
         self._initialized = False
         self.pos_id = pos_id
-        self.entreprise_id = entreprise_id or self.db_manager.get_current_enterprise_id()
+        
+        # Récupérer l'ID de l'entreprise de l'utilisateur connecté
+        from ayanna_erp.core.session_manager import SessionManager
+        if entreprise_id:
+            self.entreprise_id = entreprise_id
+        else:
+            # Récupérer l'entreprise de l'utilisateur connecté
+            connected_enterprise_id = SessionManager.get_current_enterprise_id()
+            self.entreprise_id = connected_enterprise_id if connected_enterprise_id else 1
+            
         self.stock_helper = BoutiqueStockHelper(pos_id=pos_id, entreprise_id=self.entreprise_id)
     
     def _ensure_initialized(self, session: Session) -> bool:
