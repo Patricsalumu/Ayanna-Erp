@@ -32,12 +32,90 @@ class CommandesIndexWidget(QWidget):
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(20)
         
+        # En-tête avec titre et statistiques
+        self.create_header(layout)
+        
         # Zone de filtres et recherche
         self.create_filters_section(layout)
         
         # Tableau des commandes
         self.create_commandes_table(layout)
-
+        
+        # Zone de statistiques en bas
+        self.create_statistics_section(layout)
+        
+    def create_header(self, layout):
+        """Créer l'en-tête avec titre et stats rapides"""
+        header_frame = QFrame()
+        header_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        
+        header_layout = QHBoxLayout(header_frame)
+        
+        # Titre
+        title_label = QLabel("📋 GESTION DES COMMANDES")
+        title_font = QFont()
+        title_font.setPointSize(16)
+        title_font.setBold(True)
+        title_label.setFont(title_font)
+        title_label.setStyleSheet("color: #2E7D32; margin-bottom: 5px;")
+        
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+        
+        # Stats rapides
+        self.stats_layout = QHBoxLayout()
+        self.create_stat_widget("Commandes aujourd'hui", "0", "#4CAF50")
+        self.create_stat_widget("Total CA", "0 FC", "#2196F3")
+        self.create_stat_widget("Créances", "0 FC", "#FF9800")
+        
+        header_layout.addLayout(self.stats_layout)
+        
+        layout.addWidget(header_frame)
+        
+    def create_stat_widget(self, label_text, value_text, color):
+        """Créer un widget de statistique"""
+        stat_frame = QFrame()
+        stat_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: white;
+                border: 2px solid {color};
+                border-radius: 6px;
+                padding: 10px;
+                margin: 5px;
+            }}
+        """)
+        
+        stat_layout = QVBoxLayout(stat_frame)
+        stat_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Valeur
+        value_label = QLabel(value_text)
+        value_label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {color};")
+        value_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Label
+        label = QLabel(label_text)
+        label.setStyleSheet("font-size: 11px; color: #666;")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        stat_layout.addWidget(value_label)
+        stat_layout.addWidget(label)
+        
+        # Stocker les références pour mise à jour
+        if not hasattr(self, 'stat_widgets'):
+            self.stat_widgets = {}
+        
+        key = label_text.lower().replace(' ', '_')
+        self.stat_widgets[key] = value_label
+        
+        self.stats_layout.addWidget(stat_frame)
         
     def create_filters_section(self, layout):
         """Créer la section des filtres et recherche"""
@@ -142,6 +220,36 @@ class CommandesIndexWidget(QWidget):
         self.commandes_table.doubleClicked.connect(self.on_commande_double_click)
         
         layout.addWidget(self.commandes_table)
+        
+    def create_statistics_section(self, layout):
+        """Créer la section des statistiques détaillées"""
+        stats_frame = QFrame()
+        stats_frame.setStyleSheet("""
+            QFrame {
+                background-color: #f8f9fa;
+                border: 1px solid #dee2e6;
+                border-radius: 8px;
+                padding: 15px;
+            }
+        """)
+        
+        stats_layout = QHBoxLayout(stats_frame)
+        
+        # Statistiques de la période
+        period_stats = QVBoxLayout()
+        period_label = QLabel("📊 Statistiques de la période")
+        period_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        period_stats.addWidget(period_label)
+        
+        self.stats_text = QLabel()
+        self.stats_text.setStyleSheet("font-family: monospace; font-size: 11px;")
+        self.update_period_stats()
+        period_stats.addWidget(self.stats_text)
+        
+        stats_layout.addLayout(period_stats)
+        stats_layout.addStretch()
+        
+        layout.addWidget(stats_frame)
         
     def load_commandes(self):
         """Charger les commandes depuis la base de données"""

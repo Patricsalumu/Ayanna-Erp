@@ -17,8 +17,6 @@ from ..controller.boutique_controller import BoutiqueController
 from .panier_index import PanierIndex
 from .modern_supermarket_widget import ModernSupermarketWidget
 from .produit_index import ProduitIndex
-from modules.salle_fete.view.service_index import ServiceIndex
-from modules.salle_fete.view.entreSortie_index import EntreeSortieIndex
 from .categorie_index import CategorieIndex
 from .client_index import ClientIndex
 from .commandes_index import CommandesIndexWidget
@@ -46,7 +44,7 @@ class BoutiqueWindow(QMainWindow):
         self.boutique_controller.stock_updated.connect(self.on_stock_updated)
         
         self.setWindowTitle("Ayanna ERP - Boutique")
-        self.setMinimumSize(1200, 700)
+        self.setMinimumSize(1400, 800)
         
         # Indicateur d'initialisation
         self.is_initialized = False
@@ -84,7 +82,7 @@ class BoutiqueWindow(QMainWindow):
             }
             QTabBar::tab {
                 background-color: #ECF0F1;
-                padding: 10px 6px;
+                padding: 12px 24px;
                 margin-right: 2px;
                 font-weight: bold;
                 color: #2C3E50;
@@ -126,28 +124,19 @@ class BoutiqueWindow(QMainWindow):
             # Onglet Commandes - Suivi et gestion des commandes
             self.commandes_widget = CommandesIndexWidget(self.boutique_controller, self.current_user)
             self.tab_widget.addTab(self.commandes_widget, "📋 Commandes")
-            
-            # Onglet Catégories - Gestion des catégories
-            self.categories_widget = CategorieIndex(self.boutique_controller.pos_id, self.current_user)
-            self.tab_widget.addTab(self.categories_widget, "📂 Catégories")
 
             # Onglet Produits - Gestion des produits
             pos_id = getattr(self.boutique_controller, 'pos_id', 1)
             self.produits_widget = ProduitIndex(pos_id, self.current_user)
             self.tab_widget.addTab(self.produits_widget, "📦 Produits")
-            
-            # Onglet Produits - Gestion des produits
-            pos_id = getattr(self.boutique_controller, 'pos_id', 1)
-            self.services_widget = ServiceIndex(pos_id, self.current_user)
-            self.tab_widget.addTab(self.services_widget, "📦 Services")
+
+            # Onglet Catégories - Gestion des catégories
+            self.categories_widget = CategorieIndex(self.boutique_controller.pos_id, self.current_user)
+            self.tab_widget.addTab(self.categories_widget, "📂 Catégories")
 
             # Onglet Clients - Gestion des clients
             self.clients_widget = ClientIndex(self.boutique_controller, self.current_user)
             self.tab_widget.addTab(self.clients_widget, "👥 Clients")
-            
-            # Onglet Clients - Gestion des clients
-            self.caisse_widget = EntreeSortieIndex(self.boutique_controller, self.current_user)
-            self.tab_widget.addTab(self.caisse_widget, "👥 Caisse")
 
             # Onglet Rapports - Analyses et rapports
             self.rapports_widget = RapportIndexWidget(self)
