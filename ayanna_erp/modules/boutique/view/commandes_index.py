@@ -37,6 +37,23 @@ class CommandesIndexWidget(QWidget):
         
         # Tableau des commandes
         self.create_commandes_table(layout)
+        
+        # Zone de statistiques (texte formaté)
+        period_stats = QHBoxLayout()
+        period_label = QLabel("📊 Statistiques de la période")
+        period_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        period_stats.addWidget(period_label)
+
+        self.stats_text = QLabel()
+        self.stats_text.setStyleSheet("font-family: monospace; font-size: 11px;")
+        # initialisation du texte de stats
+        try:
+            self.update_period_stats()
+        except Exception:
+            pass
+        period_stats.addWidget(self.stats_text)
+        period_stats.addStretch()
+        layout.addLayout(period_stats)
 
         
     def create_filters_section(self, layout):
@@ -110,9 +127,10 @@ class CommandesIndexWidget(QWidget):
         self.commandes_table = QTableWidget()
         self.commandes_table.setColumnCount(9)
         self.commandes_table.setHorizontalHeaderLabels([
-            "N° Commande", "Date", "Client", "Produits", "Quantité Tot.", 
+            "N° Commande", "Date", "Client", "Produits / Services", "Quantité Tot.", 
             "Sous-total", "Remise", "Total", "Paiement"
         ])
+
         
         # Configuration du tableau
         header = self.commandes_table.horizontalHeader()
@@ -153,8 +171,9 @@ class CommandesIndexWidget(QWidget):
             
             with db_manager.get_session() as session:
                 # Requête pour récupérer les commandes avec détails
+                # Aggregate both products and services using subqueries to avoid row multiplication
                 query = text("""
-                    SELECT 
+                    SELECT
                         sp.id,
                         sp.numero_commande,
                         sp.created_at,
@@ -164,16 +183,28 @@ class CommandesIndexWidget(QWidget):
                         sp.total_final,
                         sp.payment_method,
                         sp.status,
-                        GROUP_CONCAT(cp.name || ' (x' || spp.quantity || ')') as produits,
-                        SUM(spp.quantity) as total_quantity
+                        (
+                            SELECT GROUP_CONCAT(cp.name || ' (x' || spp.quantity || ')')
+                            FROM shop_paniers_products spp
+                            JOIN core_products cp ON spp.product_id = cp.id
+                            WHERE spp.panier_id = sp.id
+                        ) as produits,
+                        (
+                            SELECT GROUP_CONCAT(ss.name || ' (x' || sps.quantity || ')')
+                            FROM shop_paniers_services sps
+                            JOIN event_services ss ON sps.service_id = ss.id
+                            WHERE sps.panier_id = sp.id
+                        ) as services,
+                        (
+                            COALESCE(
+                                (SELECT SUM(spp.quantity) FROM shop_paniers_products spp WHERE spp.panier_id = sp.id), 0
+                            ) + COALESCE(
+                                (SELECT SUM(sps.quantity) FROM shop_paniers_services sps WHERE sps.panier_id = sp.id), 0
+                            )
+                        ) as total_quantity
                     FROM shop_paniers sp
                     LEFT JOIN shop_clients sc ON sp.client_id = sc.id
-                    LEFT JOIN shop_paniers_products spp ON sp.id = spp.panier_id
-                    LEFT JOIN core_products cp ON spp.product_id = cp.id
                     WHERE sp.status = 'completed'
-                    GROUP BY sp.id, sp.numero_commande, sp.created_at, sc.nom, sc.prenom, 
-                             sp.subtotal, sp.remise_amount, sp.total_final, 
-                             sp.payment_method, sp.status
                     ORDER BY sp.created_at DESC
                     LIMIT 100
                 """)
@@ -181,8 +212,36 @@ class CommandesIndexWidget(QWidget):
                 result = session.execute(query)
                 commandes = result.fetchall()
                 
-                self.populate_table(commandes)
-                self.update_statistics(commandes)
+                # Post-process each row to combine products+services into a single items field
+                processed = []
+                for c in commandes:
+                    prod = c.produits or ''
+                    serv = c.services or ''
+                    if prod and serv:
+                        items = prod + ', ' + serv
+                    else:
+                        items = prod or serv or 'Aucun produit/service'
+
+                    # Build a simple object-like with attributes used by populate_table
+                    class RowObj:
+                        pass
+
+                    r = RowObj()
+                    r.id = c.id
+                    r.numero_commande = c.numero_commande
+                    r.created_at = c.created_at
+                    r.client_name = c.client_name
+                    r.subtotal = c.subtotal
+                    r.remise_amount = c.remise_amount
+                    r.total_final = c.total_final
+                    r.payment_method = c.payment_method
+                    r.status = c.status
+                    r.produits = items
+                    r.total_quantity = c.total_quantity
+                    processed.append(r)
+
+                self.populate_table(processed)
+                self.update_statistics(processed)
                 
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des commandes: {e}")
@@ -195,51 +254,56 @@ class CommandesIndexWidget(QWidget):
         for row, commande in enumerate(commandes):
             # N° Commande
             self.commandes_table.setItem(row, 0, QTableWidgetItem(str(commande.numero_commande or f"CMD-{commande.id}")))
-            
+
             # Date
             date_str = ""
             if commande.created_at:
                 if isinstance(commande.created_at, str):
-                    # Si c'est une chaîne, la parser
                     try:
                         from datetime import datetime
                         date_obj = datetime.strptime(commande.created_at[:19], "%Y-%m-%d %H:%M:%S")
                         date_str = date_obj.strftime("%d/%m/%Y %H:%M")
                     except:
-                        date_str = commande.created_at[:16]  # Fallback
+                        date_str = commande.created_at[:16]
                 else:
-                    # Si c'est déjà un objet datetime
                     date_str = commande.created_at.strftime("%d/%m/%Y %H:%M")
             self.commandes_table.setItem(row, 1, QTableWidgetItem(date_str))
-            
+
             # Client
             self.commandes_table.setItem(row, 2, QTableWidgetItem(str(commande.client_name)))
-            
-            # Produits
-            produits_text = commande.produits or "Aucun produit"
-            if len(produits_text) > 50:
-                produits_text = produits_text[:47] + "..."
-            self.commandes_table.setItem(row, 3, QTableWidgetItem(produits_text))
-            
+
+            # Produits et services (concaténation explicite pour éviter toute perte)
+            produits = getattr(commande, 'produits', '') or ''
+            services = getattr(commande, 'services', '') or ''
+            items = []
+            if produits:
+                items.append(produits)
+            if services:
+                items.append(services)
+            items_text = ', '.join(items) if items else 'Aucun produit/service'
+            if len(items_text) > 100:
+                items_text = items_text[:97] + '...'
+            self.commandes_table.setItem(row, 3, QTableWidgetItem(items_text))
+
             # Quantité totale
             self.commandes_table.setItem(row, 4, QTableWidgetItem(str(commande.total_quantity or 0)))
-            
+
             # Sous-total
             self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.subtotal:.0f} FC"))
-            
+
             # Remise
             self.commandes_table.setItem(row, 6, QTableWidgetItem(f"{commande.remise_amount:.0f} FC"))
-            
+
             # Total
             total_item = QTableWidgetItem(f"{commande.total_final:.0f} FC")
             if commande.payment_method == 'Crédit':
-                total_item.setBackground(QColor("#ffecb3"))  # Jaune pour crédit
+                total_item.setBackground(QColor("#ffecb3"))
             self.commandes_table.setItem(row, 7, total_item)
-            
+
             # Paiement
             payment_item = QTableWidgetItem(str(commande.payment_method))
             if commande.payment_method == 'Crédit':
-                payment_item.setBackground(QColor("#ffcdd2"))  # Rouge pour crédit
+                payment_item.setBackground(QColor("#ffcdd2"))
             self.commandes_table.setItem(row, 8, payment_item)
             
     def update_statistics(self, commandes):

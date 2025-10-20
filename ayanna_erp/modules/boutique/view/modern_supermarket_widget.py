@@ -1895,7 +1895,13 @@ class PaymentDialog(QDialog):
         
         if total_amount is None:
             subtotal = sum(item['unit_price'] * item['quantity'] for item in cart_items)
-            discount_amount = subtotal * discount / 100
+            # s'assurer que discount est un float (éviter Decimal * float)
+            try:
+                discount_val = float(discount)
+            except Exception:
+                discount_val = 0.0
+
+            discount_amount = subtotal * discount_val / 100.0
             self.total_amount = subtotal - discount_amount
         else:
             self.total_amount = total_amount
