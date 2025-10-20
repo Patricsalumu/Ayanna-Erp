@@ -45,7 +45,7 @@ class BoutiqueWindow(QMainWindow):
         self.boutique_controller.payment_completed.connect(self.on_payment_completed)
         self.boutique_controller.stock_updated.connect(self.on_stock_updated)
         
-        self.setWindowTitle("Ayanna ERP - Boutique")
+        self.setWindowTitle("Ayanna ERP - Vente")
         self.setMinimumSize(1200, 700)
         
         # Indicateur d'initialisation

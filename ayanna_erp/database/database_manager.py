@@ -145,7 +145,7 @@ class DatabaseManager:
             # Insérer les modules par défaut
             modules_default = [
                 {"name": "SalleFete", "description": "Gestion des salles de fête et événements"},
-                {"name": "Boutique", "description": "Gestion de boutique générale"},
+                {"name": "Vente", "description": "Gestion des ventes des Produits et services"},
                 {"name": "Pharmacie", "description": "Gestion de pharmacie"},
                 {"name": "Restaurant", "description": "Gestion de restaurant et bar"},
                 {"name": "Hotel", "description": "Gestion d'hôtel"},

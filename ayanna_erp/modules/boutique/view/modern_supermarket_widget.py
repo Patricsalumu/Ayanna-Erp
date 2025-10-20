@@ -89,7 +89,7 @@ class ModernSupermarketWidget(QWidget):
         header_layout = QHBoxLayout(header_frame)
         
         # Titre principal
-        title_label = QLabel("🛒 Ayanna Supermarché")
+        title_label = QLabel("🛒 Ayanna Point de vente")
         title_label.setStyleSheet("""
             QLabel {
                 color: white;

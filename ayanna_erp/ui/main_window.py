@@ -265,8 +265,8 @@ class MainWindow(QMainWindow):
                     "description": "Gestion des événements\net salles de fête",
                     "color": "#E74C3C"
                 },
-                "Boutique": {
-                    "description": "Gestion de la boutique\net des ventes",
+                "Vente": {
+                    "description": "Gestion des ventes\ndes Produits et services",
                     "color": "#3498DB"
                 },
                 "Pharmacie": {
@@ -365,7 +365,7 @@ class MainWindow(QMainWindow):
             session = self.db_manager.get_session()
             
             # Vérifier si le module Boutique existe déjà
-            existing_module = session.query(Module).filter(Module.name == "Boutique").first()
+            existing_module = session.query(Module).filter(Module.name == "Vente").first()
             
             if not existing_module:
                 # Afficher un message de progression
@@ -380,8 +380,8 @@ class MainWindow(QMainWindow):
                 
                 # Créer le module Boutique
                 boutique_module = Module(
-                    name="Boutique",
-                    description="Gestion de la boutique et des ventes - Point de vente avec catalogue produits/services, panier, gestion des stocks et paiements",
+                    name="Vente",
+                    description="Gestion des ventes - Point de vente avec catalogue produits/services, panier, gestion des stocks et paiements",
                     is_active=True
                 )
                 
@@ -536,7 +536,7 @@ class MainWindow(QMainWindow):
                     QMessageBox.warning(self, "Erreur", "Aucun point de vente configuré pour ce module.")
                     return
                 window = SalleFeteWindow(self.current_user, pos_id=pos_id)
-            elif module_name == "Boutique":
+            elif module_name == "Vente":
                 # Enregistrer le module s'il n'existe pas déjà
                 self.ensure_boutique_module_registered()
                 
