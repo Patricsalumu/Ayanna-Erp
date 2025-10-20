@@ -25,37 +25,30 @@ def init_stock_data(db_session=None):
         bool: True si l'initialisation a réussi
     """
     try:
-        # Utiliser la session fournie ou en créer une nouvelle
-        session = db_session
-        session_created = False
-        
-        if session is None:
-            db_manager = DatabaseManager()
-            session = db_manager.get_session()
-            session_created = True
-        
-        # Créer les tables si elles n'existent pas
+        # Créer les tables si elles n'existent pas (utilise l'engine du DatabaseManager)
         from ayanna_erp.database.base import Base
-        from ayanna_erp.database.database_manager import DatabaseManager
-        
+
         db_manager = DatabaseManager()
         Base.metadata.create_all(db_manager.engine)
-        
+
         logger.info("📦 Initialisation du module Stock...")
-        
-        # Vérifier si les entrepôts existent déjà
-        existing_warehouses = session.query(StockWarehouse).count()
-        
-        if existing_warehouses == 0:
-            logger.info("Création des entrepôts de base...")
-            
-            # Entrepôts de base selon les POS
-            warehouses_data = [
+
+        # Si une session est fournie, l'utiliser directement, sinon ouvrir une session contextuelle
+        if db_session is None:
+            # Utiliser le context manager fourni par DatabaseManager.get_session()
+            with db_manager.get_session() as session:
+                existing_warehouses = session.query(StockWarehouse).count()
+
+                if existing_warehouses == 0:
+                    logger.info("Création des entrepôts de base...")
+
+                    # Entrepôts de base selon les POS
+                    warehouses_data = [
                 {
                     'code': 'POS_2',
-                    'name': 'Entrepôt Boutique',
+                    'name': 'Entrepôt Vente',
                     'type': 'Principal',
-                    'description': 'Entrepôt principal pour la boutique',
+                    'description': 'Entrepôt principal pour la vente',
                     'is_default': True,
                     'is_active': True,
                     'entreprise_id': 1
@@ -80,36 +73,95 @@ def init_stock_data(db_session=None):
                 }
             ]
             
-            for warehouse_data in warehouses_data:
-                warehouse = StockWarehouse(
-                    code=warehouse_data['code'],
-                    name=warehouse_data['name'],
-                    type=warehouse_data['type'],
-                    description=warehouse_data['description'],
-                    is_default=warehouse_data['is_default'],
-                    is_active=warehouse_data['is_active'],
-                    entreprise_id=warehouse_data['entreprise_id'],
-                    created_at=datetime.now(),
-                    updated_at=datetime.now()
-                )
-                session.add(warehouse)
-                logger.info(f"✅ Entrepôt créé: {warehouse.name} ({warehouse.code})")
-            
-            session.commit()
-            logger.info(f"✅ {len(warehouses_data)} entrepôts créés avec succès")
+                    for warehouse_data in warehouses_data:
+                        warehouse = StockWarehouse(
+                            code=warehouse_data['code'],
+                            name=warehouse_data['name'],
+                            type=warehouse_data['type'],
+                            description=warehouse_data['description'],
+                            is_default=warehouse_data['is_default'],
+                            is_active=warehouse_data['is_active'],
+                            entreprise_id=warehouse_data['entreprise_id'],
+                            created_at=datetime.now(),
+                            updated_at=datetime.now()
+                        )
+                        session.add(warehouse)
+                        logger.info(f"✅ Entrepôt créé: {warehouse.name} ({warehouse.code})")
+
+                    session.commit()
+                    logger.info(f"✅ {len(warehouses_data)} entrepôts créés avec succès")
+                else:
+                    logger.info(f"ℹ️  {existing_warehouses} entrepôt(s) déjà existant(s)")
+
+                return True
         else:
-            logger.info(f"ℹ️  {existing_warehouses} entrepôt(s) déjà existant(s)")
-        
-        if session_created:
-            session.close()
-            
-        return True
+            # On utilise la session fournie par l'appelant (on suppose un objet Session actif)
+            session = db_session
+            existing_warehouses = session.query(StockWarehouse).count()
+
+            if existing_warehouses == 0:
+                logger.info("Création des entrepôts de base...")
+
+                warehouses_data = [
+                    {
+                        'code': 'POS_2',
+                        'name': 'Entrepôt Vente',
+                        'type': 'Principal',
+                        'description': 'Entrepôt principal pour la vente',
+                        'is_default': True,
+                        'is_active': True,
+                        'entreprise_id': 1
+                    },
+                    {
+                        'code': 'POS_3', 
+                        'name': 'Entrepôt Pharmacie',
+                        'type': 'Principal',
+                        'description': 'Entrepôt principal pour la pharmacie',
+                        'is_default': False,
+                        'is_active': True,
+                        'entreprise_id': 1
+                    },
+                    {
+                        'code': 'POS_4',
+                        'name': 'Entrepôt Restaurant', 
+                        'type': 'Principal',
+                        'description': 'Entrepôt principal pour le restaurant',
+                        'is_default': False,
+                        'is_active': True,
+                        'entreprise_id': 1
+                    }
+                ]
+
+                for warehouse_data in warehouses_data:
+                    warehouse = StockWarehouse(
+                        code=warehouse_data['code'],
+                        name=warehouse_data['name'],
+                        type=warehouse_data['type'],
+                        description=warehouse_data['description'],
+                        is_default=warehouse_data['is_default'],
+                        is_active=warehouse_data['is_active'],
+                        entreprise_id=warehouse_data['entreprise_id'],
+                        created_at=datetime.now(),
+                        updated_at=datetime.now()
+                    )
+                    session.add(warehouse)
+                    logger.info(f"✅ Entrepôt créé: {warehouse.name} ({warehouse.code})")
+
+                session.commit()
+                logger.info(f"✅ {len(warehouses_data)} entrepôts créés avec succès")
+            else:
+                logger.info(f"ℹ️  {existing_warehouses} entrepôt(s) déjà existant(s)")
+
+            return True
         
     except Exception as e:
         logger.error(f"❌ Erreur lors de l'initialisation du module Stock: {e}")
-        if session_created and session:
-            session.rollback()
-            session.close()
+        # Pas sûr si session existe dans ce scope; tenter de rollback si possible
+        try:
+            if 'session' in locals() and session is not None:
+                session.rollback()
+        except Exception:
+            pass
         return False
 
 

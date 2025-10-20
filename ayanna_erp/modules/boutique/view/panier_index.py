@@ -14,6 +14,8 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+# Importer EventService pour permettre l'utilisation des services définis dans le module Salle de Fête
+from ayanna_erp.modules.salle_fete.model.salle_fete import EventService
 
 # ...existing code...
 
@@ -659,13 +661,34 @@ class PanierIndex(QWidget):
                     )
                     self.populate_catalog_with_products(products)
                 else:
-                    # Afficher les services
+                    # Afficher les services: combiner les services de la boutique (shop_services)
+                    # et les services définis pour les événements (event_services)
                     search_term = self.search_input.text().strip() if self.search_input.text() else None
-                    services = self.boutique_controller.get_services(
+
+                    # Services 'shop' via le controller
+                    shop_services = self.boutique_controller.get_services(
                         session,
                         search_term=search_term
                     )
-                    self.populate_catalog_with_services(services)
+
+                    # Services 'event' depuis le module salle_fete
+                    try:
+                        query = session.query(EventService)
+                        if search_term:
+                            pattern = f"%{search_term}%"
+                            query = query.filter((EventService.name.ilike(pattern)) | (EventService.description.ilike(pattern)))
+                        event_services = query.order_by(EventService.name).all()
+                    except Exception:
+                        event_services = []
+
+                    # Marquer la source pour pouvoir différencier lors de l'ajout au panier
+                    combined = []
+                    for s in shop_services:
+                        combined.append(("shop", s))
+                    for s in event_services:
+                        combined.append(("event", s))
+
+                    self.populate_catalog_with_services(combined)
                     
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement du catalogue: {str(e)}")
@@ -740,37 +763,44 @@ class PanierIndex(QWidget):
             
             self.catalog_table.setCellWidget(row, 5, add_btn)
     
-    def populate_catalog_with_services(self, services: List[ShopService]):
-        """Peupler le catalogue avec les services"""
+    def populate_catalog_with_services(self, services: List[Any]):
+        """Peupler le catalogue avec les services.
+
+        Le paramètre `services` est une liste d'éléments (source, service_obj)
+        où source est 'shop' ou 'event'.
+        """
         self.catalog_table.setRowCount(len(services))
-        
-        for row, service in enumerate(services):
+
+        for row, item in enumerate(services):
+            source, service = item
+
             # Nom
             self.catalog_table.setItem(row, 0, QTableWidgetItem(service.name))
-            
+
             # Description
-            description = service.description if service.description else "-"
+            description = service.description if getattr(service, 'description', None) else "-"
             self.catalog_table.setItem(row, 1, QTableWidgetItem(description))
-            
-            # Prix
-            price_item = QTableWidgetItem(f"{service.price:.2f} €")
+
+            # Prix (compatibilité: 'price' ou 'prix')
+            price_val = getattr(service, 'price', None) or getattr(service, 'prix', 0.0)
+            price_item = QTableWidgetItem(f"{float(price_val):.2f} €")
             price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.catalog_table.setItem(row, 2, price_item)
-            
+
             # Stock (N/A pour les services)
             stock_item = QTableWidgetItem("Illimité")
             stock_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             stock_item.setBackground(QColor("#27AE60"))  # Vert
             stock_item.setForeground(QColor("white"))
             self.catalog_table.setItem(row, 3, stock_item)
-            
+
             # Quantité (SpinBox)
             quantity_spin = QSpinBox()
             quantity_spin.setMinimum(1)
             quantity_spin.setMaximum(999)
             quantity_spin.setValue(1)
             self.catalog_table.setCellWidget(row, 4, quantity_spin)
-            
+
             # Action (Bouton Ajouter)
             add_btn = QPushButton("➕ Ajouter")
             add_btn.setStyleSheet("""
@@ -786,12 +816,12 @@ class PanierIndex(QWidget):
                     background-color: #2980B9;
                 }
             """)
-            
-            # Connecter l'événement
+
+            # Connecter l'événement en passant la source pour savoir d'où provient le service
             add_btn.clicked.connect(
-                lambda checked, sid=service.id, row=row: self.add_service_to_panier_from_catalog(sid, row)
+                lambda checked, src=source, sid=service.id, row=row: self.add_service_to_panier_from_catalog(src, sid, row)
             )
-            
+
             self.catalog_table.setCellWidget(row, 5, add_btn)
     
     def add_product_to_panier_from_catalog(self, product_id: int, row: int):
@@ -812,15 +842,42 @@ class PanierIndex(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ajout du produit: {str(e)}")
     
-    def add_service_to_panier_from_catalog(self, service_id: int, row: int):
+    def add_service_to_panier_from_catalog(self, source: str, service_id: int, row: int):
         """Ajouter un service au panier depuis le catalogue"""
         try:
             quantity_spin = self.catalog_table.cellWidget(row, 4)
             quantity = quantity_spin.value()
             
             with self.db_manager.get_session() as session:
-                success, message = self.boutique_controller.add_service_to_panier(session, service_id, quantity)
-                
+                # Si le service provient du module 'event', on doit mapper/créer un ShopService
+                actual_service_id = service_id
+                if source == 'event':
+                    # Récupérer le service Event
+                    event_service = session.query(EventService).filter(EventService.id == service_id).first()
+                    if not event_service:
+                        QMessageBox.warning(self, "Erreur", "Service événement introuvable en base.")
+                        return
+
+                    # Essayer de trouver un ShopService équivalent
+                    shop_service = session.query(ShopService).filter(ShopService.name == event_service.name).first()
+                    if not shop_service:
+                        # Créer un ShopService minimal à partir de l'EventService
+                        shop_service = ShopService(
+                            pos_id=getattr(self.boutique_controller, 'pos_id', 1) or 1,
+                            name=event_service.name,
+                            description=event_service.description,
+                            cost=getattr(event_service, 'cost', 0.0) or 0.0,
+                            price=getattr(event_service, 'price', 0.0) or 0.0,
+                            is_active=True
+                        )
+                        session.add(shop_service)
+                        session.flush()
+                        session.refresh(shop_service)
+
+                    actual_service_id = shop_service.id
+
+                success, message = self.boutique_controller.add_service_to_panier(session, actual_service_id, quantity)
+
                 if success:
                     QMessageBox.information(self, "Succès", message)
                     self.refresh_panier()

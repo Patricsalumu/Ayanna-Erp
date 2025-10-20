@@ -18,8 +18,9 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+from ..model.models import ShopClient, ShopPanier, ShopService
+from ayanna_erp.modules.salle_fete.model.salle_fete import EventService
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-from ..model.models import ShopClient, ShopPanier
 
 
 class ModernSupermarketWidget(QWidget):
@@ -44,7 +45,9 @@ class ModernSupermarketWidget(QWidget):
         self.global_discount = Decimal('0.00')
         self.categories = []
         self.products = []
-        
+        # catalogue mode: 'products' or 'services'
+        self.catalog_mode = 'products'
+
         self.init_ui()
         self.apply_modern_style()
         self.load_initial_data()
@@ -138,6 +141,20 @@ class ModernSupermarketWidget(QWidget):
         
         filters_layout.addWidget(search_label)
         filters_layout.addWidget(self.search_edit, 2)
+
+        # Toggle produits / services
+        self.products_radio = QPushButton("Produits")
+        self.products_radio.setCheckable(True)
+        self.products_radio.setChecked(True)
+        self.products_radio.clicked.connect(self.on_catalog_mode_changed)
+        filters_layout.addWidget(self.products_radio)
+
+        self.services_radio = QPushButton("Services")
+        self.services_radio.setCheckable(True)
+        self.services_radio.setChecked(False)
+        self.services_radio.clicked.connect(self.on_catalog_mode_changed)
+        filters_layout.addWidget(self.services_radio)
+
         filters_layout.addWidget(category_label)
         filters_layout.addWidget(self.category_combo, 1)
         filters_layout.addStretch()
@@ -157,6 +174,258 @@ class ModernSupermarketWidget(QWidget):
         catalog_layout.addWidget(scroll_area)
         
         return catalog_widget
+
+    def on_catalog_mode_changed(self):
+        """Basculer entre affichage produits et services."""
+        # Gérer l'état des boutons comme un toggle simple
+        sender = self.sender()
+        if sender == self.products_radio:
+            self.catalog_mode = 'products'
+            self.products_radio.setChecked(True)
+            self.services_radio.setChecked(False)
+        else:
+            self.catalog_mode = 'services'
+            self.products_radio.setChecked(False)
+            self.services_radio.setChecked(True)
+
+        # Recharger le catalogue
+        self.load_products()
+
+    def load_services(self):
+        """Charge et affiche les services (shop_services + event_services)."""
+        try:
+            with self.db_manager.get_session() as session:
+                # Services depuis shop_services via ShopService
+                shop_query = session.query(ShopService).filter(ShopService.is_active == True)
+                search_text = self.search_edit.text().strip()
+                if search_text:
+                    shop_query = shop_query.filter(ShopService.name.ilike(f'%{search_text}%'))
+                shop_services = shop_query.order_by(ShopService.name).all()
+
+                # Services depuis event_services
+                try:
+                    event_query = session.query(EventService).filter(EventService.is_active == True)
+                    if search_text:
+                        event_query = event_query.filter(EventService.name.ilike(f'%{search_text}%'))
+                    event_services = event_query.order_by(EventService.name).all()
+                except Exception:
+                    event_services = []
+
+                # Combiner (marquer la source)
+                combined = []
+                for s in shop_services:
+                    combined.append(('shop', s))
+                for s in event_services:
+                    combined.append(('event', s))
+
+                self.display_services(combined)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des services: {e}")
+
+    def display_services(self, services):
+        """Affiche les services dans la grille (cards)."""
+        # Vider la grille existante
+        for i in reversed(range(self.products_grid_layout.count())):
+            child = self.products_grid_layout.itemAt(i).widget()
+            if child:
+                child.setParent(None)
+
+        # Si on est en mode 'services', afficher en LISTE (une ligne par service)
+        if getattr(self, 'catalog_mode', 'products') == 'services':
+            for i, (source, service) in enumerate(services):
+                row = i
+                list_item = self.create_service_list_item(service, source)
+                # ajouter sur une seule colonne
+                self.products_grid_layout.addWidget(list_item, row, 0)
+
+            # pousser le reste vers le bas
+            self.products_grid_layout.setRowStretch(len(services) + 1, 1)
+            return
+
+        # Mode par défaut : grille de cards
+        cols = 3
+        for i, (source, service) in enumerate(services):
+            row = i // cols
+            col = i % cols
+            service_card = self.create_service_card(service, source)
+            self.products_grid_layout.addWidget(service_card, row, col)
+
+        self.products_grid_layout.setRowStretch(len(services) // cols + 1, 1)
+
+    def create_service_card(self, service, source='shop'):
+        """Crée une carte visuelle pour un service (source='shop'|'event')."""
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.StyledPanel)
+        card.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                padding: 10px;
+            }
+            QFrame:hover {
+                border-color: #1976D2;
+                background-color: #F3F9FF;
+            }
+        """)
+        card.setFixedSize(200, 220)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setSpacing(6)
+
+        # Icone/service image
+        img = QLabel()
+        img.setFixedSize(140, 80)
+        img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        img.setText("🎯")
+        card_layout.addWidget(img, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # Nom
+        name = getattr(service, 'name', 'Service')
+        name_label = QLabel(name[:25] + '...' if len(name) > 25 else name)
+        name_label.setStyleSheet("font-weight: bold; color: #333;")
+        name_label.setWordWrap(True)
+        card_layout.addWidget(name_label)
+
+        # Prix
+        price_val = getattr(service, 'price', None) or getattr(service, 'prix', 0.0)
+        price_label = QLabel(f"{float(price_val):.0f} FC")
+        price_label.setStyleSheet("font-size:14px; font-weight:bold; color:#4CAF50;")
+        card_layout.addWidget(price_label)
+
+        # Source badge
+        source_label = QLabel("(événement)" if source == 'event' else "(boutique)")
+        source_label.setStyleSheet("color:#777; font-size:11px;")
+        card_layout.addWidget(source_label)
+        # Bouton ajouter
+        add_btn = QPushButton("➕ Ajouter")
+        add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px; padding:6px; font-weight:bold;")
+        # Capturer l'id et la source; récupérer l'objet en session au moment de l'ajout
+        # Passer explicitement l'id du service (plus robuste que l'objet lui-même)
+        add_btn.clicked.connect(lambda svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
+        card_layout.addWidget(add_btn)
+
+        return card
+
+    def create_service_list_item(self, service, source='shop'):
+        """Crée un widget ligne pour afficher un service en mode liste."""
+        row = QFrame()
+        row.setFrameStyle(QFrame.Shape.StyledPanel)
+        row.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #E8E8E8;
+                border-radius: 6px;
+                padding: 8px;
+            }
+            QFrame:hover {
+                background-color: #F3F9FF;
+            }
+        """)
+
+        layout = QHBoxLayout(row)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(12)
+
+        # Nom et description (colonne principale)
+        name = getattr(service, 'name', getattr(service, 'nom', 'Service'))
+        name_label = QLabel(name)
+        name_label.setStyleSheet("font-weight: bold; color: #333;")
+        name_label.setWordWrap(True)
+        layout.addWidget(name_label, 3)
+
+        # Prix
+        price_val = getattr(service, 'price', None) or getattr(service, 'prix', 0.0)
+        price_label = QLabel(f"{float(price_val):.0f} FC")
+        price_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
+        layout.addWidget(price_label, 1, Qt.AlignmentFlag.AlignRight)
+
+        # Source
+        source_label = QLabel("(événement)" if source == 'event' else "(boutique)")
+        source_label.setStyleSheet("color:#777; font-size:11px;")
+        layout.addWidget(source_label, 1, Qt.AlignmentFlag.AlignRight)
+
+        # Bouton ajouter
+        add_btn = QPushButton("➕")
+        add_btn.setToolTip("Ajouter au panier")
+        add_btn.setFixedSize(34, 28)
+        add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px;")
+        # Transmettre l'id pour garantir la recherche en session
+        add_btn.clicked.connect(lambda svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
+        layout.addWidget(add_btn, 0, Qt.AlignmentFlag.AlignRight)
+
+        return row
+
+    def add_service_to_cart_by_id(self, service_or_id, source='shop', service_name=None):
+        """Récupère le service en session (shop ou event), résout/crée si nécessaire et ajoute au panier.
+
+        Accepts either an integer id, a string id, or an object with attributes (id/name/nom/price).
+        When source == 'event' we search in EventService and map/create a ShopService.
+        When source == 'shop' we search directly in ShopService.
+        """
+        try:
+            # Debug: enregistrer la valeur reçue dans un fichier pour diagnostics
+            # debug logs removed
+            with self.db_manager.get_session() as session:
+                svc = None
+
+                # Normaliser l'entrée: extraire id et nom si disponibles
+                incoming_id = None
+                incoming_name = service_name
+                try:
+                    # traiter bool séparément (False n'est pas un id valide)
+                    if isinstance(service_or_id, bool):
+                        incoming_id = None
+                    elif isinstance(service_or_id, int):
+                        incoming_id = int(service_or_id)
+                    elif isinstance(service_or_id, str) and service_or_id.isdigit():
+                        incoming_id = int(service_or_id)
+                    else:
+                        incoming_id = getattr(service_or_id, 'id', None) or getattr(service_or_id, 'pk', None)
+                        if incoming_name is None:
+                            incoming_name = getattr(service_or_id, 'name', None) or getattr(service_or_id, 'nom', None)
+                except Exception:
+                    incoming_id = None
+
+                # Si c'est un service venant d'un événement, chercher dans EventService
+                if source == 'event':
+                    ev = None
+                    if incoming_id is not None:
+                        ev = session.query(EventService).filter_by(id=incoming_id).first()
+
+                    if ev is None and incoming_name:
+                        try:
+                            ev = session.query(EventService).filter(EventService.name.ilike(f'%{incoming_name}%')).first()
+                        except Exception:
+                            ev = None
+
+                    if ev:
+                        svc = self._resolve_event_service_to_shop_service(session, ev)
+
+                # Sinon, chercher directement dans les services de la boutique
+                else:
+                    if incoming_id is not None:
+                        svc = session.query(ShopService).filter_by(id=incoming_id).first()
+
+                    if svc is None and incoming_name:
+                        try:
+                            svc = session.query(ShopService).filter(ShopService.name.ilike(f'%{incoming_name}%')).first()
+                        except Exception:
+                            svc = None
+
+                if svc is None:
+                    # Debug temporaire: afficher l'id et la source reçus
+                    # debug logs removed
+                    QMessageBox.warning(self, "Service introuvable", "Le service sélectionné est introuvable en base.")
+                    return
+
+                # svc est un ShopService ORM (id/name/price disponibles)
+                # Appeler add_to_cart avec l'objet ShopService
+                self.add_to_cart(svc, item_type='service', source='shop')
+
+        except Exception as e:
+            print(f"Erreur add_service_to_cart_by_id: {e}")
     
     def create_cart_section(self):
         """Crée la section panier avec total et paiement"""
@@ -470,25 +739,129 @@ class ModernSupermarketWidget(QWidget):
     
     def load_products(self):
         """Charge et affiche les produits dans la grille"""
+        # Si le catalogue est en mode 'services', déléguer au loader de services
+        if getattr(self, 'catalog_mode', 'products') == 'services':
+            self.load_services()
+            return
+
         try:
             with self.db_manager.get_session() as session:
                 query = session.query(CoreProduct).filter_by(is_active=True)
-                
+
                 # Appliquer le filtre de catégorie si sélectionné
                 category_id = self.category_combo.currentData()
                 if category_id:
                     query = query.filter_by(category_id=category_id)
-                
+
                 # Appliquer le filtre de recherche
                 search_text = self.search_edit.text().strip()
                 if search_text:
                     query = query.filter(CoreProduct.name.ilike(f'%{search_text}%'))
-                
+
                 products = query.all()
                 self.display_products(products)
-                
+
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des produits: {e}")
+
+    def _get_display_name(self, obj):
+        """Retourne un nom lisible pour un produit ou service en testant plusieurs attributs possibles."""
+        for attr in ('name', 'nom', 'title', 'titre', 'label', 'libelle'):
+            val = getattr(obj, attr, None)
+            # ignorer les booléens (True/False) et valeurs vides
+            if val is None or isinstance(val, bool):
+                continue
+            sval = str(val).strip()
+            if sval:
+                return sval
+        # fallback to str(obj) or generic
+        try:
+            s = str(obj)
+            if s is None:
+                return 'Article'
+            ls = s.strip().lower()
+            if ls in ('false', 'none', ''):
+                return 'Article'
+            return s
+        except Exception:
+            return 'Article'
+
+    def _get_id(self, obj):
+        """Retourne un identifiant numérique/texte pour un objet (id, service_id, etc.)."""
+        for attr in ('id', 'service_id', 'event_service_id', 'pk'):
+            try:
+                val = getattr(obj, attr, None)
+            except Exception:
+                val = None
+            if val is not None:
+                return val
+        # last resort: try to inspect __dict__ for a primary key-like field
+        try:
+            if hasattr(obj, '__dict__'):
+                for k, v in obj.__dict__.items():
+                    if k.endswith('id') and v is not None:
+                        return v
+        except Exception:
+            pass
+        return None
+
+    def _resolve_event_service_to_shop_service(self, session, event_service):
+        """Trouve ou crée un ShopService correspondant à un EventService.
+
+        Retourne une instance de ShopService (ORM) avec id, name, price.
+        """
+        try:
+            # essayer par nom
+            name = self._get_display_name(event_service)
+            price = self._get_price(event_service)
+
+            shop = session.query(ShopService).filter(ShopService.name == name).first()
+            if shop:
+                return shop
+
+            # Aucun trouvé -> créer un enregistrement minimal en ne passant que les champs mappés
+            now = __import__('datetime').datetime.now()
+            candidate = {
+                'pos_id': getattr(event_service, 'pos_id', getattr(event_service, 'pos', getattr(self, 'pos_id', None))),
+                'name': name,
+                'price': float(price) if price is not None else 0.0,
+                'description': getattr(event_service, 'description', None),
+                'is_active': True,
+                # created_at will be set by default if declared in model
+            }
+
+            # Garder uniquement les clés présentes dans le modèle ShopService
+            allowed = {}
+            for k, v in candidate.items():
+                if hasattr(ShopService, k):
+                    allowed[k] = v
+
+            try:
+                new_shop = ShopService(**allowed)
+                session.add(new_shop)
+                session.flush()
+                return new_shop
+            except Exception as e:
+                # log pour faciliter le debug sans casser l'UI
+                print(f"Erreur création ShopService depuis EventService: {e}")
+                return None
+        except Exception:
+            return None
+
+    def _get_price(self, obj):
+        """Retourne le prix (float) en testant plusieurs attributs possibles."""
+        for attr in ('price_unit', 'price', 'prix', 'tarif', 'amount', 'montant', 'cost'):
+            val = getattr(obj, attr, None)
+            if val is not None:
+                try:
+                    return float(val)
+                except Exception:
+                    # essayer de nettoyer si c'est une string
+                    try:
+                        return float(str(val).replace(',', '.'))
+                    except Exception:
+                        continue
+        return 0.0
     
     def display_products(self, products):
         """Affiche les produits dans la grille"""
@@ -514,59 +887,153 @@ class ModernSupermarketWidget(QWidget):
         """Filtre les produits selon les critères de recherche"""
         self.load_products()
     
-    def add_to_cart(self, product):
-        """Ajoute un produit au panier avec dialogue de quantité"""
+    def add_to_cart(self, product, item_type='product', source=None):
+        """Ajoute un produit ou service au panier avec dialogue de quantité.
+
+        item_type: 'product' or 'service'
+        source: for services only, 'shop' or 'event'
+        """
         try:
-            # Vérifier le stock disponible
-            available_stock = self.get_available_stock(product.id)
-            
-            # Ouvrir le dialogue de quantité
-            quantity_dialog = QuantityDialog(
-                self, 
-                product.name, 
-                available_stock
-            )
-            
+            # Debug: inspect the incoming object for services to diagnose missing fields
+            try:
+                if item_type == 'service':
+                    print('[DBG] add_to_cart received object type:', type(product))
+                    try:
+                        print('[DBG] repr:', repr(product))
+                    except Exception:
+                        pass
+                    try:
+                        print('[DBG] getattr name:', getattr(product, 'name', None))
+                        print('[DBG] getattr nom:', getattr(product, 'nom', None))
+                        print('[DBG] getattr id:', getattr(product, 'id', None))
+                        print('[DBG] getattr price:', getattr(product, 'price', getattr(product, 'prix', None)))
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            # Pour les produits, vérifier le stock
+            available_stock = None
+            if item_type == 'product':
+                available_stock = self.get_available_stock(product.id)
+
+            # Ouvrir le dialogue de quantité (utiliser le nom résolu)
+            quantity_dialog = QuantityDialog(self, self._get_display_name(product), available_stock)
+
             if quantity_dialog.exec() == QDialog.DialogCode.Accepted:
                 quantity = quantity_dialog.get_quantity()
-                
-                # Vérifier si le produit est déjà dans le panier
+
+                # Construire l'item générique en utilisant helpers pour nom/prix
+                # Déterminer un id fiable : privilégier l'attribut id des instances ORM
+                resolved_id = None
+                try:
+                    resolved_id = getattr(product, 'id', None)
+                except Exception:
+                    resolved_id = None
+
+                if resolved_id in (None, False):
+                    # fallback to legacy helper (may return pos_id in some cases)
+                    resolved_id = self._get_id(product)
+
+                new_item = {
+                    'type': item_type,
+                    'id': resolved_id,
+                    'name': self._get_display_name(product),
+                    'unit_price': float(self._get_price(product)),
+                    'quantity': quantity,
+                    'source': source
+                }
+
+                # Si c'est un service provenant d'un EventService, tenter d'abord de retrouver l'objet en base
+                if new_item['type'] == 'service' and new_item.get('source') == 'event':
+                    try:
+                        with self.db_manager.get_session() as session:
+                            event_obj = None
+                            # Si l'objet en entrée avait un id, l'utiliser
+                            try:
+                                incoming_id = self._get_id(product)
+                            except Exception:
+                                incoming_id = None
+
+                            if incoming_id is not None:
+                                # Chercher par id
+                                try:
+                                    event_obj = session.query(EventService).filter_by(id=incoming_id).first()
+                                except Exception:
+                                    event_obj = None
+
+                            # Sinon, chercher par nom (display name)
+                            if event_obj is None:
+                                try:
+                                    candidate_name = self._get_display_name(product)
+                                    if candidate_name and candidate_name != 'Article':
+                                        event_obj = session.query(EventService).filter(EventService.name.ilike(f'%{candidate_name}%')).first()
+                                except Exception:
+                                    event_obj = None
+
+                            # Si trouvé, résoudre/créer le ShopService correspondant et remplir les infos
+                            if event_obj is not None:
+                                resolved = self._resolve_event_service_to_shop_service(session, event_obj)
+                                if resolved is not None:
+                                    new_item['id'] = getattr(resolved, 'id', None)
+                                    new_item['name'] = self._get_display_name(resolved)
+                                    new_item['unit_price'] = float(self._get_price(resolved))
+                            else:
+                                # fallback : essayer de résoudre directement à partir de l'objet reçu
+                                try:
+                                    resolved = self._resolve_event_service_to_shop_service(session, product)
+                                    if resolved is not None:
+                                        new_item['id'] = getattr(resolved, 'id', None)
+                                        new_item['name'] = self._get_display_name(resolved)
+                                        new_item['unit_price'] = float(self._get_price(resolved))
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+
+                # debug logs removed
+
+                # Vérifier si l'item existe déjà
                 existing_item = None
                 for item in self.current_cart:
-                    if item['product_id'] == product.id:
-                        existing_item = item
-                        break
-                
+                    if item.get('type') != new_item.get('type'):
+                        continue
+
+                    if new_item.get('type') == 'product':
+                        # Pour les produits, comparer par id + source
+                        if item.get('id') == new_item.get('id') and item.get('source') == new_item.get('source'):
+                            existing_item = item
+                            break
+                    else:
+                        # Pour les services, utiliser name+unit_price+source comme clé (id peut être incorrect)
+                        try:
+                            same_name = (str(item.get('name')) == str(new_item.get('name')))
+                            same_price = float(item.get('unit_price', 0)) == float(new_item.get('unit_price', 0))
+                        except Exception:
+                            same_name = (item.get('name') == new_item.get('name'))
+                            same_price = item.get('unit_price') == new_item.get('unit_price')
+
+                        if same_name and same_price and item.get('source') == new_item.get('source'):
+                            existing_item = item
+                            break
+
                 if existing_item:
-                    # Mettre à jour la quantité existante
                     existing_item['quantity'] += quantity
-                    print(f"Quantité mise à jour pour {product.name}: {existing_item['quantity']}")
                 else:
-                    # Nouveau produit dans le panier
-                    new_item = {
-                        'product_id': product.id,
-                        'product_name': product.name,
-                        'unit_price': product.price_unit,
-                        'quantity': quantity
-                    }
                     self.current_cart.append(new_item)
-                    print(f"Nouveau produit ajouté: {product.name}, quantité: {quantity}")
-                
+
                 # Mettre à jour l'affichage
                 self.update_cart_display()
                 self.update_totals()
-                
+
                 # Émettre les signaux
-                self.product_added_to_cart.emit(product.id, quantity)
+                if new_item['type'] == 'product':
+                    self.product_added_to_cart.emit(new_item['id'], quantity)
                 self.cart_updated.emit()
-                
-                # Feedback visuel discret - le produit apparaît dans le panier
-                print(f"✅ {product.name} ajouté au panier (quantité: {quantity})")
-        
+
+                print(f"✅ {new_item['name']} ajouté au panier (quantité: {quantity})")
+
         except Exception as e:
-            # Garder seulement les erreurs critiques
             print(f"❌ Erreur add_to_cart: {e}")
-            # QMessageBox.warning seulement pour les erreurs graves
     
     def get_available_stock(self, product_id):
         """Récupère le stock disponible pour un produit dans l'entrepôt POS_2"""
@@ -599,27 +1066,27 @@ class ModernSupermarketWidget(QWidget):
             pass
         
         self.cart_table.setRowCount(len(self.current_cart))
-        
+
         for row, item in enumerate(self.current_cart):
-            # Nom du produit
-            name_item = QTableWidgetItem(item['product_name'])
-            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Non-éditable
+            # Nom
+            name_item = QTableWidgetItem(item.get('name') or '')
+            name_item.setFlags(name_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.cart_table.setItem(row, 0, name_item)
-            
+
             # Quantité (editable)
-            qty_item = QTableWidgetItem(str(item['quantity']))
-            qty_item.setData(Qt.ItemDataRole.UserRole, row)  # Stocker l'index pour modification
+            qty_item = QTableWidgetItem(str(item.get('quantity', 0)))
+            qty_item.setData(Qt.ItemDataRole.UserRole, row)
             self.cart_table.setItem(row, 1, qty_item)
-            
+
             # Prix unitaire
-            price_item = QTableWidgetItem(f"{item['unit_price']:.0f}")
-            price_item.setFlags(price_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Non-éditable
+            price_item = QTableWidgetItem(f"{float(item.get('unit_price', 0)):.0f}")
+            price_item.setFlags(price_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.cart_table.setItem(row, 2, price_item)
-            
+
             # Total ligne
-            total_line = item['unit_price'] * item['quantity']
+            total_line = float(item.get('unit_price', 0)) * float(item.get('quantity', 0))
             total_item = QTableWidgetItem(f"{total_line:.0f}")
-            total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)  # Non-éditable
+            total_item.setFlags(total_item.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.cart_table.setItem(row, 3, total_item)
         
         # Reconnecter le signal
@@ -652,20 +1119,20 @@ class ModernSupermarketWidget(QWidget):
                 new_qty = int(new_qty_text)
                 
                 if new_qty > 0:
-                    # Vérifier le stock disponible
-                    product_id = self.current_cart[row]['product_id']
-                    available_stock = self.get_available_stock(product_id)
-                    
-                    if available_stock is not None and new_qty > available_stock:
-                        QMessageBox.warning(
-                            self, 
-                            "Stock insuffisant",
-                            f"Stock disponible: {available_stock:.0f}\\nQuantité demandée: {new_qty}"
-                        )
-                        # Restaurer la quantité précédente
-                        self.update_cart_display()
-                        return
-                    
+                    # Si c'est un produit, vérifier le stock disponible
+                    item_obj = self.current_cart[row]
+                    if item_obj.get('type') == 'product':
+                        product_id = item_obj.get('id')
+                        available_stock = self.get_available_stock(product_id)
+                        if available_stock is not None and new_qty > available_stock:
+                            QMessageBox.warning(
+                                self,
+                                "Stock insuffisant",
+                                f"Stock disponible: {available_stock:.0f}\\nQuantité demandée: {new_qty}"
+                            )
+                            self.update_cart_display()
+                            return
+
                     # Mettre à jour la quantité
                     self.current_cart[row]['quantity'] = new_qty
                     self.update_cart_display()
@@ -674,7 +1141,7 @@ class ModernSupermarketWidget(QWidget):
                     
                 else:
                     # Demander confirmation pour supprimer l'article
-                    product_name = self.current_cart[row]['product_name']
+                    product_name = self.current_cart[row].get('name', '')
                     reply = QMessageBox.question(
                         self,
                         "Supprimer l'article",
@@ -703,18 +1170,18 @@ class ModernSupermarketWidget(QWidget):
     
     def update_totals(self):
         """Met à jour les totaux du panier"""
-        subtotal = sum(item['unit_price'] * item['quantity'] for item in self.current_cart)
-        
+        subtotal = float(sum(item['unit_price'] * item['quantity'] for item in self.current_cart))
+
         # Calculer la remise (montant fixe)
-        discount_amount = Decimal(str(self.discount_spin.value()))
-        
+        discount_amount = float(self.discount_spin.value())
+
         # S'assurer que la remise ne dépasse pas le sous-total
         if discount_amount > subtotal:
             discount_amount = subtotal
             self.discount_spin.setValue(float(subtotal))
-        
+
         total = subtotal - discount_amount
-        
+
         # Mettre à jour les labels
         self.subtotal_label.setText(f"{subtotal:.0f} FC")
         self.discount_amount_label.setText(f"{discount_amount:.0f} FC")
@@ -789,9 +1256,13 @@ class ModernSupermarketWidget(QWidget):
                 unavailable_products = []
                 
                 for item in self.current_cart:
-                    product_id = item['product_id']
-                    required_qty = item['quantity']
-                    
+                    # Ne vérifier que les produits physiques
+                    if item.get('type') != 'product':
+                        continue
+
+                    product_id = item.get('id')
+                    required_qty = item.get('quantity')
+
                     # Vérifier le stock disponible
                     stock_result = session.execute(text("""
                         SELECT COALESCE(quantity, 0) as available_qty
@@ -801,14 +1272,14 @@ class ModernSupermarketWidget(QWidget):
                         'product_id': product_id,
                         'warehouse_id': warehouse_id
                     })
-                    
+
                     stock_row = stock_result.fetchone()
                     available_qty = stock_row[0] if stock_row else 0
-                    
+
                     # Bloquer si stock insuffisant (y compris stocks négatifs)
                     if available_qty <= 0 or available_qty < required_qty:
                         unavailable_products.append(
-                            f"• {item['product_name']}: "
+                            f"• {item.get('name', '')}: "
                             f"Demandé {required_qty}, Disponible {max(0, available_qty)}"
                         )
                 
@@ -833,10 +1304,10 @@ class ModernSupermarketWidget(QWidget):
                 from datetime import datetime
                 from sqlalchemy import text
                 
-                # Calculer les totaux avec remise en montant
-                subtotal = sum(item['unit_price'] * item['quantity'] for item in self.current_cart)
-                discount_amount = self.global_discount  # Montant fixe
-                total_amount = subtotal - discount_amount
+                # Calculer les totaux avec remise en montant (forcer float)
+                subtotal = float(sum(item['unit_price'] * item['quantity'] for item in self.current_cart))
+                discount_amount = float(self.global_discount) if isinstance(self.global_discount, Decimal) else float(self.global_discount)
+                total_amount = float(subtotal - discount_amount)
                 
                 # 1. Créer la vente principale (utiliser une table temporaire ou existante)
                 sale_data = {
@@ -882,26 +1353,66 @@ class ModernSupermarketWidget(QWidget):
                 
                 # 2. Créer les lignes de vente et gérer le stock
                 for item in self.current_cart:
-                    product_id = item['product_id']
-                    quantity = item['quantity']
-                    unit_price = item['unit_price']
-                    line_total = unit_price * quantity
-                    
-                    # Créer la ligne de panier
-                    session.execute(text("""
-                        INSERT INTO shop_paniers_products 
-                        (panier_id, product_id, quantity, price_unit, total_price)
-                        VALUES (:panier_id, :product_id, :quantity, :price_unit, :total_price)
-                    """), {
-                        'panier_id': panier_id,
-                        'product_id': product_id,
-                        'quantity': quantity,
-                        'price_unit': float(unit_price),
-                        'total_price': float(line_total)
-                    })
-                    
-                    # 3. Gérer le stock POS (sortie de stock)
-                    self._update_pos_stock(session, product_id, quantity)
+                    if item.get('type') == 'product':
+                        product_id = item.get('id')
+                        quantity = item.get('quantity')
+                        unit_price = item.get('unit_price')
+                        line_total = unit_price * quantity
+
+                        # Créer la ligne de panier produits
+                        session.execute(text("""
+                            INSERT INTO shop_paniers_products 
+                            (panier_id, product_id, quantity, price_unit, total_price)
+                            VALUES (:panier_id, :product_id, :quantity, :price_unit, :total_price)
+                        """), {
+                            'panier_id': panier_id,
+                            'product_id': product_id,
+                            'quantity': quantity,
+                            'price_unit': float(unit_price),
+                            'total_price': float(line_total)
+                        })
+
+                        # 3. Gérer le stock POS (sortie de stock)
+                        self._update_pos_stock(session, product_id, quantity)
+
+                    elif item.get('type') == 'service':
+                        quantity = item.get('quantity')
+                        unit_price = item.get('unit_price')
+                        line_total = unit_price * quantity
+
+                        # Déterminer l'ID du ShopService : si source == 'event' -> mapper par nom
+                        service_id = None
+                        if item.get('source') == 'shop':
+                            service_id = item.get('id')
+                        elif item.get('source') == 'event':
+                            # Chercher ShopService existant par nom
+                            svc = session.query(ShopService).filter(ShopService.name == item.get('name')).first()
+                            if not svc:
+                                svc = ShopService(
+                                    pos_id=self.pos_id,
+                                    name=item.get('name'),
+                                    description='',
+                                    cost=0.0,
+                                    price=unit_price,
+                                    is_active=True
+                                )
+                                session.add(svc)
+                                session.flush()
+                                session.refresh(svc)
+                            service_id = svc.id
+
+                        # Insérer la ligne de service
+                        session.execute(text("""
+                            INSERT INTO shop_paniers_services
+                            (panier_id, service_id, quantity, price_unit, total_price)
+                            VALUES (:panier_id, :service_id, :quantity, :price_unit, :total_price)
+                        """), {
+                            'panier_id': panier_id,
+                            'service_id': service_id,
+                            'quantity': quantity,
+                            'price_unit': float(unit_price),
+                            'total_price': float(line_total)
+                        })
                 
                 # 4. Enregistrer le paiement
                 session.execute(text("""
@@ -1138,9 +1649,9 @@ Vendeur: {getattr(self.current_user, 'name', 'Utilisateur')}
         
         # Formater les produits avec alignement correct
         for item in self.current_cart:
-            product_name = item['product_name'][:25] + '...' if len(item['product_name']) > 25 else item['product_name']
-            quantity = item['quantity']
-            unit_price = item['unit_price']
+            product_name = item.get('name', '')[:25] + '...' if len(item.get('name', '')) > 25 else item.get('name', '')
+            quantity = item.get('quantity', 0)
+            unit_price = item.get('unit_price', 0.0)
             total_price = unit_price * quantity
             
             # Formatage aligné avec espaces

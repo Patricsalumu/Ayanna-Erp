@@ -35,7 +35,7 @@ except ImportError:
     # Les modèles stock ne sont pas encore disponibles
     pass
 
-# Import des modèles boutique pour qu'ils soient inclus dans Base.metadata
+# Import des modèles Vente pour qu'ils soient inclus dans Base.metadata
 try:
     from ayanna_erp.modules.boutique.model.models import (
         ShopClient, ShopService, ShopPanier, ShopPanierProduct, ShopPanierService,
@@ -185,7 +185,7 @@ class DatabaseManager:
             # Noms des POS par défaut pour chaque module
             pos_names = {
                 "SalleFete": "POS Salle de Fête Principale",
-                "Boutique": "POS Boutique Centrale", 
+                "Vente": "POS Vente Centrale", 
                 "Pharmacie": "POS Pharmacie",
                 "Restaurant": "POS Restaurant Principal",
                 "Hotel": "POS Hôtel",
@@ -224,7 +224,7 @@ class DatabaseManager:
             from ayanna_erp.modules.stock.models import StockWarehouse
             
             # Modules qui ont besoin d'entrepôts
-            modules_with_warehouses = {"Boutique", "Pharmacie", "Restaurant"}
+            modules_with_warehouses = {"Vente", "Pharmacie", "Restaurant"}
             
             # Récupérer les POS de l'entreprise avec leurs modules
             pos_points = session.query(POSPoint).join(Module).filter(
@@ -413,9 +413,9 @@ class DatabaseManager:
             # Import sécurisé des modèles Boutique (nouvelle architecture organisée)
             try:
                 from ayanna_erp.modules.boutique.model.models import ShopService, ShopProduct
-                print("✅ Modèles Boutique importés avec succès (nouvelle architecture organisée)")
+                print("✅ Modèles Ventes importés avec succès (nouvelle architecture organisée)")
             except Exception as e:
-                print(f"⚠️ Impossible d'importer les modèles Boutique: {e}")
+                print(f"⚠️ Impossible d'importer les modèles Vente: {e}")
                 print(f"   Détail: {type(e).__name__}: {str(e)}")
             
             # Récupérer les POS de cette entreprise
@@ -462,7 +462,7 @@ class DatabaseManager:
         
         Args:
             enterprise_id (int): ID de l'entreprise
-            module_name (str): Nom du module (ex: 'SalleFete', 'Boutique', etc.)
+            module_name (str): Nom du module (ex: 'SalleFete', 'Vente', etc.)
             
         Returns:
             int: ID du POS pour ce module et cette entreprise, ou None si non trouvé
