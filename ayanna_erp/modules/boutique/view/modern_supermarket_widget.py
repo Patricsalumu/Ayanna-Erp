@@ -773,12 +773,12 @@ class ModernSupermarketWidget(QWidget):
 
         try:
             with self.db_manager.get_session() as session:
-                # Vider le combo et remettre l'option anonyme
+                # Vider le combo
                 self.client_combo.clear()
-                self.client_combo.addItem("Client anonyme", None)
 
                 if not text:
-                    # Si le texte est vide, charger tous les clients après l'option anonyme
+                    # Si le texte est vide, commencer par l'option anonyme puis tous les clients
+                    self.client_combo.addItem("Client anonyme", None)
                     clients = session.query(ShopClient).filter_by(
                         pos_id=self.pos_id,
                         is_active=True
@@ -797,7 +797,7 @@ class ModernSupermarketWidget(QWidget):
                 ).first()
 
                 if client_by_phone:
-                    # Si trouvé par téléphone, afficher ce client
+                    # Si trouvé par téléphone, afficher ce client en premier (sans client anonyme)
                     display_name = f"{client_by_phone.nom} {client_by_phone.prenom or ''}".strip()
                     full_display = f"{display_name} ({client_by_phone.telephone})"
                     self.client_combo.addItem(full_display, client_by_phone.id)
@@ -812,6 +812,7 @@ class ModernSupermarketWidget(QWidget):
                 ).limit(10).all()
 
                 if clients_by_name:
+                    # Afficher les clients trouvés en premier (sans client anonyme)
                     for client in clients_by_name:
                         display_name = f"{client.nom} {client.prenom or ''}".strip()
                         if client.telephone:
@@ -820,7 +821,8 @@ class ModernSupermarketWidget(QWidget):
 
                     self.selected_client = clients_by_name[0]
                 else:
-                    # Aucun client trouvé - proposer de créer
+                    # Aucun client trouvé - commencer par anonyme puis proposer de créer
+                    self.client_combo.addItem("Client anonyme", None)
                     self.client_combo.addItem(f"➕ Créer client '{text}'", -1)  # -1 pour indiquer création
                     self.selected_client = None
 
