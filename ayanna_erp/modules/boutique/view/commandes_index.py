@@ -1,5 +1,6 @@
 """
 Widget pour l'affichage et la gestion des commandes du module Boutique
+Vue uniquement - la logique métier est gérée par CommandeController
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
@@ -10,6 +11,7 @@ from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6.QtGui import QFont, QPalette, QColor
 from datetime import datetime, timedelta
 from decimal import Decimal
+from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
 
 class CommandesIndexWidget(QWidget):
     """Widget principal pour l'affichage et gestion des commandes"""
@@ -22,6 +24,9 @@ class CommandesIndexWidget(QWidget):
         self.boutique_controller = boutique_controller
         self.current_user = current_user
         self.parent_window = parent
+        
+        # Initialiser le contrôleur des commandes
+        self.commande_controller = CommandeController()
         
         self.init_ui()
         self.load_commandes()
@@ -162,86 +167,28 @@ class CommandesIndexWidget(QWidget):
         layout.addWidget(self.commandes_table)
         
     def load_commandes(self):
-        """Charger les commandes depuis la base de données"""
+        """Charger les commandes depuis le contrôleur"""
         try:
-            from ayanna_erp.database.database_manager import DatabaseManager
-            from sqlalchemy import text
+            # Récupérer les filtres actuels
+            date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
+            date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
+            search_term = self.search_input.text().strip() if hasattr(self, 'search_input') and self.search_input.text().strip() else None
+            payment_filter = self.payment_filter.currentText() if hasattr(self, 'payment_filter') else None
             
-            db_manager = DatabaseManager()
+            # Utiliser le contrôleur pour récupérer les commandes
+            commandes = self.commande_controller.get_commandes(
+                date_debut=date_debut,
+                date_fin=date_fin,
+                search_term=search_term,
+                payment_filter=payment_filter
+            )
             
-            with db_manager.get_session() as session:
-                # Requête pour récupérer les commandes avec détails
-                # Aggregate both products and services using subqueries to avoid row multiplication
-                query = text("""
-                    SELECT
-                        sp.id,
-                        sp.numero_commande,
-                        sp.created_at,
-                        COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name,
-                        sp.subtotal,
-                        sp.remise_amount,
-                        sp.total_final,
-                        sp.payment_method,
-                        sp.status,
-                        (
-                            SELECT GROUP_CONCAT(cp.name || ' (x' || spp.quantity || ')')
-                            FROM shop_paniers_products spp
-                            JOIN core_products cp ON spp.product_id = cp.id
-                            WHERE spp.panier_id = sp.id
-                        ) as produits,
-                        (
-                            SELECT GROUP_CONCAT(ss.name || ' (x' || sps.quantity || ')')
-                            FROM shop_paniers_services sps
-                            JOIN event_services ss ON sps.service_id = ss.id
-                            WHERE sps.panier_id = sp.id
-                        ) as services,
-                        (
-                            COALESCE(
-                                (SELECT SUM(spp.quantity) FROM shop_paniers_products spp WHERE spp.panier_id = sp.id), 0
-                            ) + COALESCE(
-                                (SELECT SUM(sps.quantity) FROM shop_paniers_services sps WHERE sps.panier_id = sp.id), 0
-                            )
-                        ) as total_quantity
-                    FROM shop_paniers sp
-                    LEFT JOIN shop_clients sc ON sp.client_id = sc.id
-                    WHERE sp.status = 'completed'
-                    ORDER BY sp.created_at DESC
-                    LIMIT 100
-                """)
-                
-                result = session.execute(query)
-                commandes = result.fetchall()
-                
-                # Post-process each row to combine products+services into a single items field
-                processed = []
-                for c in commandes:
-                    prod = c.produits or ''
-                    serv = c.services or ''
-                    if prod and serv:
-                        items = prod + ', ' + serv
-                    else:
-                        items = prod or serv or 'Aucun produit/service'
-
-                    # Build a simple object-like with attributes used by populate_table
-                    class RowObj:
-                        pass
-
-                    r = RowObj()
-                    r.id = c.id
-                    r.numero_commande = c.numero_commande
-                    r.created_at = c.created_at
-                    r.client_name = c.client_name
-                    r.subtotal = c.subtotal
-                    r.remise_amount = c.remise_amount
-                    r.total_final = c.total_final
-                    r.payment_method = c.payment_method
-                    r.status = c.status
-                    r.produits = items
-                    r.total_quantity = c.total_quantity
-                    processed.append(r)
-
-                self.populate_table(processed)
-                self.update_statistics(processed)
+            self.populate_table(commandes)
+            self.update_statistics(commandes)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des commandes: {e}")
+            print(f"❌ Erreur load_commandes: {e}")
                 
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des commandes: {e}")
@@ -253,56 +200,50 @@ class CommandesIndexWidget(QWidget):
         
         for row, commande in enumerate(commandes):
             # N° Commande
-            self.commandes_table.setItem(row, 0, QTableWidgetItem(str(commande.numero_commande or f"CMD-{commande.id}")))
+            self.commandes_table.setItem(row, 0, QTableWidgetItem(str(commande.get('numero_commande') or f"CMD-{commande.get('id')}")))
 
             # Date
             date_str = ""
-            if commande.created_at:
-                if isinstance(commande.created_at, str):
+            created_at = commande.get('created_at')
+            if created_at:
+                if isinstance(created_at, str):
                     try:
                         from datetime import datetime
-                        date_obj = datetime.strptime(commande.created_at[:19], "%Y-%m-%d %H:%M:%S")
+                        date_obj = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
                         date_str = date_obj.strftime("%d/%m/%Y %H:%M")
                     except:
-                        date_str = commande.created_at[:16]
+                        date_str = created_at[:16]
                 else:
-                    date_str = commande.created_at.strftime("%d/%m/%Y %H:%M")
+                    date_str = created_at.strftime("%d/%m/%Y %H:%M")
             self.commandes_table.setItem(row, 1, QTableWidgetItem(date_str))
 
             # Client
-            self.commandes_table.setItem(row, 2, QTableWidgetItem(str(commande.client_name)))
+            self.commandes_table.setItem(row, 2, QTableWidgetItem(str(commande.get('client_name', ''))))
 
-            # Produits et services (concaténation explicite pour éviter toute perte)
-            produits = getattr(commande, 'produits', '') or ''
-            services = getattr(commande, 'services', '') or ''
-            items = []
-            if produits:
-                items.append(produits)
-            if services:
-                items.append(services)
-            items_text = ', '.join(items) if items else 'Aucun produit/service'
+            # Produits et services (déjà concaténés dans commande['produits'])
+            items_text = commande.get('produits', 'Aucun produit/service')
             if len(items_text) > 100:
                 items_text = items_text[:97] + '...'
             self.commandes_table.setItem(row, 3, QTableWidgetItem(items_text))
 
             # Quantité totale
-            self.commandes_table.setItem(row, 4, QTableWidgetItem(str(commande.total_quantity or 0)))
+            self.commandes_table.setItem(row, 4, QTableWidgetItem(str(commande.get('total_quantity') or 0)))
 
             # Sous-total
-            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.subtotal:.0f} FC"))
+            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} FC"))
 
             # Remise
-            self.commandes_table.setItem(row, 6, QTableWidgetItem(f"{commande.remise_amount:.0f} FC"))
+            self.commandes_table.setItem(row, 6, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} FC"))
 
             # Total
-            total_item = QTableWidgetItem(f"{commande.total_final:.0f} FC")
-            if commande.payment_method == 'Crédit':
+            total_item = QTableWidgetItem(f"{commande.get('total_final', 0):.0f} FC")
+            if commande.get('payment_method') == 'Crédit':
                 total_item.setBackground(QColor("#ffecb3"))
             self.commandes_table.setItem(row, 7, total_item)
 
             # Paiement
-            payment_item = QTableWidgetItem(str(commande.payment_method))
-            if commande.payment_method == 'Crédit':
+            payment_item = QTableWidgetItem(str(commande.get('payment_method', '')))
+            if commande.get('payment_method') == 'Crédit':
                 payment_item.setBackground(QColor("#ffcdd2"))
             self.commandes_table.setItem(row, 8, payment_item)
             
@@ -311,33 +252,14 @@ class CommandesIndexWidget(QWidget):
         if not commandes:
             return
             
-        total_ca = sum(c.total_final for c in commandes)
-        total_creances = sum(c.total_final for c in commandes if c.payment_method == 'Crédit')
-        
-        # Calculer les commandes d'aujourd'hui
-        commandes_aujourd_hui = 0
-        today = datetime.now().date()
-        
-        for c in commandes:
-            if c.created_at:
-                try:
-                    if isinstance(c.created_at, str):
-                        # Parser la chaîne de date
-                        date_obj = datetime.strptime(c.created_at[:19], "%Y-%m-%d %H:%M:%S")
-                        if date_obj.date() == today:
-                            commandes_aujourd_hui += 1
-                    else:
-                        # Objet datetime
-                        if c.created_at.date() == today:
-                            commandes_aujourd_hui += 1
-                except:
-                    pass  # Ignorer les dates mal formatées
+        # Utiliser le contrôleur pour calculer les statistiques
+        stats = self.commande_controller.get_commandes_statistics(commandes)
         
         # Mise à jour des widgets de stats
         if hasattr(self, 'stat_widgets'):
-            self.stat_widgets.get('commandes_aujourd\'hui', QLabel()).setText(str(commandes_aujourd_hui))
-            self.stat_widgets.get('total_ca', QLabel()).setText(f"{total_ca:.0f} FC")
-            self.stat_widgets.get('créances', QLabel()).setText(f"{total_creances:.0f} FC")
+            self.stat_widgets.get('commandes_aujourd\'hui', QLabel()).setText(str(stats['commandes_aujourd_hui']))
+            self.stat_widgets.get('total_ca', QLabel()).setText(f"{stats['total_ca']:.0f} FC")
+            self.stat_widgets.get('créances', QLabel()).setText(f"{stats['total_creances']:.0f} FC")
             
         self.update_period_stats(commandes)
         
@@ -352,18 +274,11 @@ Créances: 0 FC
 Panier moyen: 0 FC
             """
         else:
-            nb_commandes = len(commandes)
-            total_ca = sum(c.total_final for c in commandes)
-            creances = sum(c.total_final for c in commandes if c.payment_method == 'Crédit')
-            panier_moyen = total_ca / nb_commandes if nb_commandes > 0 else 0
-            
-            stats_text = f"""
-Période: {self.date_debut.date().toString('dd/MM/yyyy')} - {self.date_fin.date().toString('dd/MM/yyyy')}
-Commandes: {nb_commandes}
-Chiffre d'affaires: {total_ca:.0f} FC
-Créances: {creances:.0f} FC
-Panier moyen: {panier_moyen:.0f} FC
-            """
+            # Utiliser le contrôleur pour formater les statistiques
+            stats = self.commande_controller.get_commandes_statistics(commandes)
+            stats_text = self.commande_controller.format_period_stats(
+                stats, self.date_debut.date(), self.date_fin.date()
+            )
             
         self.stats_text.setText(stats_text.strip())
         
@@ -384,8 +299,28 @@ Panier moyen: {panier_moyen:.0f} FC
             
     def export_commandes(self):
         """Exporter les commandes"""
-        # TODO: Implémenter l'export CSV/Excel
-        QMessageBox.information(self, "Export", "Fonctionnalité d'export à implémenter")
+        try:
+            # Récupérer les commandes actuelles (avec filtres appliqués)
+            date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
+            date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
+            search_term = self.search_input.text().strip() if hasattr(self, 'search_input') and self.search_input.text().strip() else None
+            payment_filter = self.payment_filter.currentText() if hasattr(self, 'payment_filter') else None
+            
+            commandes = self.commande_controller.get_commandes(
+                date_debut=date_debut,
+                date_fin=date_fin,
+                search_term=search_term,
+                payment_filter=payment_filter,
+                limit=1000  # Plus de données pour l'export
+            )
+            
+            # Utiliser le contrôleur pour l'export
+            result = self.commande_controller.export_commandes(commandes, 'csv')
+            QMessageBox.information(self, "Export", result)
+            
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'export: {e}")
+            print(f"❌ Erreur export_commandes: {e}")
         
     def refresh_data(self):
         """Actualiser les données (interface publique)"""
