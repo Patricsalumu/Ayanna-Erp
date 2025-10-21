@@ -21,6 +21,7 @@ from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ..model.models import ShopClient, ShopPanier, ShopService
 from ayanna_erp.modules.salle_fete.model.salle_fete import EventService
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from .client_index import ClientFormDialog
 
 
 class ModernSupermarketWidget(QWidget):
@@ -445,15 +446,44 @@ class ModernSupermarketWidget(QWidget):
         """)
         cart_layout.addWidget(cart_title)
         
-        # Sélection client
+        # Sélection client avec recherche avancée
         client_frame = QFrame()
         client_layout = QHBoxLayout(client_frame)
+        client_layout.setContentsMargins(5, 5, 5, 5)
         client_layout.addWidget(QLabel("👤 Client:"))
-        
+
+        # LineEdit pour la recherche
+        self.client_search = QLineEdit()
+        self.client_search.setMinimumWidth(200)
+        self.client_search.setPlaceholderText("Tapez numéro téléphone ou nom...")
+        self.client_search.textChanged.connect(self.on_client_search_changed)
+        client_layout.addWidget(self.client_search)
+
+        # ComboBox pour afficher les résultats (non éditable)
         self.client_combo = QComboBox()
-        self.client_combo.setEditable(True)
+        self.client_combo.setMinimumWidth(200)
+        self.client_combo.currentIndexChanged.connect(self.on_client_selected)
         client_layout.addWidget(self.client_combo)
-        
+
+        # Bouton pour ajouter un nouveau client
+        self.add_client_btn = QPushButton("➕")
+        self.add_client_btn.setToolTip("Ajouter un nouveau client")
+        self.add_client_btn.setFixedSize(30, 25)
+        self.add_client_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.add_client_btn.clicked.connect(self.create_new_client)
+        client_layout.addWidget(self.add_client_btn)
+
         cart_layout.addWidget(client_frame)
         
         # Liste des articles du panier
@@ -719,23 +749,211 @@ class ModernSupermarketWidget(QWidget):
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des catégories: {e}")
     
     def load_clients(self):
-        """Charge la liste des clients"""
+        """Charge la liste des clients dans le combo"""
         try:
             with self.db_manager.get_session() as session:
                 clients = session.query(ShopClient).filter_by(
-                    pos_id=self.pos_id, 
+                    pos_id=self.pos_id,
                     is_active=True
                 ).all()
-                
+
                 self.client_combo.clear()
                 self.client_combo.addItem("Client anonyme", None)
-                
+
                 for client in clients:
                     display_name = f"{client.nom} {client.prenom or ''}".strip()
                     self.client_combo.addItem(display_name, client.id)
-                    
+
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des clients: {e}")
+    
+    def on_client_search_changed(self, text):
+        """Gestionnaire de changement de texte dans la recherche client"""
+        text = text.strip()
+
+        try:
+            with self.db_manager.get_session() as session:
+                # Vider le combo et remettre l'option anonyme
+                self.client_combo.clear()
+                self.client_combo.addItem("Client anonyme", None)
+
+                if not text:
+                    # Si le texte est vide, charger tous les clients après l'option anonyme
+                    clients = session.query(ShopClient).filter_by(
+                        pos_id=self.pos_id,
+                        is_active=True
+                    ).all()
+
+                    for client in clients:
+                        display_name = f"{client.nom} {client.prenom or ''}".strip()
+                        self.client_combo.addItem(display_name, client.id)
+                    return
+
+                # Recherche par téléphone (priorité)
+                client_by_phone = session.query(ShopClient).filter(
+                    ShopClient.pos_id == self.pos_id,
+                    ShopClient.is_active == True,
+                    ShopClient.telephone.like(f"%{text}%")
+                ).first()
+
+                if client_by_phone:
+                    # Si trouvé par téléphone, afficher ce client
+                    display_name = f"{client_by_phone.nom} {client_by_phone.prenom or ''}".strip()
+                    full_display = f"{display_name} ({client_by_phone.telephone})"
+                    self.client_combo.addItem(full_display, client_by_phone.id)
+                    self.selected_client = client_by_phone
+                    return
+
+                # Recherche par nom/prénom
+                clients_by_name = session.query(ShopClient).filter(
+                    ShopClient.pos_id == self.pos_id,
+                    ShopClient.is_active == True,
+                    (ShopClient.nom.like(f"%{text}%") | ShopClient.prenom.like(f"%{text}%"))
+                ).limit(10).all()
+
+                if clients_by_name:
+                    for client in clients_by_name:
+                        display_name = f"{client.nom} {client.prenom or ''}".strip()
+                        if client.telephone:
+                            display_name += f" ({client.telephone})"
+                        self.client_combo.addItem(display_name, client.id)
+
+                    self.selected_client = clients_by_name[0]
+                else:
+                    # Aucun client trouvé - proposer de créer
+                    self.client_combo.addItem(f"➕ Créer client '{text}'", -1)  # -1 pour indiquer création
+                    self.selected_client = None
+
+        except Exception as e:
+            print(f"Erreur lors de la recherche client: {e}")
+            import traceback
+            traceback.print_exc()
+            # En cas d'erreur, s'assurer qu'on a au moins l'option anonyme
+            try:
+                if self.client_combo.count() == 0:
+                    self.client_combo.addItem("Client anonyme", None)
+            except:
+                pass
+    
+    def on_client_selected(self, index):
+        """Gestionnaire de sélection de client"""
+        if index >= 0:
+            client_id = self.client_combo.itemData(index)
+            if client_id == -1:
+                # L'utilisateur a sélectionné "Créer client"
+                current_text = self.client_combo.currentText().replace("➕ Créer client '", "").replace("'", "")
+                self.create_new_client_with_text(current_text)
+                return
+            elif client_id is not None:
+                try:
+                    with self.db_manager.get_session() as session:
+                        self.selected_client = session.query(ShopClient).filter_by(id=client_id).first()
+                except Exception as e:
+                    print(f"Erreur lors de la sélection du client: {e}")
+                    self.selected_client = None
+            else:
+                self.selected_client = None
+    
+    def create_new_client_with_text(self, text):
+        """Créer un nouveau client depuis la recherche avec pré-remplissage"""
+        try:
+            dialog = ClientFormDialog(self)
+
+            # Pré-remplir selon le type de texte saisi
+            if text and (text.isdigit() or text.startswith('+')):
+                # Si c'est un numéro de téléphone
+                dialog.telephone_input.setText(text)
+            else:
+                # Essayer de séparer nom et prénom
+                parts = text.split()
+                if len(parts) >= 2:
+                    dialog.nom_input.setText(parts[0])
+                    dialog.prenom_input.setText(' '.join(parts[1:]))
+                elif len(parts) == 1:
+                    dialog.nom_input.setText(parts[0])
+
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                client_data = dialog.get_client_data()
+
+                try:
+                    with self.db_manager.get_session() as session:
+                        new_client = self.boutique_controller.create_client(
+                            session,
+                            nom=client_data["nom"],
+                            prenom=client_data.get("prenom"),
+                            email=client_data.get("email"),
+                            telephone=client_data.get("telephone"),
+                            adresse=client_data.get("adresse")
+                        )
+
+                        # Recharger les clients de manière sécurisée
+                        self._safe_reload_clients()
+
+                        # Vider le champ de recherche après création
+                        self.client_search.clear()
+
+                        QMessageBox.information(self, "Succès", f"Client '{new_client.nom}' créé avec succès!")
+
+                except Exception as e:
+                    QMessageBox.critical(self, "Erreur", f"Erreur lors de la création du client: {str(e)}")
+                    import traceback
+                    traceback.print_exc()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ouverture du dialogue: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+    def _safe_reload_clients(self):
+        """Recharge les clients de manière sécurisée sans déclencher de signaux récursifs"""
+        try:
+            # Déconnecter temporairement les signaux
+            self.client_combo.currentIndexChanged.disconnect(self.on_client_selected)
+        except:
+            pass
+
+        try:
+            # Recharger les clients
+            self.load_clients()
+        finally:
+            # Reconnecter les signaux
+            try:
+                self.client_combo.currentIndexChanged.connect(self.on_client_selected)
+            except:
+                pass
+    
+    def create_new_client(self):
+        """Créer un nouveau client depuis le bouton ➕"""
+        # Récupérer le texte actuel du champ de recherche
+        current_text = self.client_search.text().strip()
+
+        dialog = ClientFormDialog(self)
+
+        # Pré-remplir le téléphone si ça ressemble à un numéro
+        if current_text and (current_text.isdigit() or current_text.startswith('+')):
+            dialog.telephone_input.setText(current_text)
+
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            client_data = dialog.get_client_data()
+
+            try:
+                with self.db_manager.get_session() as session:
+                    new_client = self.boutique_controller.create_client(
+                        session,
+                        nom=client_data["nom"],
+                        prenom=client_data.get("prenom"),
+                        email=client_data.get("email"),
+                        telephone=client_data.get("telephone"),
+                        adresse=client_data.get("adresse")
+                    )
+
+                    # Recharger les clients et vider le champ de recherche
+                    self.load_clients()
+                    self.client_search.clear()
+
+                    QMessageBox.information(self, "Succès", f"Client '{new_client.nom}' créé avec succès!")
+
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de la création du client: {str(e)}")
     
     def load_products(self):
         """Charge et affiche les produits dans la grille"""
