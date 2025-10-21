@@ -205,6 +205,40 @@ class ProduitIndex(QWidget):
             details += f"<b>Compte comptable :</b> {product.account_id}<br>"
             details += f"<b>Statut :</b> {'Actif' if product.is_active else 'Inactif'}<br>"
             details += f"<b>Description :</b> {product.description or ''}<br>"
+            
+            # Ajouter les statistiques de vente
+            sales_stats = self.produit_controller.get_product_sales_statistics(session, product_id)
+            details += f"<br><b>📊 STATISTIQUES DE VENTE</b><br>"
+            details += f"<b>Ventes :</b> {sales_stats['sales_count']} fois<br>"
+            details += f"<b>Quantité vendue :</b> {sales_stats['total_quantity_sold']:.2f} {product.unit}<br>"
+            if sales_stats['last_sale_date']:
+                # Gérer le cas où last_sale_date peut être une string ou un datetime
+                last_sale = sales_stats['last_sale_date']
+                if isinstance(last_sale, str):
+                    details += f"<b>Dernière vente :</b> {last_sale}<br>"
+                else:
+                    details += f"<b>Dernière vente :</b> {last_sale.strftime('%d/%m/%Y %H:%M')}<br>"
+            else:
+                details += f"<b>Dernière vente :</b> Jamais vendu<br>"
+            details += f"<b>Chiffre d'affaires :</b> {sales_stats['total_revenue']:.2f} €<br>"
+            details += f"<b>Bénéfice :</b> {sales_stats['total_profit']:.2f} €<br>"
+            
+            # Ajouter les détails de stock
+            stock_details = self.produit_controller.get_product_stock_details(session, product_id)
+            details += f"<br><b>📦 DÉTAILS DE STOCK</b><br>"
+            details += f"<b>Stock actuel :</b> {stock_details['current_stock']:.2f} {product.unit}<br>"
+            details += f"<b>Stock minimum :</b> {stock_details['min_stock_level']:.2f} {product.unit}<br>"
+            details += f"<b>Entrepôt :</b> {stock_details['warehouse_name']}<br>"
+            
+            if stock_details['recent_movements']:
+                details += f"<b>Derniers mouvements ({len(stock_details['recent_movements'])}):</b><br>"
+                for i, movement in enumerate(stock_details['recent_movements'][:5]):  # Afficher les 5 derniers
+                    date_str = movement['date'].strftime('%d/%m/%Y %H:%M') if movement['date'] else 'N/A'
+                    qty_str = f"{movement['quantity']:+.2f}"
+                    details += f"  • {date_str}: {qty_str} {product.unit} ({movement['movement_type']}) - {movement['source']}<br>"
+            else:
+                details += f"<b>Mouvements :</b> Aucun mouvement récent<br>"
+            
             self.detail_label.setText(details)
             
             # Affichage de l'image
