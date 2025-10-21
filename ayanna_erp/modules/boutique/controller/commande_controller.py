@@ -55,7 +55,7 @@ class CommandeController:
                         (
                             SELECT GROUP_CONCAT(ss.name || ' (x' || sps.quantity || ')')
                             FROM shop_paniers_services sps
-                            JOIN shop_services ss ON sps.service_id = ss.id
+                            JOIN event_services ss ON sps.service_id = ss.id
                             WHERE sps.panier_id = sp.id
                         ) as services,
                         (
@@ -294,6 +294,9 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
 
                 commande_dict = dict(commande._asdict())
 
+                # Récupérer l'ID réel de la commande pour les requêtes suivantes
+                real_commande_id = commande_dict['id']
+
                 # Calculer le montant payé
                 payments_query = text("""
                     SELECT COALESCE(SUM(amount), 0) as montant_paye
@@ -316,21 +319,21 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
                     WHERE spp.panier_id = :commande_id
                 """)
 
-                products_result = session.execute(products_query, {'commande_id': commande_id})
+                products_result = session.execute(products_query, {'commande_id': real_commande_id})
                 products = products_result.fetchall()
 
                 # Récupérer les services de la commande
                 services_query = text("""
                     SELECT
                         sps.*,
-                        ss.name as service_name,
+                        es.name as service_name,
                         sps.price_unit as unit_price
                     FROM shop_paniers_services sps
-                    LEFT JOIN shop_services ss ON sps.service_id = ss.id
+                    LEFT JOIN event_services es ON sps.service_id = es.id
                     WHERE sps.panier_id = :commande_id
                 """)
 
-                services_result = session.execute(services_query, {'commande_id': commande_id})
+                services_result = session.execute(services_query, {'commande_id': real_commande_id})
                 services = services_result.fetchall()
 
                 # Construire le détail des produits/services
