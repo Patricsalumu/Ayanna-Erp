@@ -23,6 +23,7 @@ import json
 from ..controller.entre_sortie_controller import EntreSortieController
 from ..controller.paiement_controller import PaiementController
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ayanna_erp.modules.boutique.model.models import ShopExpense, ShopPayment, ShopPanier, ShopClient
 
 
 class DepenseDialog(QDialog):
@@ -490,6 +491,10 @@ class EntreeSortieIndex(QWidget):
             else:
                 selected_date = date.today()
             
+            # Définir les bornes de la journée pour les requêtes SQL
+            start_datetime = datetime.combine(selected_date, datetime.min.time())
+            end_datetime = datetime.combine(selected_date, datetime.max.time())
+            
             # Initialiser la liste des données
             self.journal_data = []
             
@@ -544,6 +549,82 @@ class EntreeSortieIndex(QWidget):
                     
             except Exception as e:
                 print(f"Erreur lors du chargement des paiements: {e}")
+            
+            # Charger les sorties (dépenses) depuis shop_expenses (boutique)
+            try:
+                from ayanna_erp.database.database_manager import DatabaseManager
+                db_manager = DatabaseManager()
+                session = db_manager.get_session()
+                
+                # Récupérer les dépenses de boutique pour la date sélectionnée
+                shop_expenses = session.query(ShopExpense)\
+                    .filter(
+                        ShopExpense.pos_id == pos_id,
+                        ShopExpense.expense_date.between(start_datetime, end_datetime)
+                    )\
+                    .all()
+                
+                for expense in shop_expenses:
+                    entry = {
+                        'id': f'SHOP_EXP_{expense.id}',
+                        'datetime': expense.expense_date,
+                        'type': 'Sortie',
+                        'libelle': f'[BOUTIQUE] {expense.description}',
+                        'categorie': expense.category or 'Dépense boutique',
+                        'montant_entree': 0.0,
+                        'montant_sortie': float(expense.amount),
+                        'utilisateur': 'Système',  # Pas d'info utilisateur pour les dépenses boutique
+                        'description': f'Référence: {expense.reference or ""}'
+                    }
+                    self.journal_data.append(entry)
+                    
+                session.close()
+                    
+            except Exception as e:
+                print(f"Erreur lors du chargement des dépenses boutique: {e}")
+            
+            # Charger les entrées (paiements) depuis shop_payments (boutique)
+            try:
+                from ayanna_erp.database.database_manager import DatabaseManager
+                db_manager = DatabaseManager()
+                session = db_manager.get_session()
+                
+                # Récupérer les paiements de boutique pour la date sélectionnée
+                shop_payments = session.query(ShopPayment)\
+                    .join(ShopPanier)\
+                    .outerjoin(ShopClient)\
+                    .filter(
+                        ShopPanier.pos_id == pos_id,
+                        ShopPayment.payment_date.between(start_datetime, end_datetime),
+                        ShopPanier.status.in_(['validé', 'payé', 'completed'])
+                    )\
+                    .all()
+                
+                for payment in shop_payments:
+                    # Récupérer le nom du client
+                    client_name = "Client anonyme"
+                    if payment.panier.client:
+                        client_name = f"{payment.panier.client.nom or ''} {payment.panier.client.prenom or ''}".strip()
+                        if not client_name:
+                            client_name = f"Client #{payment.panier.client.id}"
+                    
+                    entry = {
+                        'id': f'SHOP_PAY_{payment.id}',
+                        'datetime': payment.payment_date,
+                        'type': 'Entrée',
+                        'libelle': f'[BOUTIQUE] Paiement {payment.reference} - {client_name}',
+                        'categorie': 'Paiement boutique',
+                        'montant_entree': float(payment.amount),
+                        'montant_sortie': 0.0,
+                        'utilisateur': 'Système',  # Pas d'info utilisateur pour les paiements boutique
+                        'description': f'Panier #{payment.panier.numero_commande or payment.panier.id}'
+                    }
+                    self.journal_data.append(entry)
+                    
+                session.close()
+                    
+            except Exception as e:
+                print(f"Erreur lors du chargement des paiements boutique: {e}")
             
             # Trier par date/heure décroissante
             self.journal_data.sort(key=lambda x: x['datetime'], reverse=True)

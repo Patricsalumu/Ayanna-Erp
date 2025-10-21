@@ -7,10 +7,12 @@ import sys
 import os
 from PyQt6.QtCore import QObject, pyqtSignal
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy import text, literal
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
 from ayanna_erp.modules.salle_fete.model.salle_fete import EventService, EventReservation, EventReservationService, get_database_manager
+from ayanna_erp.modules.boutique.model.models import ShopPanier, ShopPanierService, ShopClient, ShopService
 
 
 class ServiceController(QObject):
@@ -285,14 +287,26 @@ class ServiceController(QObject):
     def get_service_usage_statistics(self, service_id):
         """
         Récupère les statistiques d'utilisation pour un service donné
+        Inclut les données des événements (salle de fête) et de la boutique
         Retourne: dict avec total_uses, total_quantity, total_revenue, average_quantity, last_used
         """
         try:
             db_manager = get_database_manager()
             session = db_manager.get_session()
             
-            # Jointure pour récupérer les données d'utilisation du service
-            usage_data = (session.query(
+            # Récupérer le nom du service pour faire correspondre avec les services boutique
+            event_service = session.query(EventService).filter(EventService.id == service_id).first()
+            if not event_service:
+                return {
+                    'total_uses': 0,
+                    'total_quantity': 0,
+                    'total_revenue': 0.0,
+                    'average_quantity': 0.0,
+                    'last_used': None
+                }
+            
+            # Données des événements (salle de fête)
+            event_usage_data = (session.query(
                     EventReservationService.quantity,
                     (EventReservationService.quantity * EventReservationService.unit_price).label('revenue'),
                     EventReservation.event_date
@@ -302,7 +316,21 @@ class ServiceController(QObject):
                 .all()
             )
             
-            if not usage_data:
+            # Données de la boutique - chercher les services avec le même ID (services partagés)
+            shop_usage_data = (session.query(
+                    ShopPanierService.quantity,
+                    (ShopPanierService.quantity * ShopPanierService.price_unit).label('revenue'),
+                    ShopPanier.created_at.label('event_date')
+                )
+                .join(ShopPanier, ShopPanierService.panier_id == ShopPanier.id)
+                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed']))
+                .all()
+            )
+            
+            # Combiner les données
+            all_usage_data = event_usage_data + shop_usage_data
+            
+            if not all_usage_data:
                 return {
                     'total_uses': 0,
                     'total_quantity': 0,
@@ -312,11 +340,11 @@ class ServiceController(QObject):
                 }
             
             # Calcul des statistiques
-            total_uses = len(usage_data)
-            total_quantity = sum(usage.quantity for usage in usage_data)
-            total_revenue = sum(float(usage.revenue) for usage in usage_data)
+            total_uses = len(all_usage_data)
+            total_quantity = sum(float(usage.quantity) for usage in all_usage_data)
+            total_revenue = sum(float(usage.revenue) for usage in all_usage_data)
             average_quantity = total_quantity / total_uses if total_uses > 0 else 0.0
-            last_used = max(usage.event_date for usage in usage_data)
+            last_used = max(usage.event_date for usage in all_usage_data)
             
             return {
                 'total_uses': total_uses,
@@ -338,39 +366,96 @@ class ServiceController(QObject):
     def get_service_recent_usage(self, service_id, limit=10):
         """
         Récupère les dernières utilisations d'un service
+        Inclut les données des événements (salle de fête) et de la boutique
         Retourne: liste des dernières utilisations avec date, client et quantité
         """
         try:
             db_manager = get_database_manager()
             session = db_manager.get_session()
             
-            # Récupération des dernières utilisations
-            recent_usage = (session.query(
+            # Récupérer le nom du service pour faire correspondre avec les services boutique
+            event_service = session.query(EventService).filter(EventService.id == service_id).first()
+            if not event_service:
+                return []
+            
+            # Données des événements (salle de fête)
+            event_usage = (session.query(
                     EventReservation.event_date,
-                    EventReservation.client_nom,
-                    EventReservation.client_prenom,
-                    EventReservation.client_telephone,
+                    EventReservation.client_nom.label('nom'),
+                    EventReservation.client_prenom.label('prenom'),
+                    EventReservation.client_telephone.label('telephone'),
                     EventReservationService.quantity,
-                    EventReservationService.unit_price
+                    EventReservationService.unit_price,
+                    EventReservationService.reservation_id.label('reference_id'),
+                                        literal('event').label('source')  # Pour identifier la source
                 )
                 .join(EventReservationService, EventReservation.id == EventReservationService.reservation_id)
                 .filter(EventReservationService.service_id == service_id)
-                .order_by(EventReservation.event_date.desc())
-                .limit(limit)
                 .all()
             )
             
-            # Formatage des résultats
-            usage_list = []
-            for usage in recent_usage:
-                client_name = f"{usage.client_nom or ''} {usage.client_prenom or ''}".strip() or "Client non spécifié"
-                usage_list.append({
+            # Convertir en dictionnaires pour éviter les problèmes de mélange d'objets
+            event_dicts = []
+            for usage in event_usage:
+                event_dicts.append({
                     'event_date': usage.event_date,
-                    'client_name': client_name,
-                    'client_telephone': usage.client_telephone,
+                    'nom': usage.nom,
+                    'prenom': usage.prenom,
+                    'telephone': usage.telephone,
                     'quantity': usage.quantity,
                     'unit_price': usage.unit_price,
-                    'total_line': usage.quantity * usage.unit_price
+                    'reference_id': usage.reference_id,
+                    'source': usage.source
+                })
+            
+            # Données de la boutique - chercher les services avec le même ID (services partagés)
+            shop_usage = (session.query(
+                    ShopPanier.created_at.label('event_date'),
+                    ShopClient.nom,
+                    ShopClient.prenom,
+                    ShopClient.telephone,
+                    ShopPanierService.quantity,
+                    ShopPanierService.price_unit,
+                    ShopPanier.id.label('reference_id'),
+                    literal('shop').label('source')
+                )
+                .join(ShopPanierService, ShopPanier.id == ShopPanierService.panier_id)
+                .outerjoin(ShopClient, ShopPanier.client_id == ShopClient.id)
+                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed']))
+                .all()
+            )
+            
+            # Convertir en dictionnaires
+            shop_dicts = []
+            for usage in shop_usage:
+                shop_dicts.append({
+                    'event_date': usage.event_date,
+                    'nom': usage.nom,
+                    'prenom': usage.prenom,
+                    'telephone': usage.telephone,
+                    'quantity': usage.quantity,
+                    'unit_price': usage.price_unit,  # Renommé pour uniformité
+                    'reference_id': usage.reference_id,
+                    'source': usage.source
+                })
+            
+            # Combiner et trier par date décroissante
+            all_usage = event_dicts + shop_dicts
+            all_usage_sorted = sorted(all_usage, key=lambda x: x['event_date'], reverse=True)[:limit]
+            
+            # Formatage des résultats
+            usage_list = []
+            for usage in all_usage_sorted:
+                client_name = f"{usage['nom'] or ''} {usage['prenom'] or ''}".strip() or "Client non spécifié"
+                usage_list.append({
+                    'event_date': usage['event_date'],
+                    'client_name': client_name,
+                    'client_telephone': usage['telephone'],
+                    'quantity': float(usage['quantity']),
+                    'unit_price': float(usage['unit_price']),
+                    'total_line': float(usage['quantity']) * float(usage['unit_price']),
+                    'source': usage['source'],
+                    'reference_id': usage['reference_id']
                 })
             
             return usage_list
