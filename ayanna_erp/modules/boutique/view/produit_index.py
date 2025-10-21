@@ -231,11 +231,10 @@ class ProduitIndex(QWidget):
             details += f"<b>Entrepôt :</b> {stock_details['warehouse_name']}<br>"
             
             if stock_details['recent_movements']:
-                details += f"<b>Derniers mouvements ({len(stock_details['recent_movements'])}):</b><br>"
-                for i, movement in enumerate(stock_details['recent_movements'][:5]):  # Afficher les 5 derniers
+                details += f"<b>Derniers mouvements ({len(stock_details['recent_movements'])} - du plus récent au plus ancien):</b><br>"
+                for i, movement in enumerate(stock_details['recent_movements'][:10]):  # Afficher les 10 plus récents (déjà triés)
                     date_str = movement['date'].strftime('%d/%m/%Y %H:%M') if movement['date'] else 'N/A'
-                    qty_str = f"{movement['quantity']:+.2f}"
-                    details += f"  • {date_str}: {qty_str} {product.unit} ({movement['movement_type']}) - {movement['source']}<br>"
+                    details += f"  • {date_str}: {movement['quantity']} ({movement['movement_type']}) - {movement['source']}<br>"
             else:
                 details += f"<b>Mouvements :</b> Aucun mouvement récent<br>"
             

@@ -1,5 +1,6 @@
 from ayanna_erp.modules.core.controllers.product_controller import CoreProductController
-from sqlalchemy import text
+from sqlalchemy import text, desc, or_
+from datetime import datetime
 
 class ProduitController(CoreProductController):
     """
@@ -128,23 +129,72 @@ class ProduitController(CoreProductController):
             warehouse_name = pos_warehouse.name
 
             # Récupérer les derniers mouvements de stock (10 plus récents)
+            # Mouvements où l'entrepôt POS_2 est soit source soit destination
+            from sqlalchemy import or_
             recent_movements = session.query(StockMovement)\
-                .filter_by(product_id=product_id, warehouse_id=pos_warehouse.id)\
+                .filter(
+                    StockMovement.product_id == product_id,
+                    or_(
+                        StockMovement.warehouse_id == pos_warehouse.id,  # Sorties de POS_2 (ventes)
+                        StockMovement.destination_warehouse_id == pos_warehouse.id  # Entrées vers POS_2 (achats/réceptions)
+                    )
+                )\
                 .order_by(desc(StockMovement.created_at))\
                 .limit(10)\
                 .all()
 
-            # Formater les mouvements
+            # Formater les mouvements avec la logique expliquée
             movements_list = []
+            processed_movement_ids = set()  # Pour éviter les doublons
+            
             for movement in recent_movements:
+                # Éviter les doublons
+                if movement.id in processed_movement_ids:
+                    continue
+                processed_movement_ids.add(movement.id)
+                
+                # Déterminer le type de mouvement basé sur les entrepôts source/destination
+                if movement.warehouse_id is None and movement.destination_warehouse_id == pos_warehouse.id:
+                    # Achat/réception : warehouse_id null, destination_warehouse_id = POS_2
+                    movement_type_display = "ACHAT/RÉCEPTION"
+                    source_display = "Fournisseur/Externe"
+                    quantity_display = f"+{float(movement.quantity):.2f}"
+                elif movement.warehouse_id == pos_warehouse.id and movement.destination_warehouse_id is None:
+                    # Vente : warehouse_id = POS_2, destination_warehouse_id null
+                    movement_type_display = "VENTE"
+                    source_display = "Client"
+                    quantity_display = f"{float(movement.quantity):.2f}"
+                elif movement.warehouse_id is not None and movement.destination_warehouse_id is not None:
+                    # Transfert entre entrepôts
+                    if movement.warehouse_id == pos_warehouse.id:
+                        # Sortie de POS_2 vers un autre entrepôt
+                        dest_warehouse = session.query(StockWarehouse).get(movement.destination_warehouse_id)
+                        movement_type_display = "TRANSFERT SORTIE"
+                        source_display = f"Vers {dest_warehouse.name if dest_warehouse else 'Entrepôt inconnu'}"
+                        quantity_display = f"{float(movement.quantity):.2f}"
+                    else:
+                        # Entrée vers POS_2 depuis un autre entrepôt
+                        source_warehouse = session.query(StockWarehouse).get(movement.warehouse_id)
+                        movement_type_display = "TRANSFERT ENTRÉE"
+                        source_display = f"Depuis {source_warehouse.name if source_warehouse else 'Entrepôt inconnu'}"
+                        quantity_display = f"+{float(movement.quantity):.2f}"
+                else:
+                    # Autre type de mouvement
+                    movement_type_display = movement.movement_type or "INCONNU"
+                    source_display = movement.reference or "Non spécifié"
+                    quantity_display = f"{float(movement.quantity):+.2f}"
+
                 movements_list.append({
                     'date': movement.created_at,
-                    'quantity': float(movement.quantity),
-                    'movement_type': movement.movement_type,
-                    'source': movement.source or 'Non spécifié',
+                    'quantity': quantity_display,
+                    'movement_type': movement_type_display,
+                    'source': source_display,
                     'reference': movement.reference or '',
-                    'notes': movement.notes or ''
+                    'notes': movement.description or ''
                 })
+
+            # Trier les mouvements par date décroissante (plus récent en premier)
+            movements_list.sort(key=lambda x: x['date'] or datetime.min, reverse=True)
 
             return {
                 'current_stock': current_stock,
