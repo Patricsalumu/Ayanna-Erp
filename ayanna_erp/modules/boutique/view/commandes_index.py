@@ -5,8 +5,8 @@ Vue uniquement - la logique métier est gérée par CommandeController
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                             QTableWidgetItem, QPushButton, QLabel, QDateEdit, 
-                            QLineEdit, QComboBox, QGroupBox, QGridLayout,
-                            QHeaderView, QFrame, QSplitter, QMessageBox)
+                            QLineEdit, QComboBox, QGroupBox, QGridLayout, QFormLayout,
+                            QHeaderView, QFrame, QSplitter, QMessageBox, QScrollArea)
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6.QtGui import QFont, QPalette, QColor
 from datetime import datetime, timedelta
@@ -40,10 +40,22 @@ class CommandesIndexWidget(QWidget):
         # Zone de filtres et recherche
         self.create_filters_section(layout)
         
-        # Tableau des commandes
-        self.create_commandes_table(layout)
+        # Splitter principal : tableau à gauche, détails à droite
+        main_splitter = QSplitter(Qt.Orientation.Horizontal)
+        layout.addWidget(main_splitter)
         
-        # Zone de statistiques (texte formaté)
+        # Tableau des commandes (côté gauche)
+        table_widget = self.create_commandes_table()
+        main_splitter.addWidget(table_widget)
+        
+        # Zone de détails (côté droit)
+        details_widget = self.create_details_section()
+        main_splitter.addWidget(details_widget)
+        
+        # Définir les proportions (70% tableau, 30% détails)
+        main_splitter.setSizes([700, 300])
+        
+        # Zone de statistiques (texte formaté) - en bas
         period_stats = QHBoxLayout()
         period_label = QLabel("📊 Statistiques de la période")
         period_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
@@ -127,13 +139,13 @@ class CommandesIndexWidget(QWidget):
         
         layout.addWidget(filters_group)
         
-    def create_commandes_table(self, layout):
+    def create_commandes_table(self):
         """Créer le tableau des commandes"""
         self.commandes_table = QTableWidget()
-        self.commandes_table.setColumnCount(9)
+        self.commandes_table.setColumnCount(8)
         self.commandes_table.setHorizontalHeaderLabels([
-            "N° Commande", "Date", "Client", "Produits / Services", "Quantité Tot.", 
-            "Sous-total", "Remise", "Total", "Paiement"
+            "N° Commande", "Date", "Client", "Produits / Services", 
+            "Sous-total", "Remise", "Total", "Payé", "Paiement"
         ])
 
         
@@ -142,7 +154,7 @@ class CommandesIndexWidget(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # N° Commande
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Date
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)           # Client
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)           # Client
         header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)           # Produits
         
         self.commandes_table.setAlternatingRowColors(True)
@@ -162,9 +174,163 @@ class CommandesIndexWidget(QWidget):
         """)
         
         # Connecter les signaux
-        self.commandes_table.doubleClicked.connect(self.on_commande_double_click)
+        self.commandes_table.itemSelectionChanged.connect(self.on_commande_selected)
         
-        layout.addWidget(self.commandes_table)
+        return self.commandes_table
+    
+    def create_details_section(self):
+        """Créer la section de détails des commandes"""
+        details_widget = QWidget()
+        details_layout = QVBoxLayout(details_widget)
+        details_layout.setContentsMargins(10, 10, 10, 10)
+        details_layout.setSpacing(15)
+        
+        # Titre de la section
+        title_label = QLabel("📋 Détails de la commande")
+        title_label.setStyleSheet("""
+            QLabel {
+                font-size: 16px;
+                font-weight: bold;
+                color: #1976D2;
+                padding: 10px;
+                background-color: #E3F2FD;
+                border-radius: 6px;
+            }
+        """)
+        details_layout.addWidget(title_label)
+        
+        # Scroll area pour les détails
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #e0e0e0;
+                border-radius: 6px;
+                background-color: white;
+            }
+        """)
+        
+        # Contenu scrollable
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setContentsMargins(10, 10, 10, 10)
+        scroll_layout.setSpacing(15)
+        self.details_info = QGroupBox("Informations générales")
+        self.details_info.setStyleSheet("""
+            QGroupBox {
+                font-weight: bold;
+                border: 2px solid #e0e0e0;
+                border-radius: 6px;
+                margin-top: 10px;
+                padding-top: 10px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                left: 10px;
+                padding: 0 5px 0 5px;
+            }
+        """)
+        
+        info_layout = QFormLayout(self.details_info)
+        
+        self.detail_numero = QLabel("-")
+        self.detail_date = QLabel("-")
+        self.detail_client = QLabel("-")
+        self.detail_sous_total = QLabel("-")
+        self.detail_remise = QLabel("-")
+        self.detail_total = QLabel("-")
+        self.detail_paye = QLabel("-")
+        self.detail_restant = QLabel("-")
+        self.detail_statut = QLabel("-")
+        
+        info_layout.addRow("N° Commande:", self.detail_numero)
+        info_layout.addRow("Date:", self.detail_date)
+        info_layout.addRow("Client:", self.detail_client)
+        info_layout.addRow("Sous-total:", self.detail_sous_total)
+        info_layout.addRow("Remise:", self.detail_remise)
+        info_layout.addRow("Total:", self.detail_total)
+        info_layout.addRow("Payé:", self.detail_paye)
+        info_layout.addRow("Restant:", self.detail_restant)
+        info_layout.addRow("Statut:", self.detail_statut)
+        
+        scroll_layout.addWidget(self.details_info)
+        
+        # Liste des produits/services
+        products_group = QGroupBox("Produits / Services")
+        products_layout = QVBoxLayout(products_group)
+        
+        self.products_list = QLabel("Sélectionnez une commande pour voir les détails")
+        self.products_list.setWordWrap(True)
+        self.products_list.setStyleSheet("""
+            QLabel {
+                padding: 10px;
+                background-color: #f9f9f9;
+                border-radius: 4px;
+                min-height: 60px;
+            }
+        """)
+        products_layout.addWidget(self.products_list)
+        
+        scroll_layout.addWidget(products_group)
+        
+        # Boutons d'action
+        actions_group = QGroupBox("Actions")
+        actions_layout = QVBoxLayout(actions_group)
+        actions_layout.setSpacing(10)
+        
+        self.pay_button = QPushButton("💳 Payer")
+        self.pay_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 12px;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+            }
+        """)
+        self.pay_button.clicked.connect(self.on_pay_commande)
+        self.pay_button.setEnabled(False)
+        actions_layout.addWidget(self.pay_button)
+        
+        self.print_button = QPushButton("🖨️ Imprimer")
+        self.print_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 12px;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        self.print_button.clicked.connect(self.on_print_commande)
+        self.print_button.setEnabled(False)
+        actions_layout.addWidget(self.print_button)
+        
+        scroll_layout.addWidget(actions_group)
+        
+        # Espacement
+        scroll_layout.addStretch()
+        
+        scroll_area.setWidget(scroll_content)
+        details_layout.addWidget(scroll_area)
+        
+        return details_widget
         
     def load_commandes(self):
         """Charger les commandes depuis le contrôleur"""
@@ -226,20 +392,26 @@ class CommandesIndexWidget(QWidget):
                 items_text = items_text[:97] + '...'
             self.commandes_table.setItem(row, 3, QTableWidgetItem(items_text))
 
-            # Quantité totale
-            self.commandes_table.setItem(row, 4, QTableWidgetItem(str(commande.get('total_quantity') or 0)))
-
             # Sous-total
-            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} FC"))
+            self.commandes_table.setItem(row, 4, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} FC"))
 
             # Remise
-            self.commandes_table.setItem(row, 6, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} FC"))
+            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} FC"))
 
             # Total
             total_item = QTableWidgetItem(f"{commande.get('total_final', 0):.0f} FC")
             if commande.get('payment_method') == 'Crédit':
                 total_item.setBackground(QColor("#ffecb3"))
-            self.commandes_table.setItem(row, 7, total_item)
+            self.commandes_table.setItem(row, 6, total_item)
+
+            # Payé (montant déjà payé)
+            montant_paye = commande.get('montant_paye', 0)
+            paye_item = QTableWidgetItem(f"{montant_paye:.0f} FC")
+            if montant_paye >= commande.get('total_final', 0):
+                paye_item.setBackground(QColor("#c8e6c9"))  # Vert pour soldé
+            elif montant_paye > 0:
+                paye_item.setBackground(QColor("#fff3e0"))  # Orange pour partiellement payé
+            self.commandes_table.setItem(row, 7, paye_item)
 
             # Paiement
             payment_item = QTableWidgetItem(str(commande.get('payment_method', '')))
@@ -288,14 +460,151 @@ Panier moyen: 0 FC
         # Pour l'instant, on recharge tout
         self.load_commandes()
         
-    def on_commande_double_click(self, index):
-        """Gérer le double-clic sur une commande"""
-        row = index.row()
-        if row >= 0:
-            commande_id = self.commandes_table.item(row, 0).text()
-            # TODO: Ouvrir détail de la commande
-            QMessageBox.information(self, "Détail commande", 
-                                  f"Affichage du détail de la commande {commande_id}")
+    def on_commande_selected(self):
+        """Gérer la sélection d'une commande dans le tableau"""
+        print("DEBUG: on_commande_selected appelée")
+        selected_rows = self.commandes_table.selectionModel().selectedRows()
+        print(f"DEBUG: selected_rows = {len(selected_rows)}")
+        if not selected_rows:
+            self.clear_details()
+            return
+            
+        row = selected_rows[0].row()
+        commande_id = self.commandes_table.item(row, 0).text()
+        print(f"DEBUG: commande_id = {commande_id}")
+        
+        # Récupérer les détails de la commande
+        try:
+            commande_details = self.commande_controller.get_commande_details(commande_id)
+            print(f"DEBUG: commande_details = {commande_details is not None}")
+            if commande_details:
+                self.update_details(commande_details)
+            else:
+                self.clear_details()
+        except Exception as e:
+            print(f"Erreur lors de la récupération des détails: {e}")
+            self.clear_details()
+    
+    def update_details(self, commande):
+        """Mettre à jour la zone de détails avec les informations de la commande"""
+        print(f"DEBUG: update_details appelée avec commande: {commande.get('numero_commande', 'N/A')}")
+        self.detail_numero.setText(str(commande.get('numero_commande') or f"CMD-{commande.get('id')}"))
+        
+        # Date
+        created_at = commande.get('created_at')
+        if created_at:
+            if isinstance(created_at, str):
+                try:
+                    from datetime import datetime
+                    date_obj = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
+                    date_str = date_obj.strftime("%d/%m/%Y %H:%M")
+                except:
+                    date_str = created_at[:16]
+            else:
+                date_str = created_at.strftime("%d/%m/%Y %H:%M")
+        else:
+            date_str = "-"
+        self.detail_date.setText(date_str)
+        
+        self.detail_client.setText(str(commande.get('client_name', '-')))
+        self.detail_sous_total.setText(f"{commande.get('subtotal', 0):.0f} FC")
+        self.detail_remise.setText(f"{commande.get('remise_amount', 0):.0f} FC")
+        self.detail_total.setText(f"{commande.get('total_final', 0):.0f} FC")
+        
+        montant_paye = commande.get('montant_paye', 0)
+        total_final = commande.get('total_final', 0)
+        restant = total_final - montant_paye
+        
+        self.detail_paye.setText(f"{montant_paye:.0f} FC")
+        self.detail_restant.setText(f"{restant:.0f} FC")
+        
+        # Statut de paiement
+        if montant_paye >= total_final:
+            self.detail_statut.setText("✅ Soldé")
+            self.detail_statut.setStyleSheet("color: #4CAF50; font-weight: bold;")
+            self.pay_button.setEnabled(False)
+            self.pay_button.setText("💳 Soldé")
+        elif montant_paye > 0:
+            self.detail_statut.setText("⏳ Partiellement payé")
+            self.detail_statut.setStyleSheet("color: #FF9800; font-weight: bold;")
+            self.pay_button.setEnabled(True)
+            self.pay_button.setText("💳 Payer le restant")
+        else:
+            self.detail_statut.setText("❌ Non payé")
+            self.detail_statut.setStyleSheet("color: #f44336; font-weight: bold;")
+            self.pay_button.setEnabled(True)
+            self.pay_button.setText("💳 Payer")
+        
+        # Produits/Services
+        produits_text = commande.get('produits_detail', 'Aucun détail disponible')
+        self.products_list.setText(produits_text)
+        
+        # Activer les boutons
+        self.print_button.setEnabled(True)
+        
+        # Stocker l'ID de la commande pour les actions
+        self.selected_commande_id = commande.get('id')
+    
+    def clear_details(self):
+        """Vider la zone de détails"""
+        self.detail_numero.setText("-")
+        self.detail_date.setText("-")
+        self.detail_client.setText("-")
+        self.detail_sous_total.setText("-")
+        self.detail_remise.setText("-")
+        self.detail_total.setText("-")
+        self.detail_paye.setText("-")
+        self.detail_restant.setText("-")
+        self.detail_statut.setText("-")
+        self.detail_statut.setStyleSheet("")
+        self.products_list.setText("Sélectionnez une commande pour voir les détails")
+        
+        self.pay_button.setEnabled(False)
+        self.pay_button.setText("💳 Payer")
+        self.print_button.setEnabled(False)
+        
+        self.selected_commande_id = None
+    
+    def on_pay_commande(self):
+        """Gérer le paiement d'une commande"""
+        if not hasattr(self, 'selected_commande_id') or not self.selected_commande_id:
+            QMessageBox.warning(self, "Erreur", "Aucune commande sélectionnée")
+            return
+        
+        try:
+            # Ouvrir la fenêtre de paiement moderne
+            from ayanna_erp.modules.boutique.view.modern_supermarket_widget import ModernSupermarketWidget
+            
+            # Créer une instance temporaire pour le paiement
+            payment_widget = ModernSupermarketWidget(self.boutique_controller, self.current_user, pos_id=1)
+            
+            # TODO: Charger la commande dans le panier pour paiement
+            # Pour l'instant, afficher un message
+            QMessageBox.information(self, "Paiement", 
+                                  f"Ouverture de la fenêtre de paiement pour la commande {self.selected_commande_id}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ouverture du paiement: {e}")
+    
+    def on_print_commande(self):
+        """Imprimer une commande"""
+        if not hasattr(self, 'selected_commande_id') or not self.selected_commande_id:
+            QMessageBox.warning(self, "Erreur", "Aucune commande sélectionnée")
+            return
+        
+        try:
+            # Utiliser la fonction d'impression de modern_supermarket_widget
+            from ayanna_erp.modules.boutique.view.modern_supermarket_widget import ModernSupermarketWidget
+            
+            # Créer une instance temporaire pour générer le reçu
+            print_widget = ModernSupermarketWidget(self.boutique_controller, self.current_user, pos_id=1)
+            
+            # TODO: Générer et imprimer la facture
+            QMessageBox.information(self, "Impression", 
+                                  f"Génération de la facture pour la commande {self.selected_commande_id}")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'impression: {e}")
             
     def export_commandes(self):
         """Exporter les commandes"""

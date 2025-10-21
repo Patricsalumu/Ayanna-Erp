@@ -6,7 +6,7 @@ Gère la logique métier des commandes : récupération, statistiques, filtrage,
 
 from datetime import datetime
 from decimal import Decimal
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Union
 from sqlalchemy import text
 from ayanna_erp.database.database_manager import DatabaseManager
 
@@ -64,7 +64,12 @@ class CommandeController:
                             ) + COALESCE(
                                 (SELECT SUM(sps.quantity) FROM shop_paniers_services sps WHERE sps.panier_id = sp.id), 0
                             )
-                        ) as total_quantity
+                        ) as total_quantity,
+                        (
+                            COALESCE(
+                                (SELECT SUM(spay.amount) FROM shop_payments spay WHERE spay.panier_id = sp.id), 0
+                            )
+                        ) as montant_paye
                     FROM shop_paniers sp
                     LEFT JOIN shop_clients sc ON sp.client_id = sc.id
                     WHERE sp.status = 'completed'
@@ -138,7 +143,8 @@ class CommandeController:
                         'status': c.status,
                         'produits': items,
                         'services': c.services,  # Garder séparé pour populate_table
-                        'total_quantity': c.total_quantity
+                        'total_quantity': c.total_quantity,
+                        'montant_paye': c.montant_paye
                     }
                     processed.append(commande)
 
@@ -244,33 +250,95 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
         # Pour l'instant, retourner un message
         return f"Export {format_type} non implémenté. {len(commandes)} commandes à exporter."
 
-    def get_commande_details(self, commande_id: int) -> Optional[Dict[str, Any]]:
+    def get_commande_details(self, commande_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         """
         Récupérer les détails d'une commande spécifique
 
         Args:
-            commande_id: ID de la commande
+            commande_id: ID entier ou numéro de commande (string)
 
         Returns:
             Détails de la commande ou None si non trouvée
         """
         try:
             with self.db_manager.get_session() as session:
-                query = text("""
-                    SELECT
-                        sp.*,
-                        COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name
-                    FROM shop_paniers sp
-                    LEFT JOIN shop_clients sc ON sp.client_id = sc.id
-                    WHERE sp.id = :commande_id
-                """)
+                # Déterminer si c'est un ID entier ou un numéro de commande
+                if isinstance(commande_id, str) and not commande_id.isdigit():
+                    # C'est un numéro de commande, rechercher par numero_commande
+                    query = text("""
+                        SELECT
+                            sp.*,
+                            COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name
+                        FROM shop_paniers sp
+                        LEFT JOIN shop_clients sc ON sp.client_id = sc.id
+                        WHERE sp.numero_commande = :commande_id
+                    """)
+                else:
+                    # C'est un ID entier
+                    commande_id_int = int(commande_id)
+                    query = text("""
+                        SELECT
+                            sp.*,
+                            COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name
+                        FROM shop_paniers sp
+                        LEFT JOIN shop_clients sc ON sp.client_id = sc.id
+                        WHERE sp.id = :commande_id
+                    """)
+                    commande_id = commande_id_int
 
                 result = session.execute(query, {'commande_id': commande_id})
                 commande = result.fetchone()
 
-                if commande:
-                    return dict(commande)
-                return None
+                if not commande:
+                    return None
+
+                commande_dict = dict(commande._asdict())
+
+                # Récupérer les produits de la commande
+                products_query = text("""
+                    SELECT
+                        spp.*,
+                        cp.name as product_name,
+                        spp.price_unit as unit_price
+                    FROM shop_paniers_products spp
+                    LEFT JOIN core_products cp ON spp.product_id = cp.id
+                    WHERE spp.panier_id = :commande_id
+                """)
+
+                products_result = session.execute(products_query, {'commande_id': commande_id})
+                products = products_result.fetchall()
+
+                # Récupérer les services de la commande
+                services_query = text("""
+                    SELECT
+                        sps.*,
+                        ss.name as service_name,
+                        sps.price_unit as unit_price
+                    FROM shop_paniers_services sps
+                    LEFT JOIN shop_services ss ON sps.service_id = ss.id
+                    WHERE sps.panier_id = :commande_id
+                """)
+
+                services_result = session.execute(services_query, {'commande_id': commande_id})
+                services = services_result.fetchall()
+
+                # Construire le détail des produits/services
+                produits_detail = []
+                for product in products:
+                    product_dict = dict(product._asdict())
+                    produits_detail.append(
+                        f"• {product_dict.get('product_name', 'Produit inconnu')} - {product_dict.get('quantity', 0)} x {product_dict.get('unit_price', 0):.0f} FC = {product_dict.get('total_price', 0):.0f} FC"
+                    )
+
+                for service in services:
+                    service_dict = dict(service._asdict())
+                    produits_detail.append(
+                        f"• {service_dict.get('service_name', 'Service inconnu')} - {service_dict.get('quantity', 0)} x {service_dict.get('unit_price', 0):.0f} FC = {service_dict.get('total_price', 0):.0f} FC"
+                    )
+
+                commande_dict['produits_detail'] = '\n'.join(produits_detail) if produits_detail else 'Aucun produit/service'
+
+                return commande_dict
 
         except Exception as e:
             print(f"❌ Erreur get_commande_details: {e}")
