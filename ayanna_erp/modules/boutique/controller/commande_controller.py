@@ -294,6 +294,17 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
 
                 commande_dict = dict(commande._asdict())
 
+                # Calculer le montant payé
+                payments_query = text("""
+                    SELECT COALESCE(SUM(amount), 0) as montant_paye
+                    FROM shop_payments
+                    WHERE panier_id = :panier_id
+                """)
+
+                payments_result = session.execute(payments_query, {'panier_id': commande_dict['id']})
+                payments_row = payments_result.fetchone()
+                commande_dict['montant_paye'] = payments_row.montant_paye if payments_row else 0
+
                 # Récupérer les produits de la commande
                 products_query = text("""
                     SELECT

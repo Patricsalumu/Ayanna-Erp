@@ -6,12 +6,13 @@ Vue uniquement - la logique métier est gérée par CommandeController
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget, 
                             QTableWidgetItem, QPushButton, QLabel, QDateEdit, 
                             QLineEdit, QComboBox, QGroupBox, QGridLayout, QFormLayout,
-                            QHeaderView, QFrame, QSplitter, QMessageBox, QScrollArea)
+                            QHeaderView, QFrame, QSplitter, QMessageBox, QScrollArea, QDialog)
 from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6.QtGui import QFont, QPalette, QColor
 from datetime import datetime, timedelta
 from decimal import Decimal
 from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
+from ayanna_erp.modules.boutique.view.modern_supermarket_widget import PaymentDialog
 
 class CommandesIndexWidget(QWidget):
     """Widget principal pour l'affichage et gestion des commandes"""
@@ -462,21 +463,17 @@ Panier moyen: 0 FC
         
     def on_commande_selected(self):
         """Gérer la sélection d'une commande dans le tableau"""
-        print("DEBUG: on_commande_selected appelée")
         selected_rows = self.commandes_table.selectionModel().selectedRows()
-        print(f"DEBUG: selected_rows = {len(selected_rows)}")
         if not selected_rows:
             self.clear_details()
             return
             
         row = selected_rows[0].row()
         commande_id = self.commandes_table.item(row, 0).text()
-        print(f"DEBUG: commande_id = {commande_id}")
         
         # Récupérer les détails de la commande
         try:
             commande_details = self.commande_controller.get_commande_details(commande_id)
-            print(f"DEBUG: commande_details = {commande_details is not None}")
             if commande_details:
                 self.update_details(commande_details)
             else:
@@ -487,7 +484,6 @@ Panier moyen: 0 FC
     
     def update_details(self, commande):
         """Mettre à jour la zone de détails avec les informations de la commande"""
-        print(f"DEBUG: update_details appelée avec commande: {commande.get('numero_commande', 'N/A')}")
         self.detail_numero.setText(str(commande.get('numero_commande') or f"CMD-{commande.get('id')}"))
         
         # Date
@@ -566,25 +562,101 @@ Panier moyen: 0 FC
         self.selected_commande_id = None
     
     def on_pay_commande(self):
-        """Gérer le paiement d'une commande"""
+        """Ouvrir la fenêtre de paiement pour une commande existante"""
         if not hasattr(self, 'selected_commande_id') or not self.selected_commande_id:
-            QMessageBox.warning(self, "Erreur", "Aucune commande sélectionnée")
+            QMessageBox.warning(self, "Sélection requise", "Veuillez d'abord sélectionner une commande.")
             return
         
         try:
-            # Ouvrir la fenêtre de paiement moderne
-            from ayanna_erp.modules.boutique.view.modern_supermarket_widget import ModernSupermarketWidget
+            # Récupérer les détails de la commande
+            commande_details = self.commande_controller.get_commande_details(self.selected_commande_id)
+            if not commande_details:
+                QMessageBox.critical(self, "Erreur", "Impossible de récupérer les détails de la commande.")
+                return
             
-            # Créer une instance temporaire pour le paiement
-            payment_widget = ModernSupermarketWidget(self.boutique_controller, self.current_user, pos_id=1)
+            # Calculer le montant restant à payer
+            montant_paye = commande_details.get('montant_paye', 0)
+            total_final = commande_details.get('total_final', 0)
+            montant_restant = total_final - montant_paye
             
-            # TODO: Charger la commande dans le panier pour paiement
-            # Pour l'instant, afficher un message
-            QMessageBox.information(self, "Paiement", 
-                                  f"Ouverture de la fenêtre de paiement pour la commande {self.selected_commande_id}")
+            if montant_restant <= 0:
+                QMessageBox.information(self, "Paiement complet", "Cette commande est déjà entièrement payée.")
+                return
             
+            # Créer des éléments de panier fictifs pour la PaymentDialog
+            # On crée un élément représentant le paiement restant de la commande
+            cart_items = [{
+                'name': f"Commande {commande_details.get('numero_commande', self.selected_commande_id)}",
+                'unit_price': montant_restant,
+                'quantity': 1,
+                'total_price': montant_restant
+            }]
+            
+            # Ouvrir le dialogue de paiement avec le montant restant
+            payment_dialog = PaymentDialog(self, cart_items, 0, montant_restant)
+            if payment_dialog.exec() == QDialog.DialogCode.Accepted:
+                # Traiter le paiement
+                self.process_commande_payment(payment_dialog.get_payment_data(), commande_details)
+                
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ouverture du paiement: {e}")
+    
+    def process_commande_payment(self, payment_data, commande_details):
+        """Traiter le paiement d'une commande existante"""
+        try:
+            # Extraire les données de paiement
+            payment_method = payment_data.get('method')  # Correction: 'method' au lieu de 'payment_method'
+            amount = payment_data.get('amount_received', 0)  # Correction: 'amount_received' au lieu de 'amount'
+            
+            if not payment_method:
+                QMessageBox.warning(self, "Erreur", "Veuillez sélectionner une méthode de paiement.")
+                return
+            
+            if amount <= 0:
+                QMessageBox.warning(self, "Erreur", "Le montant doit être supérieur à 0.")
+                return
+            
+            # Vérifier que le montant ne dépasse pas le restant dû
+            montant_paye = commande_details.get('montant_paye', 0)
+            total_final = commande_details.get('total_final', 0)
+            montant_restant = total_final - montant_paye
+            
+            if amount > montant_restant:
+                QMessageBox.warning(self, "Erreur", f"Le montant saisi ({amount:.0f} FC) dépasse le restant dû ({montant_restant:.0f} FC).")
+                return
+            
+            # Enregistrer le paiement dans la base de données
+            with self.commande_controller.db_manager.get_session() as session:
+                from sqlalchemy import text
+                
+                # Insérer le paiement
+                insert_payment = text("""
+                    INSERT INTO shop_payments (panier_id, payment_method, amount, payment_date)
+                    VALUES (:panier_id, :payment_method, :amount, :payment_date)
+                """)
+                
+                session.execute(insert_payment, {
+                    'panier_id': commande_details['id'],
+                    'payment_method': payment_method,
+                    'amount': amount,
+                    'payment_date': datetime.now()
+                })
+                
+                session.commit()
+            
+            # Rafraîchir l'affichage
+            self.load_commandes()
+            
+            # Si une commande est sélectionnée, rafraîchir les détails
+            if hasattr(self, 'selected_commande_id') and self.selected_commande_id:
+                commande_details = self.commande_controller.get_commande_details(self.selected_commande_id)
+                if commande_details:
+                    self.update_details(commande_details)
+            
+            QMessageBox.information(self, "Succès", f"Paiement de {amount:.0f} FC enregistré avec succès.")
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'enregistrement du paiement: {e}")
     
     def on_print_commande(self):
         """Imprimer une commande"""
