@@ -454,14 +454,14 @@ class ModernSupermarketWidget(QWidget):
 
         # LineEdit pour la recherche
         self.client_search = QLineEdit()
-        self.client_search.setMinimumWidth(200)
+        self.client_search.setMinimumWidth(150)
         self.client_search.setPlaceholderText("Tapez numéro téléphone ou nom...")
         self.client_search.textChanged.connect(self.on_client_search_changed)
         client_layout.addWidget(self.client_search)
 
         # ComboBox pour afficher les résultats (non éditable)
         self.client_combo = QComboBox()
-        self.client_combo.setMinimumWidth(200)
+        self.client_combo.setMinimumWidth(150)
         self.client_combo.currentIndexChanged.connect(self.on_client_selected)
         client_layout.addWidget(self.client_combo)
 
@@ -1881,7 +1881,7 @@ Vendeur: {getattr(self.current_user, 'name', 'Utilisateur')}
         receipt_text += f"""
 --- TOTAUX ---
 Sous-total:              {sale_data['subtotal']:>8.0f} FC
-Remise ({sale_data.get('discount_percent', 0)}%):             -{sale_data['discount_amount']:>8.0f} FC
+Remise appliquée:        -{sale_data['discount_amount']:>8.0f} FC
 TOTAL À PAYER:           {sale_data['total_amount']:>8.0f} FC
 
 --- PAIEMENT ---
@@ -2112,6 +2112,19 @@ class PaymentDialog(QDialog):
         super().__init__(parent)
         self.cart_items = cart_items
         self.discount = discount
+        self.client = None
+        try:
+            # try to get currently selected client name if available from parent
+            if hasattr(parent, 'client_combo'):
+                data = parent.client_combo.currentData()
+                # try to fetch display text safely
+                try:
+                    idx = parent.client_combo.currentIndex()
+                    self.client = parent.client_combo.itemText(idx)
+                except Exception:
+                    self.client = None
+        except Exception:
+            self.client = None
         
         if total_amount is None:
             subtotal = sum(item['unit_price'] * item['quantity'] for item in cart_items)
@@ -2121,8 +2134,12 @@ class PaymentDialog(QDialog):
             except Exception:
                 discount_val = 0.0
 
-            discount_amount = subtotal * discount_val / 100.0
-            self.total_amount = subtotal - discount_amount
+            # discount est maintenant un montant fixe en FC, pas un pourcentage
+            self.discount_amount = discount_val
+            # s'assurer que la remise ne dépasse pas le sous-total
+            if self.discount_amount > subtotal:
+                self.discount_amount = subtotal
+            self.total_amount = subtotal - self.discount_amount
         else:
             self.total_amount = total_amount
         
@@ -2136,17 +2153,44 @@ class PaymentDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        # Récapitulatif
-        summary_group = QGroupBox("Récapitulatif de la commande")
+        # Récapitulatif enrichi
+        summary_group = QGroupBox()
+        summary_group.setTitle("Récapitulatif de la commande")
         summary_layout = QFormLayout(summary_group)
-        
-        summary_layout.addRow("Nombre d'articles:", QLabel(str(len(self.cart_items))))
-        summary_layout.addRow("Remise appliquée:", QLabel(f"{self.discount}%"))
-        
+
+        # Sous-total
+        subtotal = sum(item['unit_price'] * item['quantity'] for item in self.cart_items)
+        subtotal_label = QLabel(f"{subtotal:.0f} FC")
+        subtotal_label.setStyleSheet("color: #333; font-weight: bold;")
+        summary_layout.addRow("Sous-total:", subtotal_label)
+
+        # Client (si connu)
+        client_display = QLabel(self.client or "Client anonyme")
+        client_display.setStyleSheet("color: #555;")
+        summary_layout.addRow("Client:", client_display)
+
+        # Nombre d'articles
+        items_label = QLabel(str(len(self.cart_items)))
+        items_label.setStyleSheet("color: #555;")
+        summary_layout.addRow("Articles:", items_label)
+
+        # Remise (montant fixe)
+        disc_val = getattr(self, 'discount_amount', float(self.discount) if self.discount else 0.0)
+        disc_label = QLabel(f"-{disc_val:.0f} FC")
+        disc_label.setStyleSheet("color: #e53935; font-weight: bold;")
+        summary_layout.addRow("Remise:", disc_label)
+
+        # Total final mis en valeur
         total_label = QLabel(f"{self.total_amount:.0f} FC")
-        total_label.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 16px;")
+        total_label.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 18px;")
         summary_layout.addRow("TOTAL À PAYER:", total_label)
-        
+
+        # Améliorer l'aspect visuel du groupe
+        summary_group.setStyleSheet('''
+            QGroupBox { border: 1px solid #E0E0E0; border-radius: 6px; padding: 10px; background: #FFF; }
+            QLabel { font-size: 13px; }
+        ''')
+
         layout.addWidget(summary_group)
         
         # Mode de paiement
