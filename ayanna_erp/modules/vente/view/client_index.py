@@ -1,18 +1,19 @@
 """
 Widget de l'onglet Clients - Gestion des clients de la boutique
 """
-
 from typing import List
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, 
-    QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit
+    QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit,
+    QGridLayout
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ..model.models import ShopClient
+from sqlalchemy import func
+from ayanna_erp.modules.boutique.model.models import ShopClient, ShopPanier, ShopPayment
 
 
 class ClientIndex(QWidget):
@@ -27,7 +28,7 @@ class ClientIndex(QWidget):
         self.current_user = current_user
         self.db_manager = DatabaseManager()
         
-        self.setup_ui()
+        self.setup_ui()e
         self.load_clients()
     
     def setup_ui(self):
@@ -108,24 +109,99 @@ class ClientIndex(QWidget):
         
         # Statistiques
         stats_container = QVBoxLayout()
-        stats_title = QLabel("Statistiques")
+        stats_title = QLabel("📊 Statistiques Globales")
         stats_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        stats_title.setStyleSheet("font-weight: bold; color: #2C3E50; margin-bottom: 5px;")
+        stats_title.setStyleSheet("font-weight: bold; color: #2C3E50; margin-bottom: 10px; font-size: 14px;")
         stats_container.addWidget(stats_title)
         
-        self.total_clients_label = QLabel("Total: 0 clients")
-        self.total_clients_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        # Grille des statistiques
+        stats_grid = QGridLayout()
+        stats_grid.setSpacing(8)
+        
+        # Ligne 1
+        self.total_clients_label = QLabel("0")
+        self.total_clients_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         self.total_clients_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.total_clients_label.setStyleSheet("""
             QLabel {
                 border: 2px solid #3498DB;
                 border-radius: 8px;
                 background-color: #EBF5FF;
-                padding: 10px;
+                padding: 12px;
                 color: #2C3E50;
+                min-width: 80px;
             }
         """)
-        stats_container.addWidget(self.total_clients_label)
+        stats_grid.addWidget(QLabel("👥 Total Clients"), 0, 0, Qt.AlignmentFlag.AlignCenter)
+        stats_grid.addWidget(self.total_clients_label, 1, 0)
+        
+        self.total_commandes_label = QLabel("0")
+        self.total_commandes_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.total_commandes_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.total_commandes_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #E74C3C;
+                border-radius: 8px;
+                background-color: #FDEDEC;
+                padding: 12px;
+                color: #2C3E50;
+                min-width: 80px;
+            }
+        """)
+        stats_grid.addWidget(QLabel("🛒 Total Commandes"), 0, 1, Qt.AlignmentFlag.AlignCenter)
+        stats_grid.addWidget(self.total_commandes_label, 1, 1)
+        
+        # Ligne 2
+        self.total_depense_label = QLabel("0.00 €")
+        self.total_depense_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.total_depense_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.total_depense_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #27AE60;
+                border-radius: 8px;
+                background-color: #D5F4E6;
+                padding: 12px;
+                color: #2C3E50;
+                min-width: 80px;
+            }
+        """)
+        stats_grid.addWidget(QLabel("💰 Total Dépensé"), 2, 0, Qt.AlignmentFlag.AlignCenter)
+        stats_grid.addWidget(self.total_depense_label, 3, 0)
+        
+        self.paniers_non_regles_label = QLabel("0")
+        self.paniers_non_regles_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.paniers_non_regles_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.paniers_non_regles_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #F39C12;
+                border-radius: 8px;
+                background-color: #FEF5E7;
+                padding: 12px;
+                color: #2C3E50;
+                min-width: 80px;
+            }
+        """)
+        stats_grid.addWidget(QLabel("⚠️ Paniers Non Réglés"), 2, 1, Qt.AlignmentFlag.AlignCenter)
+        stats_grid.addWidget(self.paniers_non_regles_label, 3, 1)
+        
+        # Ligne 3 - Montant non payé
+        self.montant_non_paye_label = QLabel("0.00 €")
+        self.montant_non_paye_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        self.montant_non_paye_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.montant_non_paye_label.setStyleSheet("""
+            QLabel {
+                border: 2px solid #9B59B6;
+                border-radius: 8px;
+                background-color: #F5EEF8;
+                padding: 12px;
+                color: #2C3E50;
+                min-width: 80px;
+            }
+        """)
+        stats_grid.addWidget(QLabel("💸 Montant Non Payé"), 4, 0, 1, 2, Qt.AlignmentFlag.AlignCenter)
+        stats_grid.addWidget(self.montant_non_paye_label, 5, 0, 1, 2)
+        
+        stats_container.addLayout(stats_grid)
         stats_container.addStretch()
         
         self.detail_layout.addLayout(stats_container)
@@ -215,6 +291,7 @@ class ClientIndex(QWidget):
             with self.db_manager.get_session() as session:
                 clients = self.boutique_controller.get_clients(session, search_term=search_term)
                 self.populate_clients_table(clients)
+                self.update_statistics(clients)  # Mettre à jour les statistiques après recherche
                 
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors de la recherche: {str(e)}")
@@ -290,12 +367,57 @@ class ClientIndex(QWidget):
             self.clients_table.setCellWidget(row, 5, actions_widget)
     
     def update_statistics(self, clients: List[ShopClient]):
-        """Mettre à jour les statistiques"""
-        total = len(clients)
-        self.total_clients_label.setText(f"Total: {total} clients")
+        """Mettre à jour les statistiques globales"""
+        try:
+            with self.db_manager.get_session() as session:
+                # Nombre total de clients
+                total_clients = len(clients)
+                self.total_clients_label.setText(str(total_clients))
+                
+                # Statistiques des paniers/commandes
+                paniers = session.query(ShopPanier).filter(ShopPanier.pos_id == getattr(self.boutique_controller, 'pos_id', 1)).all()
+                total_commandes = len([p for p in paniers if p.status in ['validé', 'payé', 'completed']])
+                self.total_commandes_label.setText(str(total_commandes))
+                
+                # Calculer les montants
+                total_depense = 0.0
+                paniers_non_regles = 0
+                montant_non_paye = 0.0
+                
+                for panier in paniers:
+                    if panier.status in ['validé', 'payé', 'completed']:
+                        # Paniers payés - ajouter au total dépensé
+                        total_depense += float(panier.total_final or 0)
+                    else:
+                        # Paniers non réglés
+                        paniers_non_regles += 1
+                        
+                        # Calculer le montant non payé pour ce panier
+                        montant_paye = session.query(ShopPayment)\
+                            .filter(ShopPayment.panier_id == panier.id)\
+                            .with_entities(func.sum(ShopPayment.amount))\
+                            .scalar() or 0
+                        
+                        montant_du = float(panier.total_final or 0) - float(montant_paye)
+                        if montant_du > 0:
+                            montant_non_paye += montant_du
+                
+                # Mettre à jour les labels
+                self.total_depense_label.setText(f"{total_depense:.2f} €")
+                self.paniers_non_regles_label.setText(str(paniers_non_regles))
+                self.montant_non_paye_label.setText(f"{montant_non_paye:.2f} €")
+                
+        except Exception as e:
+            print(f"Erreur lors du calcul des statistiques: {e}")
+            # Valeurs par défaut en cas d'erreur
+            self.total_clients_label.setText("0")
+            self.total_commandes_label.setText("0")
+            self.total_depense_label.setText("0.00 €")
+            self.paniers_non_regles_label.setText("0")
+            self.montant_non_paye_label.setText("0.00 €")
         
-        # Si aucun client sélectionné, remettre le message par défaut
-        if total == 0:
+        # Gestion du message de détails
+        if len(clients) == 0:
             self.detail_label.setText("Aucun client disponible.")
         elif self.clients_table.currentRow() == -1:  # Aucune sélection
             self.detail_label.setText("Sélectionnez un client pour voir les détails.")

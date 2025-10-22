@@ -19,7 +19,7 @@ from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-from ..model.models import ShopClient, ShopPanier
+from ayanna_erp.modules.boutique.model.models import ShopClient, ShopPanier
 
 
 class ModernSupermarketWidget(QWidget):

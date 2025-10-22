@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
-from ..model.models import (
+from ayanna_erp.modules.boutique.model.models import (
     ShopClient, ShopService,
     ShopPanier, ShopPanierProduct, ShopPanierService,
     ShopPayment, ShopExpense, ShopComptesConfig

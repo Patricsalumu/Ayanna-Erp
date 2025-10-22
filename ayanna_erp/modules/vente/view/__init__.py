@@ -1,4 +1,4 @@
-from .boutique_window import BoutiqueWindow
+from .vente_window import BoutiqueWindow
 from .panier_index import PanierIndex
 from .produit_index import ProduitIndex
 from .categorie_index import CategorieIndex

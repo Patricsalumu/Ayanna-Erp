@@ -37,7 +37,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
-from ..model.models import ShopClient, ShopService, ShopPanier, ShopComptesConfig
+from ayanna_erp.modules.boutique.model.models import ShopClient, ShopService, ShopPanier, ShopComptesConfig
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 
 
