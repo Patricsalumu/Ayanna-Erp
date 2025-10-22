@@ -293,6 +293,16 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
                     return None
 
                 commande_dict = dict(commande._asdict())
+                
+                # S'assurer que les valeurs string sont bien des strings (pas None)
+                for key, value in commande_dict.items():
+                    if value is None:
+                        if key in ['numero_commande', 'notes', 'payment_method']:
+                            commande_dict[key] = ''
+                        elif key in ['client_name']:
+                            commande_dict[key] = 'Client anonyme'
+                        elif key in ['subtotal', 'remise_amount', 'total_final', 'montant_paye']:
+                            commande_dict[key] = 0.0
 
                 # Récupérer l'ID réel de la commande pour les requêtes suivantes
                 real_commande_id = commande_dict['id']
