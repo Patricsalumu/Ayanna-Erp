@@ -91,37 +91,7 @@ class ServiceIndex(QWidget):
                 background-color: #219A52;
             }
         """)
-        
-        self.edit_service_button = QPushButton("✏️ Modifier")
-        self.edit_service_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498DB;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980B9;
-            }
-        """)
-        
-        self.delete_service_button = QPushButton("🗑️ Supprimer")
-        self.delete_service_button.setStyleSheet("""
-            QPushButton {
-                background-color: #E74C3C;
-                color: white;
-                border: none;
-                padding: 10px 20px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #C0392B;
-            }
-        """)
-        
+          
         # Barre de recherche et filtres
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍 Rechercher un service...")
@@ -150,8 +120,6 @@ class ServiceIndex(QWidget):
         """)
         
         toolbar_layout.addWidget(self.add_service_button)
-        toolbar_layout.addWidget(self.edit_service_button)
-        toolbar_layout.addWidget(self.delete_service_button)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(QLabel("Catégorie:"))
         # toolbar_layout.addWidget(self.category_filter)
@@ -162,9 +130,9 @@ class ServiceIndex(QWidget):
         
         # Table des services (côté gauche)
         self.services_table = QTableWidget()
-        self.services_table.setColumnCount(9)
+        self.services_table.setColumnCount(8)
         self.services_table.setHorizontalHeaderLabels([
-            "ID", "Nom du service", "Coût", "Prix ", "Marge", "Compte produit", "Compte charge", "Statut"
+            "ID", "Nom du service", "Coût", "Prix ", "Marge", "C. produit", "C. charge", "Statut"
         ])
         
         # Configuration du tableau
@@ -422,8 +390,6 @@ class ServiceIndex(QWidget):
         """Connecter les signaux des widgets aux méthodes"""
         # Boutons d'action
         self.add_service_button.clicked.connect(self.show_add_service_form)
-        self.edit_service_button.clicked.connect(self.show_edit_service_form)
-        self.delete_service_button.clicked.connect(self.delete_selected_service)
         
         # Table des services
         self.services_table.itemSelectionChanged.connect(self.on_service_selection_changed)
@@ -502,7 +468,7 @@ class ServiceIndex(QWidget):
                     comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
                     compte = comptabilite_controller.get_compte_by_id(service.compte_produit_id)
                     if compte:
-                        compte_produit_text = f"{compte.numero} - {compte.nom}"
+                        compte_produit_text = f"{compte.numero}"
                 except Exception as e:
                     print(f"Erreur lors de la récupération du compte produit: {e}")
                     compte_produit_text = "Erreur"
@@ -517,7 +483,7 @@ class ServiceIndex(QWidget):
                     comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
                     compte = comptabilite_controller.get_compte_by_id(service.compte_charge_id)
                     if compte:
-                        compte_charge_text = f"{compte.numero} - {compte.nom}"
+                        compte_charge_text = f"{compte.numero}"
                 except Exception as e:
                     print(f"Erreur lors de la récupération du compte charge: {e}")
                     compte_charge_text = "Erreur"
@@ -547,14 +513,8 @@ class ServiceIndex(QWidget):
                 if service.id == service_id:
                     self.selected_service = service
                     break
-            
-            # Activer les boutons
-            self.edit_service_button.setEnabled(True)
-            self.delete_service_button.setEnabled(True)
         else:
             self.selected_service = None
-            self.edit_service_button.setEnabled(False)
-            self.delete_service_button.setEnabled(False)
     
     def show_add_service_form(self):
         """Afficher le formulaire d'ajout de service"""

@@ -506,7 +506,7 @@ class ProduitIndex(QWidget):
                         comptabilite_controller.session = session
                         compte = comptabilite_controller.get_compte_by_id(product.compte_produit_id)
                         if compte:
-                            compte_produit_text = f"{compte.numero} - {compte.nom}"
+                            compte_produit_text = f"{compte.numero}"
                 except Exception as e:
                     print(f"Erreur lors de la récupération du compte produit: {e}")
                     compte_produit_text = "Erreur"
@@ -523,7 +523,7 @@ class ProduitIndex(QWidget):
                         comptabilite_controller.session = session
                         compte = comptabilite_controller.get_compte_by_id(product.compte_charge_id)
                         if compte:
-                            compte_charge_text = f"{compte.numero} - {compte.nom}"
+                            compte_charge_text = f"{compte.numero}"
                 except Exception as e:
                     print(f"Erreur lors de la récupération du compte charge: {e}")
                     compte_charge_text = "Erreur"

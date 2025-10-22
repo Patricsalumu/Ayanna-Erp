@@ -23,7 +23,6 @@ from .paiement_index import PaiementIndex
 from .rapport_index import RapportIndex
 from .entreSortie_index import EntreeSortieIndex
 
-
 class SalleFeteWindow(QMainWindow):
     """Fenêtre principale du module Salle de Fête"""
     
@@ -47,7 +46,7 @@ class SalleFeteWindow(QMainWindow):
         self.main_controller.database_ready.connect(self.on_database_ready)
         
         self.setWindowTitle("Ayanna ERP - Salle de Fête")
-        self.setMinimumSize(1200, 750)
+        self.setMinimumSize(1200, 700)
         
         # Indicateur d'initialisation
         self.is_initialized = False
@@ -140,7 +139,7 @@ class SalleFeteWindow(QMainWindow):
         
         # Onglet Entrées/Sorties
         self.entree_sortie_widget = EntreeSortieIndex(self.main_controller, self.current_user)
-        self.tab_widget.addTab(self.entree_sortie_widget, "📥📤 Entrées/Sorties")
+        self.tab_widget.addTab(self.entree_sortie_widget, "📥📤 Caisse")
         
         # Onglet Paiements
         self.paiements_widget = PaiementIndex(self.main_controller, self.current_user)

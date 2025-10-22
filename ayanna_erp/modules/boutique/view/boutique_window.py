@@ -139,7 +139,7 @@ class BoutiqueWindow(QMainWindow):
             # Onglet Produits - Gestion des produits
             pos_id = getattr(self.boutique_controller, 'pos_id', 1)
             self.services_widget = ServiceIndex(pos_id, self.current_user)
-            self.tab_widget.addTab(self.services_widget, "📦 Services")
+            self.tab_widget.addTab(self.services_widget, "🔧 Services")
 
             # Onglet Clients - Gestion des clients
             self.clients_widget = ClientIndex(self.boutique_controller, self.current_user)
@@ -147,12 +147,12 @@ class BoutiqueWindow(QMainWindow):
             
             # Onglet Clients - Gestion des clients
             self.caisse_widget = EntreeSortieIndex(self.boutique_controller, self.current_user)
-            self.tab_widget.addTab(self.caisse_widget, "👥 Caisse")
+            self.tab_widget.addTab(self.caisse_widget, "📥📤 Caisse")
 
             # # Onglet Rapports - Analyses et rapports
             # self.rapports_widget = RapportIndexWidget(self)
             # self.tab_widget.addTab(self.rapports_widget, "📈 Rapports")
-            
+
             # Définir l'onglet par défaut (Vente)
             self.tab_widget.setCurrentIndex(0)
             
