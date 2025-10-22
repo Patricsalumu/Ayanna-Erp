@@ -59,7 +59,8 @@ class ProduitController(QObject):
                 stock_min=product_data.get('stock_min', 0.0),
                 unit=product_data.get('unit', 'pièce'),
                 category=product_data.get('category', ''),
-                account_id=product_data.get('account_id'),
+                compte_produit_id=product_data.get('compte_produit_id'),
+                compte_charge_id=product_data.get('compte_charge_id'),
                 is_active=product_data.get('is_active', True)
             )
             

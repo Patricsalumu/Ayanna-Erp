@@ -177,12 +177,19 @@ class ProduitForm(QDialog):
         accounting_group = QGroupBox("Comptabilité")
         accounting_layout = QFormLayout(accounting_group)
         
-        # Compte comptable de vente
-        self.account_combo = QComboBox()
-        self.account_combo.setMinimumWidth(250)
-        self.account_combo.setToolTip("Sélectionnez le compte comptable de vente pour ce produit")
+        # Compte comptable de vente (produit)
+        self.compte_produit_combo = QComboBox()
+        self.compte_produit_combo.setMinimumWidth(250)
+        self.compte_produit_combo.setToolTip("Sélectionnez le compte comptable de vente pour ce produit")
         self.load_sales_accounts()
-        accounting_layout.addRow("Compte de vente:", self.account_combo)
+        accounting_layout.addRow("Compte de vente:", self.compte_produit_combo)
+        
+        # Compte comptable de charge (achat)
+        self.compte_charge_combo = QComboBox()
+        self.compte_charge_combo.setMinimumWidth(250)
+        self.compte_charge_combo.setToolTip("Sélectionnez le compte comptable de charge pour les achats de ce produit")
+        self.load_expense_accounts()
+        accounting_layout.addRow("Compte de charge:", self.compte_charge_combo)
         
         layout.addWidget(accounting_group)
         
@@ -352,15 +359,39 @@ class ProduitForm(QDialog):
             # Filtrer les comptes par entreprise
             comptes = comptabilite_controller.get_comptes_vente(entreprise_id=entreprise_id)
             
-            self.account_combo.clear()
-            self.account_combo.addItem("-- Sélectionner un compte --", None)
+            self.compte_produit_combo.clear()
+            self.compte_produit_combo.addItem("-- Sélectionner un compte --", None)
             
             for compte in comptes:
-                self.account_combo.addItem(f"{compte.numero} - {compte.nom}", compte.id)
+                self.compte_produit_combo.addItem(f"{compte.numero} - {compte.nom}", compte.id)
                 
         except Exception as e:
             print(f"Erreur lors du chargement des comptes: {e}")
-            self.account_combo.addItem("Erreur - Comptes indisponibles", None)
+            self.compte_produit_combo.addItem("Erreur - Comptes indisponibles", None)
+    
+    def load_expense_accounts(self):
+        """Charger les comptes de charge dans le combo box"""
+        try:
+            # Importer ici pour éviter les imports circulaires
+            from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+            
+            comptabilite_controller = ComptabiliteController()
+            
+            # Récupérer l'entreprise depuis le contrôleur produit
+            entreprise_id = self.get_enterprise_id()
+            
+            # Filtrer les comptes par entreprise
+            comptes = comptabilite_controller.get_comptes_charge(entreprise_id=entreprise_id)
+            
+            self.compte_charge_combo.clear()
+            self.compte_charge_combo.addItem("-- Sélectionner un compte --", None)
+            
+            for compte in comptes:
+                self.compte_charge_combo.addItem(f"{compte.numero} - {compte.nom}", compte.id)
+                
+        except Exception as e:
+            print(f"Erreur lors du chargement des comptes: {e}")
+            self.compte_charge_combo.addItem("Erreur - Comptes indisponibles", None)
     
     def get_enterprise_id(self):
         """Récupérer l'ID de l'entreprise depuis le contrôleur produit"""
@@ -440,11 +471,17 @@ class ProduitForm(QDialog):
             self.stock_min_spinbox.setValue(float(self.produit_data.stock_min or 0))
             self.active_checkbox.setChecked(bool(self.produit_data.is_active))
             
-            # Sélectionner le compte comptable
-            if hasattr(self.produit_data, 'account_id') and self.produit_data.account_id:
-                for i in range(self.account_combo.count()):
-                    if self.account_combo.itemData(i) == self.produit_data.account_id:
-                        self.account_combo.setCurrentIndex(i)
+            # Sélectionner les comptes comptables
+            if hasattr(self.produit_data, 'compte_produit_id') and self.produit_data.compte_produit_id:
+                for i in range(self.compte_produit_combo.count()):
+                    if self.compte_produit_combo.itemData(i) == self.produit_data.compte_produit_id:
+                        self.compte_produit_combo.setCurrentIndex(i)
+                        break
+            
+            if hasattr(self.produit_data, 'compte_charge_id') and self.produit_data.compte_charge_id:
+                for i in range(self.compte_charge_combo.count()):
+                    if self.compte_charge_combo.itemData(i) == self.produit_data.compte_charge_id:
+                        self.compte_charge_combo.setCurrentIndex(i)
                         break
         else:
             # Dictionnaire (rétrocompatibilité)
@@ -474,12 +511,19 @@ class ProduitForm(QDialog):
             self.stock_min_spinbox.setValue(float(self.produit_data.get('stock_min', 0)))
             self.active_checkbox.setChecked(bool(self.produit_data.get('is_active', True)))
             
-            # Sélectionner le compte comptable
-            account_id = self.produit_data.get('account_id')
-            if account_id:
-                for i in range(self.account_combo.count()):
-                    if self.account_combo.itemData(i) == account_id:
-                        self.account_combo.setCurrentIndex(i)
+            # Sélectionner les comptes comptables
+            compte_produit_id = self.produit_data.get('compte_produit_id')
+            if compte_produit_id:
+                for i in range(self.compte_produit_combo.count()):
+                    if self.compte_produit_combo.itemData(i) == compte_produit_id:
+                        self.compte_produit_combo.setCurrentIndex(i)
+                        break
+            
+            compte_charge_id = self.produit_data.get('compte_charge_id')
+            if compte_charge_id:
+                for i in range(self.compte_charge_combo.count()):
+                    if self.compte_charge_combo.itemData(i) == compte_charge_id:
+                        self.compte_charge_combo.setCurrentIndex(i)
                         break
         
         # Mettre à jour les calculs
@@ -512,7 +556,8 @@ class ProduitForm(QDialog):
             'stock_quantity': round(self.stock_spinbox.value(), 2),
             'stock_min': round(self.stock_min_spinbox.value(), 2),
             'is_active': self.active_checkbox.isChecked(),
-            'account_id': self.account_combo.currentData()  # ID du compte comptable sélectionné
+            'compte_produit_id': self.compte_produit_combo.currentData(),  # ID du compte produit sélectionné
+            'compte_charge_id': self.compte_charge_combo.currentData()    # ID du compte charge sélectionné
         }
     
     def save_produit(self):

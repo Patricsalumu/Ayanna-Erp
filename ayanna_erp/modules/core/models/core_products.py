@@ -33,7 +33,8 @@ class CoreProduct(Base):
     unit = Column(String(50), default='pièce')  # Unité de mesure
     
     # Comptabilité
-    account_id = Column(Integer, ForeignKey('compta_comptes.id'))
+    compte_produit_id = Column(Integer, ForeignKey('compta_comptes.id'))  # Compte produit pour les ventes
+    compte_charge_id = Column(Integer, ForeignKey('compta_comptes.id'))   # Compte charge pour les achats
     
     # État
     is_active = Column(Boolean, default=True)
@@ -42,7 +43,8 @@ class CoreProduct(Base):
     # Relations
     entreprise = relationship("Entreprise")
     category = relationship("CoreProductCategory", back_populates="products")
-    account = relationship("ComptaComptes")
+    compte_produit = relationship("ComptaComptes", foreign_keys=[compte_produit_id])
+    compte_charge = relationship("ComptaComptes", foreign_keys=[compte_charge_id])
     
     # Relations avec les autres modules (qui utilisent maintenant core_products)
     pos_accesses = relationship("POSProductAccess", back_populates="product")

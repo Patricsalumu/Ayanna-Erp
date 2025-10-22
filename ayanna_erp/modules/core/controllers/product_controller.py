@@ -49,7 +49,7 @@ class CoreProductController:
     def get_product_by_id(self, session: Session, product_id: int) -> Optional[CoreProduct]:
         return session.query(CoreProduct).filter(CoreProduct.id == product_id, CoreProduct.entreprise_id == self.entreprise_id).first()
 
-    def create_product(self, session: Session, nom: str, prix, category_id: int, description: Optional[str] = None, unit: str = "pièce", stock_initial: float = 0.0, cost: float = 0.0, barcode: Optional[str] = None, image: Optional[str] = None, stock_min: float = 0.0, account_id: Optional[int] = None, is_active: bool = True) -> CoreProduct:
+    def create_product(self, session: Session, nom: str, prix, category_id: int, description: Optional[str] = None, unit: str = "pièce", stock_initial: float = 0.0, cost: float = 0.0, barcode: Optional[str] = None, image: Optional[str] = None, stock_min: float = 0.0, compte_produit_id: Optional[int] = None, compte_charge_id: Optional[int] = None, is_active: bool = True) -> CoreProduct:
         """
         Créer un produit et initialiser son stock sur l'entrepôt correspondant au POS
         Le stock initial est toujours 0 - l'approvisionnement vient des achats
@@ -64,7 +64,8 @@ class CoreProductController:
             cost=cost,
             barcode=barcode,
             image=image,
-            account_id=account_id,
+            compte_produit_id=compte_produit_id,
+            compte_charge_id=compte_charge_id,
             is_active=is_active
         )
         session.add(product)

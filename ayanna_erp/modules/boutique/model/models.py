@@ -52,7 +52,8 @@ class ShopService(Base):
     image = Column(Text)  # Image du service
     cost = Column(Numeric(15, 2), default=0.0)  # Coût du service
     price = Column(Numeric(15, 2), default=0.0)  # Prix de vente
-    account_id = Column(Integer)  # Compte comptable
+    compte_produit_id = Column(Integer)  # Compte produit pour les ventes
+    compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
     

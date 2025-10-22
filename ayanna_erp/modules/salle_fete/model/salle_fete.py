@@ -52,7 +52,8 @@ class EventService(Base):
     description = Column(Text)
     cost = Column(Float, default=0.0)  # Coût du service
     price = Column(Float, default=0.0)  # Prix de vente
-    account_id = Column(Integer)  # Compte comptable
+    compte_produit_id = Column(Integer)  # Compte produit pour les ventes
+    compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
     
@@ -75,7 +76,8 @@ class EventProduct(Base):
     stock_min = Column(Float, default=0.0)  # Seuil minimum de stock
     unit = Column(String(50), default='pièce')  # Unité de mesure
     category = Column(String(100))  # Catégorie du produit
-    account_id = Column(Integer)  # Compte comptable
+    compte_produit_id = Column(Integer)  # Compte produit pour les ventes
+    compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
     

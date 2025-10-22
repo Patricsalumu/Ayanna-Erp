@@ -70,6 +70,31 @@ class ComptabiliteController:
             print(f"Erreur lors de la récupération des comptes de vente: {e}")
             return []
 
+    def get_comptes_charge(self, entreprise_id=None):
+        """
+        Récupère la liste des comptes comptables de charge (classe 6)
+        pour utilisation dans les formulaires de services et produits
+        Filtre par entreprise si entreprise_id est fourni
+        """
+        try:
+            # Base query: Récupérer les comptes de classe 6 (Charges)
+            query = self.session.query(ComptaComptes).join(
+                ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id
+            ).filter(
+                ComptaComptes.numero.like('6%')  # Comptes de classe 6
+            )
+            
+            # Filtrer par entreprise si spécifié
+            if entreprise_id:
+                query = query.filter(ComptaClasses.enterprise_id == entreprise_id)
+            
+            comptes = query.order_by(ComptaComptes.numero).all()
+            
+            return comptes
+        except Exception as e:
+            print(f"Erreur lors de la récupération des comptes de charge: {e}")
+            return []
+
     def get_compte_by_id(self, compte_id):
         """
         Récupère un compte comptable par son ID

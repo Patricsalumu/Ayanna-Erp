@@ -16,6 +16,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
 import os
 import shutil
 from datetime import datetime
@@ -109,9 +110,9 @@ class ProduitIndex(QWidget):
 
         # Tableau des produits
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(8)
+        self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels([
-            "ID", "Nom", "Catégorie", "Prix", "Stock", "Unité", "Statut", "Actions"
+            "ID", "Nom", "Catégorie", "Prix", "Stock", "Unité", "Compte produit", "Compte charge", "Statut", "Actions"
         ])
         header = self.products_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
@@ -122,6 +123,8 @@ class ProduitIndex(QWidget):
         header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(7, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(8, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(9, QHeaderView.ResizeMode.ResizeToContents)
         self.products_table.setAlternatingRowColors(True)
         self.products_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.products_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Désactiver l'édition directe
@@ -202,7 +205,38 @@ class ProduitIndex(QWidget):
             details += f"<b>Stock :</b> {stock_info['total_stock']}<br>"
             details += f"<b>Unité :</b> {product.unit}<br>"
             details += f"<b>Code-barres :</b> {product.barcode}<br>"
-            details += f"<b>Compte comptable :</b> {product.account_id}<br>"
+            
+            # Afficher les comptes comptables avec leurs noms
+            if hasattr(product, 'compte_produit_id') and product.compte_produit_id:
+                try:
+                    comptabilite_controller = ComptabiliteController()
+                    with self.db_manager.get_session() as session:
+                        comptabilite_controller.session = session
+                        compte_produit = comptabilite_controller.get_compte_by_id(product.compte_produit_id)
+                        if compte_produit:
+                            details += f"<b>Compte produit :</b> {compte_produit.numero} - {compte_produit.nom}<br>"
+                        else:
+                            details += f"<b>Compte produit :</b> {product.compte_produit_id} (introuvable)<br>"
+                except Exception as e:
+                    details += f"<b>Compte produit :</b> {product.compte_produit_id} (erreur)<br>"
+            else:
+                details += f"<b>Compte produit :</b> Non défini<br>"
+            
+            if hasattr(product, 'compte_charge_id') and product.compte_charge_id:
+                try:
+                    comptabilite_controller = ComptabiliteController()
+                    with self.db_manager.get_session() as session:
+                        comptabilite_controller.session = session
+                        compte_charge = comptabilite_controller.get_compte_by_id(product.compte_charge_id)
+                        if compte_charge:
+                            details += f"<b>Compte charge :</b> {compte_charge.numero} - {compte_charge.nom}<br>"
+                        else:
+                            details += f"<b>Compte charge :</b> {product.compte_charge_id} (introuvable)<br>"
+                except Exception as e:
+                    details += f"<b>Compte charge :</b> {product.compte_charge_id} (erreur)<br>"
+            else:
+                details += f"<b>Compte charge :</b> Non défini<br>"
+            
             details += f"<b>Statut :</b> {'Actif' if product.is_active else 'Inactif'}<br>"
             details += f"<b>Description :</b> {product.description or ''}<br>"
             
@@ -463,6 +497,40 @@ class ProduitIndex(QWidget):
             # Unité
             self.products_table.setItem(row, 5, QTableWidgetItem(getattr(product, "unit", "unité")))
 
+            # Compte produit (ventes)
+            compte_produit_text = "Non défini"
+            if hasattr(product, 'compte_produit_id') and product.compte_produit_id:
+                try:
+                    comptabilite_controller = ComptabiliteController()
+                    with self.db_manager.get_session() as session:
+                        comptabilite_controller.session = session
+                        compte = comptabilite_controller.get_compte_by_id(product.compte_produit_id)
+                        if compte:
+                            compte_produit_text = f"{compte.numero} - {compte.nom}"
+                except Exception as e:
+                    print(f"Erreur lors de la récupération du compte produit: {e}")
+                    compte_produit_text = "Erreur"
+            compte_produit_item = QTableWidgetItem(compte_produit_text)
+            compte_produit_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.products_table.setItem(row, 6, compte_produit_item)
+
+            # Compte charge (achats)
+            compte_charge_text = "Non défini"
+            if hasattr(product, 'compte_charge_id') and product.compte_charge_id:
+                try:
+                    comptabilite_controller = ComptabiliteController()
+                    with self.db_manager.get_session() as session:
+                        comptabilite_controller.session = session
+                        compte = comptabilite_controller.get_compte_by_id(product.compte_charge_id)
+                        if compte:
+                            compte_charge_text = f"{compte.numero} - {compte.nom}"
+                except Exception as e:
+                    print(f"Erreur lors de la récupération du compte charge: {e}")
+                    compte_charge_text = "Erreur"
+            compte_charge_item = QTableWidgetItem(compte_charge_text)
+            compte_charge_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.products_table.setItem(row, 7, compte_charge_item)
+
             # Statut
             status_item = QTableWidgetItem("Actif" if product.is_active else "Inactif")
             status_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -472,7 +540,7 @@ class ProduitIndex(QWidget):
             else:
                 status_item.setBackground(QColor("#E74C3C"))
                 status_item.setForeground(QColor("white"))
-            self.products_table.setItem(row, 6, status_item)
+            self.products_table.setItem(row, 8, status_item)
 
             # Actions
             actions_widget = QWidget()
@@ -520,7 +588,7 @@ class ProduitIndex(QWidget):
             stock_btn.clicked.connect(lambda checked, p=product: self.manage_product_stock(p))
             actions_layout.addWidget(stock_btn)
 
-            self.products_table.setCellWidget(row, 7, actions_widget)
+            self.products_table.setCellWidget(row, 9, actions_widget)
     
     def create_new_product(self):
         dialog = ProductFormDialog(self, self.produit_controller)
@@ -540,7 +608,8 @@ class ProduitIndex(QWidget):
                         barcode=product_data.get("barcode"),
                         image=product_data.get("image"),
                         stock_min=product_data.get("stock_min", 0),
-                        account_id=product_data.get("account_id"),
+                        compte_produit_id=product_data.get("compte_produit_id"),
+                        compte_charge_id=product_data.get("compte_charge_id"),
                         is_active=product_data.get("is_active", True)
                     )
                     QMessageBox.information(self, "Succès", f"Produit '{new_product.name}' créé avec succès!")
@@ -567,7 +636,8 @@ class ProduitIndex(QWidget):
                         barcode=product_data.get("barcode"),
                         image=product_data.get("image"),
                         stock_min=product_data.get("stock_min", 0),
-                        account_id=product_data.get("account_id"),
+                        compte_produit_id=product_data.get("compte_produit_id"),
+                        compte_charge_id=product_data.get("compte_charge_id"),
                         is_active=product_data.get("is_active", True)
                     )
                     if updated_product:
@@ -888,13 +958,21 @@ class ProductFormDialog(QDialog):
         image_layout.addLayout(image_input_layout)
         other_layout.addRow(image_label, image_widget)
 
-        # Compte comptable
-        account_label = QLabel("Compte comptable:")
-        account_label.setStyleSheet(label_style)
-        self.account_combo = QComboBox()
-        self.account_combo.setStyleSheet(input_style)
-        self.load_accounting_accounts()
-        other_layout.addRow(account_label, self.account_combo)
+        # Compte produit (ventes)
+        compte_produit_label = QLabel("Compte produit (ventes):")
+        compte_produit_label.setStyleSheet(label_style)
+        self.compte_produit_combo = QComboBox()
+        self.compte_produit_combo.setStyleSheet(input_style)
+        self.load_accounting_accounts_produit()
+        other_layout.addRow(compte_produit_label, self.compte_produit_combo)
+
+        # Compte charge (achats)
+        compte_charge_label = QLabel("Compte charge (achats):")
+        compte_charge_label.setStyleSheet(label_style)
+        self.compte_charge_combo = QComboBox()
+        self.compte_charge_combo.setStyleSheet(input_style)
+        self.load_accounting_accounts_charge()
+        other_layout.addRow(compte_charge_label, self.compte_charge_combo)
 
         # Statut actif/inactif
         status_label = QLabel("Statut:")
@@ -996,12 +1074,12 @@ class ProductFormDialog(QDialog):
             print(f"❌ Erreur lors de la récupération de l'entreprise: {e}")
             return None
 
-    def load_accounting_accounts(self):
-        """Charger les comptes comptables de classe 7 (ventes) dans le combo box"""
+    def load_accounting_accounts_produit(self):
+        """Charger les comptes comptables de classe 7 (ventes/produits) dans le combo box"""
         try:
             enterprise_id = self.get_enterprise_id()
             if not enterprise_id:
-                self.account_combo.addItem("Aucune entreprise trouvée", None)
+                self.compte_produit_combo.addItem("Aucune entreprise trouvée", None)
                 return
 
             # Utiliser le contrôleur comptabilité pour récupérer les comptes de vente
@@ -1009,22 +1087,58 @@ class ProductFormDialog(QDialog):
             with self.db_manager.get_session() as session:
                 comptabilite_controller.session = session
                 comptes_vente = comptabilite_controller.get_comptes_vente(enterprise_id)
-                
-                self.account_combo.clear()
-                self.account_combo.addItem("Sélectionnez un compte", None)
-                
+
+                self.compte_produit_combo.clear()
+                self.compte_produit_combo.addItem("Sélectionnez un compte produit", None)
+
                 if not comptes_vente:
-                    self.account_combo.addItem("Aucun compte de vente disponible", None)
+                    self.compte_produit_combo.addItem("Aucun compte de vente disponible", None)
                 else:
                     for compte in comptes_vente:
                         # Format: "701 - Ventes marchandises"
                         display_text = f"{compte.numero} - {compte.nom}"
-                        self.account_combo.addItem(display_text, compte.id)
-                        
+                        self.compte_produit_combo.addItem(display_text, compte.id)
+
         except Exception as e:
-            print(f"❌ Erreur lors du chargement des comptes comptables: {e}")
-            self.account_combo.clear()
-            self.account_combo.addItem("Erreur de chargement", None)
+            print(f"❌ Erreur lors du chargement des comptes produit: {e}")
+            self.compte_produit_combo.clear()
+            self.compte_produit_combo.addItem("Erreur de chargement", None)
+
+    def load_accounting_accounts_charge(self):
+        """Charger les comptes comptables de classe 6 (charges/achats) dans le combo box"""
+        try:
+            enterprise_id = self.get_enterprise_id()
+            if not enterprise_id:
+                self.compte_charge_combo.addItem("Aucune entreprise trouvée", None)
+                return
+
+            # Utiliser le contrôleur comptabilité pour récupérer les comptes de charge
+            comptabilite_controller = ComptabiliteController()
+            with self.db_manager.get_session() as session:
+                comptabilite_controller.session = session
+                # Récupérer les comptes de classe 6 (Charges)
+                comptes_charge = session.query(ComptaComptes).join(
+                    ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id
+                ).filter(
+                    ComptaComptes.numero.like('6%'),  # Comptes de classe 6
+                    ComptaClasses.enterprise_id == enterprise_id
+                ).order_by(ComptaComptes.numero).all()
+
+                self.compte_charge_combo.clear()
+                self.compte_charge_combo.addItem("Sélectionnez un compte charge", None)
+
+                if not comptes_charge:
+                    self.compte_charge_combo.addItem("Aucun compte de charge disponible", None)
+                else:
+                    for compte in comptes_charge:
+                        # Format: "601 - Achats de marchandises"
+                        display_text = f"{compte.numero} - {compte.nom}"
+                        self.compte_charge_combo.addItem(display_text, compte.id)
+
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des comptes charge: {e}")
+            self.compte_charge_combo.clear()
+            self.compte_charge_combo.addItem("Erreur de chargement", None)
 
     def copy_image_to_project(self, image_path: str) -> str:
         """Copier l'image sélectionnée dans le dossier du projet et retourner le chemin relatif"""
@@ -1103,11 +1217,18 @@ class ProductFormDialog(QDialog):
             if getattr(self.product, "image", None):
                 self.image_input.setText(self.product.image)
             
-            # Sélectionner le compte comptable
-            if getattr(self.product, "account_id", None):
-                for i in range(self.account_combo.count()):
-                    if self.account_combo.itemData(i) == self.product.account_id:
-                        self.account_combo.setCurrentIndex(i)
+            # Sélectionner le compte produit
+            if getattr(self.product, "compte_produit_id", None):
+                for i in range(self.compte_produit_combo.count()):
+                    if self.compte_produit_combo.itemData(i) == self.product.compte_produit_id:
+                        self.compte_produit_combo.setCurrentIndex(i)
+                        break
+            
+            # Sélectionner le compte charge
+            if getattr(self.product, "compte_charge_id", None):
+                for i in range(self.compte_charge_combo.count()):
+                    if self.compte_charge_combo.itemData(i) == self.product.compte_charge_id:
+                        self.compte_charge_combo.setCurrentIndex(i)
                         break
             
             self.active_checkbox.setChecked(getattr(self.product, "is_active", True))
@@ -1169,7 +1290,8 @@ class ProductFormDialog(QDialog):
             "category_id": self.category_combo.currentData(),
             "unit": self.unite_input.text().strip() or "unité",
             "stock_min": self.stock_min_input.value(),
-            "account_id": self.account_combo.currentData(),
+            "compte_produit_id": self.compte_produit_combo.currentData(),
+            "compte_charge_id": self.compte_charge_combo.currentData(),
             "is_active": self.active_checkbox.isChecked()
         }
         # Stock initial seulement en mode création

@@ -202,7 +202,7 @@ class ProduitIndex(QWidget):
             details += f"<b>Stock :</b> {stock_info['total_stock']}<br>"
             details += f"<b>Unité :</b> {product.unit}<br>"
             details += f"<b>Code-barres :</b> {product.barcode}<br>"
-            details += f"<b>Compte comptable :</b> {product.account_id}<br>"
+            details += f"<b>Compte produit :</b> {product.compte_produit_id}<br>"
             details += f"<b>Statut :</b> {'Actif' if product.is_active else 'Inactif'}<br>"
             details += f"<b>Description :</b> {product.description or ''}<br>"
             self.detail_label.setText(details)

@@ -52,7 +52,8 @@ class ServiceController(QObject):
                 description=service_data.get('description', ''),
                 cost=service_data.get('cost', 0.0),
                 price=service_data.get('price', 0.0),
-                account_id=service_data.get('account_id'),
+                compte_produit_id=service_data.get('compte_produit_id'),
+                compte_charge_id=service_data.get('compte_charge_id'),
                 is_active=service_data.get('is_active', True)
             )
             

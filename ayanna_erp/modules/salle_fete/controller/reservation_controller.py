@@ -762,42 +762,42 @@ class ReservationController(QObject):
             # === CALCUL DES MONTANTS BRUTS (HT SANS REMISE) ===
             
             # Services : montant brut = prix_unitaire * quantité (SANS remise)
-            services_details = {}  # {account_id: {'total_brut': x, 'names': []}}
+            services_details = {}  # {compte_produit_id: {'total_brut': x, 'names': []}}
             for service_item in reservation.services:
                 service = service_item.service
-                if service and hasattr(service, 'account_id') and service.account_id:
+                if service and hasattr(service, 'compte_produit_id') and service.compte_produit_id:
                     # Montant brut HT (sans remise)
                     montant_ht_brut = float(service_item.unit_price or 0) * float(service_item.quantity or 1)
                     
-                    account_id = service.account_id
-                    if account_id not in services_details:
-                        services_details[account_id] = {'total_brut': 0, 'names': []}
+                    compte_produit_id = service.compte_produit_id
+                    if compte_produit_id not in services_details:
+                        services_details[compte_produit_id] = {'total_brut': 0, 'names': []}
                     
-                    services_details[account_id]['total_brut'] += montant_ht_brut
-                    services_details[account_id]['names'].append(service.name)
+                    services_details[compte_produit_id]['total_brut'] += montant_ht_brut
+                    services_details[compte_produit_id]['names'].append(service.name)
             
             # Produits : montant brut = prix_unitaire * quantité (SANS remise)
-            produits_details = {}  # {account_id: {'total_brut': x, 'names': []}}
+            produits_details = {}  # {compte_produit_id: {'total_brut': x, 'names': []}}
             for product_item in reservation.products:
                 product = product_item.product
-                if product and hasattr(product, 'account_id') and product.account_id:
+                if product and hasattr(product, 'compte_produit_id') and product.compte_produit_id:
                     # Montant brut HT (sans remise)
                     montant_ht_brut = float(product_item.unit_price or 0) * float(product_item.quantity or 1)
                     
-                    account_id = product.account_id
-                    if account_id not in produits_details:
-                        produits_details[account_id] = {'total_brut': 0, 'names': []}
+                    compte_produit_id = product.compte_produit_id
+                    if compte_produit_id not in produits_details:
+                        produits_details[compte_produit_id] = {'total_brut': 0, 'names': []}
                     
-                    produits_details[account_id]['total_brut'] += montant_ht_brut
-                    produits_details[account_id]['names'].append(product.name)
+                    produits_details[compte_produit_id]['total_brut'] += montant_ht_brut
+                    produits_details[compte_produit_id]['names'].append(product.name)
             
             # === RÉPARTITION PROPORTIONNELLE SELON MONTANT BRUT / TOTAL TTC BRUT ===
             
             # Répartition des services
-            for account_id, details in services_details.items():
+            for compte_produit_id, details in services_details.items():
                 proportion = details['total_brut'] / total_ttc_sans_remise
                 montant_service = montant_paiement * proportion
-                repartition['services'][account_id] = {
+                repartition['services'][compte_produit_id] = {
                     'montant_net': montant_service,
                     'total_brut': details['total_brut'],
                     'proportion': proportion
@@ -807,13 +807,13 @@ class ReservationController(QObject):
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  🛎️  Services [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {account_id}")
+                print(f"  🛎️  Services [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {compte_produit_id}")
             
             # Répartition des produits
-            for account_id, details in produits_details.items():
+            for compte_produit_id, details in produits_details.items():
                 proportion = details['total_brut'] / total_ttc_sans_remise
                 montant_produit = montant_paiement * proportion
-                repartition['produits'][account_id] = {
+                repartition['produits'][compte_produit_id] = {
                     'montant_net': montant_produit,
                     'total_brut': details['total_brut'],
                     'proportion': proportion
@@ -823,7 +823,7 @@ class ReservationController(QObject):
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  📦 Produits [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {account_id}")
+                print(f"  📦 Produits [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {compte_produit_id}")
             
             # === CALCUL DE LA TVA ===
             
@@ -911,7 +911,7 @@ class ReservationController(QObject):
             
             print(f"  📊 Ventilation: Accompte {payment.amount:.2f}€ + Remise {remise_totale:.2f}€ = {montant_a_ventiler:.2f}€")
             
-            for account_id, details in repartition['services'].items():
+            for compte_produit_id, details in repartition['services'].items():
                 if details['montant_net'] > 0:
                     # Utiliser la proportion déjà calculée correctement
                     proportion = details['proportion']
@@ -919,7 +919,7 @@ class ReservationController(QObject):
                     
                     ecriture_service = EcritureComptable(
                         journal_id=journal_id,
-                        compte_comptable_id=account_id,
+                        compte_comptable_id=compte_produit_id,
                         debit=0,
                         credit=montant_credit,
                         ordre=ordre,
@@ -927,11 +927,11 @@ class ReservationController(QObject):
                     )
                     session.add(ecriture_service)
                     ecritures.append(ecriture_service)
-                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {account_id} (proportion: {proportion:.1%})")
+                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
                     ordre += 1
             
             # === 3. ÉCRITURES DE CRÉDIT POUR LES PRODUITS (PROPORTIONNEL) ===
-            for account_id, details in repartition['produits'].items():
+            for compte_produit_id, details in repartition['produits'].items():
                 if details['montant_net'] > 0:
                     # Utiliser la proportion déjà calculée correctement
                     proportion = details['proportion']
@@ -939,7 +939,7 @@ class ReservationController(QObject):
                     
                     ecriture_produit = EcritureComptable(
                         journal_id=journal_id,
-                        compte_comptable_id=account_id,
+                        compte_comptable_id=compte_produit_id,
                         debit=0,
                         credit=montant_credit,
                         ordre=ordre,
@@ -947,7 +947,7 @@ class ReservationController(QObject):
                     )
                     session.add(ecriture_produit)
                     ecritures.append(ecriture_produit)
-                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {account_id} (proportion: {proportion:.1%})")
+                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
                     ordre += 1
             
             # === 4. ÉCRITURE DE CRÉDIT POUR LA TVA (PROPORTIONNEL) ===

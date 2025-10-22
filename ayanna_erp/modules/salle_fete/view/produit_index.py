@@ -195,9 +195,9 @@ class ProduitIndex(QWidget):
         
         # Table des produits (côté gauche)
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(10)
+        self.products_table.setColumnCount(12)
         self.products_table.setHorizontalHeaderLabels([
-            "ID", "Nom du produit", "Catégorie", "Cout", "Prix unitaire", "Seuil min.", "Unité", "Stock", "Compte", "Statut"
+            "ID", "Nom du produit", "Catégorie", "Coût", "Prix unitaire", "Seuil min.", "Unité", "Stock", "Compte produit", "Compte charge", "Statut"
         ])
         
         # Configuration du tableau
@@ -324,49 +324,33 @@ class ProduitIndex(QWidget):
     
     def load_products(self):
         """Charger les produits depuis la base de données"""
-        # TODO: Implémenter le chargement depuis la base de données
-        # Pour l'instant, on utilise des données de test
+        try:
+            # Charger les produits via le contrôleur (qui émet le signal products_loaded)
+            self.produit_controller.load_all_products()
+        except Exception as e:
+            print(f"Erreur lors du chargement des produits: {e}")
+            # Fallback vers les données de test en cas d'erreur
+            self.load_test_data()
+    
+    def load_test_data(self):
+        """Charger des données de test en cas d'erreur de chargement"""
+        # Données de test avec les nouvelles colonnes
+        self.products_data = []
         sample_data = [
-            ["001", "Simba", "Boissons", "16 $", "25", "10", "bouteille", "En stock"],
-            ["002", "Tembo", "Boissons", "17 $", "5", "20", "plateau", "Stock faible"],
-            ["003", "Castel", "Boissons", "17 $", "30", "5", "pièce", "En stock"],
-            ["004", "Chui", "Boissons", "10 $", "0", "5", "bouquet", "Rupture"],
-            ["005", "Sucrées", "Boissons", "11.59 $", "100", "50", "lot de 20", "En stock"],
-            ["006", "Heineken", "Boissons", "11.57 $", "15", "10", "bouteille", "En stock"],
+            {"id": 1, "name": "Simba", "category": "Boissons", "cost": 16.0, "price_unit": 25.0, "stock_min": 10, "unit": "bouteille", "stock_quantity": 15, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
+            {"id": 2, "name": "Tembo", "category": "Boissons", "cost": 17.0, "price_unit": 5.0, "stock_min": 20, "unit": "plateau", "stock_quantity": 5, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
+            {"id": 3, "name": "Castel", "category": "Boissons", "cost": 17.0, "price_unit": 30.0, "stock_min": 5, "unit": "pièce", "stock_quantity": 30, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
+            {"id": 4, "name": "Chui", "category": "Boissons", "cost": 10.0, "price_unit": 0.0, "stock_min": 5, "unit": "bouquet", "stock_quantity": 0, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
+            {"id": 5, "name": "Sucrées", "category": "Boissons", "cost": 11.59, "price_unit": 100.0, "stock_min": 50, "unit": "lot de 20", "stock_quantity": 100, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
+            {"id": 6, "name": "Heineken", "category": "Boissons", "cost": 11.57, "price_unit": 15.0, "stock_min": 10, "unit": "bouteille", "stock_quantity": 15, "compte_produit_id": None, "compte_charge_id": None, "is_active": True},
         ]
         
-        self.products_table.setRowCount(len(sample_data))
+        # Convertir en objets similaires aux vrais produits
+        for data in sample_data:
+            product = type('TestProduct', (), data)()
+            self.products_data.append(product)
         
-        for row, data in enumerate(sample_data):
-            for col, value in enumerate(data):
-                item = QTableWidgetItem(str(value))
-                
-                # Couleur selon le stock
-                if col == 4:  # Colonne stock
-                    stock_value = int(value)
-                    min_threshold = int(data[5])
-                    
-                    if stock_value == 0:
-                        item.setBackground(Qt.GlobalColor.red)
-                        item.setForeground(Qt.GlobalColor.white)
-                    elif stock_value <= min_threshold:
-                        item.setBackground(Qt.GlobalColor.yellow)
-                    else:
-                        item.setBackground(Qt.GlobalColor.green)
-                        item.setForeground(Qt.GlobalColor.white)
-                
-                # Couleur selon le statut
-                elif col == 7:  # Colonne statut
-                    if value == "En stock":
-                        item.setBackground(Qt.GlobalColor.green)
-                        item.setForeground(Qt.GlobalColor.white)
-                    elif value == "Stock faible":
-                        item.setBackground(Qt.GlobalColor.yellow)
-                    else:  # Rupture
-                        item.setBackground(Qt.GlobalColor.red)
-                        item.setForeground(Qt.GlobalColor.white)
-                
-                self.products_table.setItem(row, col, item)
+        self.populate_products_table()
     
     def on_product_selected(self):
         """Gérer la sélection d'un produit"""
@@ -565,6 +549,12 @@ class ProduitIndex(QWidget):
         """Callback quand une erreur survient"""
         QMessageBox.critical(self, "Erreur", error_message)
     
+    def on_products_loaded(self, products):
+        """Callback quand les produits sont chargés"""
+        self.products_data = products
+        self.populate_products_table()
+        self.update_statistics()
+    
     def populate_products_table(self):
         """Remplir le tableau des produits avec les données"""
         self.products_table.setRowCount(len(self.products_data))
@@ -600,20 +590,35 @@ class ProduitIndex(QWidget):
             stock = float(product.stock_quantity or 0)
             self.products_table.setItem(row, 7, QTableWidgetItem(f"{stock:.0f}"))
 
-            # Compte comptable
-            account_text = "Non défini"
-            if hasattr(product, 'account_id') and product.account_id:
+            # Compte produit (ventes)
+            compte_produit_text = "Non défini"
+            if hasattr(product, 'compte_produit_id') and product.compte_produit_id:
                 try:
                     # Importer ici pour éviter les imports circulaires
                     from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
                     comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
-                    compte = comptabilite_controller.get_compte_by_id(product.account_id)
+                    compte = comptabilite_controller.get_compte_by_id(product.compte_produit_id)
                     if compte:
-                        account_text = f"{compte.numero} - {compte.nom}"
+                        compte_produit_text = f"{compte.numero} - {compte.nom}"
                 except Exception as e:
-                    print(f"Erreur lors de la récupération du compte: {e}")
-                    account_text = "Erreur"
-            self.products_table.setItem(row, 8, QTableWidgetItem(account_text))
+                    print(f"Erreur lors de la récupération du compte produit: {e}")
+                    compte_produit_text = "Erreur"
+            self.products_table.setItem(row, 8, QTableWidgetItem(compte_produit_text))
+            
+            # Compte charge (achats)
+            compte_charge_text = "Non défini"
+            if hasattr(product, 'compte_charge_id') and product.compte_charge_id:
+                try:
+                    # Importer ici pour éviter les imports circulaires
+                    from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+                    comptabilite_controller = ComptabiliteController(user_controller=self.user_controller)
+                    compte = comptabilite_controller.get_compte_by_id(product.compte_charge_id)
+                    if compte:
+                        compte_charge_text = f"{compte.numero} - {compte.nom}"
+                except Exception as e:
+                    print(f"Erreur lors de la récupération du compte charge: {e}")
+                    compte_charge_text = "Erreur"
+            self.products_table.setItem(row, 9, QTableWidgetItem(compte_charge_text))
             
             # Statut stock
             if stock == 0:
@@ -628,7 +633,7 @@ class ProduitIndex(QWidget):
             
             status_item = QTableWidgetItem(status)
             status_item.setBackground(status_color)
-            self.products_table.setItem(row, 9, status_item)
+            self.products_table.setItem(row, 10, status_item)
             
         
         # Cacher la colonne ID

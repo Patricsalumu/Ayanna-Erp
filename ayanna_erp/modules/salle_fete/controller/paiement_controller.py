@@ -843,40 +843,40 @@ class PaiementController(QObject):
             # === PHASE 1: CALCULER LES TOTAUX NETS DES COMPTES ===
             
             # Calculer les totaux nets des services (déjà après remise en BDD)
-            services_details = {}  # {account_id: {'total_ttc_net': x, 'names': []}}
+            services_details = {}  # {compte_produit_id: {'total_ttc_net': x, 'names': []}}
             for service_item in reservation.services:
                 service = service_item.service
-                if service and hasattr(service, 'account_id') and service.account_id:
+                if service and hasattr(service, 'compte_produit_id') and service.compte_produit_id:
                     line_total_ttc_net = float(service_item.line_total or 0)  # Déjà net
                     
-                    account_id = service.account_id
-                    if account_id not in services_details:
-                        services_details[account_id] = {'total_ttc_net': 0, 'names': []}
+                    compte_produit_id = service.compte_produit_id
+                    if compte_produit_id not in services_details:
+                        services_details[compte_produit_id] = {'total_ttc_net': 0, 'names': []}
                     
-                    services_details[account_id]['total_ttc_net'] += line_total_ttc_net
-                    services_details[account_id]['names'].append(service.name)
+                    services_details[compte_produit_id]['total_ttc_net'] += line_total_ttc_net
+                    services_details[compte_produit_id]['names'].append(service.name)
             
             # Calculer les totaux nets des produits (déjà après remise en BDD)
-            produits_details = {}  # {account_id: {'total_ttc_net': x, 'names': []}}
+            produits_details = {}  # {compte_produit_id: {'total_ttc_net': x, 'names': []}}
             for product_item in reservation.products:
                 product = product_item.product
-                if product and hasattr(product, 'account_id') and product.account_id:
+                if product and hasattr(product, 'compte_produit_id') and product.compte_produit_id:
                     line_total_ttc_net = float(product_item.line_total or 0)  # Déjà net
                     
-                    account_id = product.account_id
-                    if account_id not in produits_details:
-                        produits_details[account_id] = {'total_ttc_net': 0, 'names': []}
+                    compte_produit_id = product.compte_produit_id
+                    if compte_produit_id not in produits_details:
+                        produits_details[compte_produit_id] = {'total_ttc_net': 0, 'names': []}
                     
-                    produits_details[account_id]['total_ttc_net'] += line_total_ttc_net
-                    produits_details[account_id]['names'].append(product.name)
+                    produits_details[compte_produit_id]['total_ttc_net'] += line_total_ttc_net
+                    produits_details[compte_produit_id]['names'].append(product.name)
             
             # === PHASE 2: RÉPARTITION PROPORTIONNELLE SIMPLE ===
             
             # Répartition des services
-            for account_id, details in services_details.items():
+            for compte_produit_id, details in services_details.items():
                 proportion = details['total_ttc_net'] / total_ttc_net
                 montant_service = montant_paiement * proportion
-                repartition['services'][account_id] = {
+                repartition['services'][compte_produit_id] = {
                     'montant_net': montant_service,
                     'total_ttc_net': details['total_ttc_net'],
                     'proportion': proportion
@@ -886,13 +886,13 @@ class PaiementController(QObject):
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  🛎️  Services [{names_str}]: {details['total_ttc_net']:.2f}€ net ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {account_id}")
+                print(f"  🛎️  Services [{names_str}]: {details['total_ttc_net']:.2f}€ net ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {compte_produit_id}")
             
             # Répartition des produits
-            for account_id, details in produits_details.items():
+            for compte_produit_id, details in produits_details.items():
                 proportion = details['total_ttc_net'] / total_ttc_net
                 montant_produit = montant_paiement * proportion
-                repartition['produits'][account_id] = {
+                repartition['produits'][compte_produit_id] = {
                     'montant_net': montant_produit,
                     'total_ttc_net': details['total_ttc_net'],
                     'proportion': proportion
@@ -902,7 +902,7 @@ class PaiementController(QObject):
                 if len(details['names']) > 3:
                     names_str += f" (+{len(details['names'])-3} autres)"
                 
-                print(f"  📦 Produits [{names_str}]: {details['total_ttc_net']:.2f}€ net ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {account_id}")
+                print(f"  📦 Produits [{names_str}]: {details['total_ttc_net']:.2f}€ net ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {compte_produit_id}")
             
             # === PHASE 3: CALCUL DE LA TVA NETTE ===
             
@@ -1002,7 +1002,7 @@ class PaiementController(QObject):
             print(f"  📊 Ventilation PAIEMENT: {payment.amount:.2f}€ selon proportions")
             
             # === SERVICES ===
-            for account_id, details in repartition['services'].items():
+            for compte_produit_id, details in repartition['services'].items():
                 if details['montant_net'] > 0:
                     # Utiliser directement la proportion calculée dans calculer_repartition_paiement
                     proportion = details['proportion']
@@ -1010,7 +1010,7 @@ class PaiementController(QObject):
                     
                     ecriture_service = EcritureComptable(
                         journal_id=journal_id,
-                        compte_comptable_id=account_id,
+                        compte_comptable_id=compte_produit_id,
                         debit=0,
                         credit=montant_credit,
                         ordre=ordre,
@@ -1018,11 +1018,11 @@ class PaiementController(QObject):
                     )
                     session.add(ecriture_service)
                     ecritures.append(ecriture_service)
-                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {account_id} (proportion: {proportion:.1%})")
+                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
                     ordre += 1
             
             # === PRODUITS ===
-            for account_id, details in repartition['produits'].items():
+            for compte_produit_id, details in repartition['produits'].items():
                 if details['montant_net'] > 0:
                     # Utiliser directement la proportion calculée dans calculer_repartition_paiement
                     proportion = details['proportion']
@@ -1030,7 +1030,7 @@ class PaiementController(QObject):
                     
                     ecriture_produit = EcritureComptable(
                         journal_id=journal_id,
-                        compte_comptable_id=account_id,
+                        compte_comptable_id=compte_produit_id,
                         debit=0,
                         credit=montant_credit,
                         ordre=ordre,
@@ -1038,7 +1038,7 @@ class PaiementController(QObject):
                     )
                     session.add(ecriture_produit)
                     ecritures.append(ecriture_produit)
-                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {account_id} (proportion: {proportion:.1%})")
+                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
                     ordre += 1
             
             # === TVA ===
