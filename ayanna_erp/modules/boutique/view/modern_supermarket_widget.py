@@ -711,7 +711,7 @@ class ModernSupermarketWidget(QWidget):
         return actions_frame
     
     def create_product_card(self, product):
-        """Crée une carte produit moderne"""
+        """Crée une carte produit moderne avec image haute résolution"""
         card = QFrame()
         card.setFrameStyle(QFrame.Shape.StyledPanel)
         card.setStyleSheet("""
@@ -726,48 +726,116 @@ class ModernSupermarketWidget(QWidget):
                 background-color: #F3F9FF;
             }
         """)
-        card.setFixedSize(200, 250)
+        card.setFixedSize(220, 280)  # Augmenté pour meilleure visibilité
         
         card_layout = QVBoxLayout(card)
         card_layout.setSpacing(8)
         
-        # Image produit (placeholder)
+        # Image produit avec haute résolution
         image_label = QLabel()
-        image_label.setFixedSize(160, 120)
+        image_label.setFixedSize(180, 140)  # Résolution améliorée
         image_label.setStyleSheet("""
             QLabel {
-                background-color: #F5F5F5;
-                border: 1px dashed #BDBDBD;
-                border-radius: 4px;
+                background-color: #F8F9FA;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
             }
         """)
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setText("📦\nImage")
+        
+        # Charger l'image du produit selon la logique spécifiée
+        image_loaded = False
+        if hasattr(product, 'image') and product.image and product.image.strip():
+            try:
+                # Le champ image contient le chemin relatif ou nom du fichier
+                image_filename = product.image.strip()
+                
+                # Construire le chemin complet de l'image (même logique que produit_index.py)
+                if os.path.isabs(image_filename):
+                    # Chemin absolu
+                    full_path = image_filename
+                else:
+                    # Chemin relatif depuis la racine du projet
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                    full_path = os.path.join(project_root, image_filename.replace("/", os.sep))
+                
+                if os.path.exists(full_path):
+                    # Charger l'image avec PyQt6
+                    pixmap = QPixmap(full_path)
+                    if not pixmap.isNull():
+                        # Redimensionner l'image pour s'adapter au label tout en gardant les proportions
+                        scaled_pixmap = pixmap.scaled(
+                            image_label.size(),  # Utiliser la taille du label comme dans produit_index.py
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation  # Haute qualité
+                        )
+                        image_label.setPixmap(scaled_pixmap)
+                        image_loaded = True
+                        print(f"✅ Image chargée avec succès pour {product.name}: {full_path}")
+                    else:
+                        print(f"❌ Image corrompue: {full_path}")
+                else:
+                    print(f"❌ Image introuvable: {full_path}")
+                        
+            except Exception as e:
+                print(f"❌ Erreur chargement image '{product.image}': {e}")
+        
+        # Si pas d'image chargée, afficher une image par défaut moderne
+        if not image_loaded:
+            image_label.setText("📦\nProduit")
+            image_label.setStyleSheet("""
+                QLabel {
+                    background-color: #F8F9FA;
+                    border: 2px dashed #DEE2E6;
+                    border-radius: 6px;
+                    color: #6C757D;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+        
         card_layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignCenter)
         
         # Nom du produit
-        name_label = QLabel(product.name[:25] + "..." if len(product.name) > 25 else product.name)
+        name_label = QLabel(product.name[:30] + "..." if len(product.name) > 30 else product.name)
         name_label.setStyleSheet("""
             QLabel {
                 font-weight: bold;
-                color: #333;
+                color: #212529;
                 background: transparent;
+                font-size: 11px;
             }
         """)
         name_label.setWordWrap(True)
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(name_label)
         
-        # Prix
-        price_label = QLabel(f"{product.price_unit:.0f} FC")
+        # Prix avec meilleure mise en forme
+        price = getattr(product, 'price_unit', getattr(product, 'sale_price', 0))
+        price_label = QLabel(f"{price:.0f} FC")
         price_label.setStyleSheet("""
             QLabel {
-                font-size: 14px;
+                font-size: 13px;
                 font-weight: bold;
-                color: #4CAF50;
+                color: #28A745;
                 background: transparent;
             }
         """)
+        price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         card_layout.addWidget(price_label)
+        
+        # Informations supplémentaires (code produit si disponible)
+        if hasattr(product, 'code') and product.code:
+            code_label = QLabel(f"Code: {product.code}")
+            code_label.setStyleSheet("""
+                QLabel {
+                    font-size: 9px;
+                    color: #6C757D;
+                    background: transparent;
+                }
+            """)
+            code_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            card_layout.addWidget(code_label)
         
         # Bouton d'ajout au panier
         add_btn = QPushButton("➕ Ajouter")
@@ -777,11 +845,15 @@ class ModernSupermarketWidget(QWidget):
                 color: white;
                 border: none;
                 border-radius: 4px;
-                padding: 6px;
+                padding: 8px 12px;
                 font-weight: bold;
+                font-size: 11px;
             }
             QPushButton:hover {
                 background-color: #1976D2;
+            }
+            QPushButton:pressed {
+                background-color: #1565C0;
             }
         """)
         add_btn.clicked.connect(lambda: self.add_to_cart(product))
