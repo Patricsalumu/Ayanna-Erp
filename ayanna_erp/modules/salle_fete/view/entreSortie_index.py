@@ -320,12 +320,12 @@ class EntreeSortieIndex(QWidget):
         filters_group = QGroupBox("Filtres et Recherche")
         filters_layout = QHBoxLayout(filters_group)
         
-        # Filtre par date
-        filters_layout.addWidget(QLabel("Date:"))
-        self.date_filter = QDateEdit()
-        self.date_filter.setDate(QDate.currentDate())
-        self.date_filter.setCalendarPopup(True)
-        self.date_filter.setStyleSheet("""
+        # Filtre par plage de dates
+        filters_layout.addWidget(QLabel("Du:"))
+        self.date_debut_filter = QDateEdit()
+        self.date_debut_filter.setDate(QDate.currentDate().addDays(-7))  # Par défaut 7 jours en arrière
+        self.date_debut_filter.setCalendarPopup(True)
+        self.date_debut_filter.setStyleSheet("""
             QDateEdit {
                 padding: 8px;
                 border: 1px solid #BDC3C7;
@@ -333,7 +333,21 @@ class EntreeSortieIndex(QWidget):
                 background-color: white;
             }
         """)
-        filters_layout.addWidget(self.date_filter)
+        filters_layout.addWidget(self.date_debut_filter)
+        
+        filters_layout.addWidget(QLabel("Au:"))
+        self.date_fin_filter = QDateEdit()
+        self.date_fin_filter.setDate(QDate.currentDate())
+        self.date_fin_filter.setCalendarPopup(True)
+        self.date_fin_filter.setStyleSheet("""
+            QDateEdit {
+                padding: 8px;
+                border: 1px solid #BDC3C7;
+                border-radius: 4px;
+                background-color: white;
+            }
+        """)
+        filters_layout.addWidget(self.date_fin_filter)
         
         # Filtre type d'opération
         filters_layout.addWidget(QLabel("Type:"))
@@ -420,7 +434,7 @@ class EntreeSortieIndex(QWidget):
         layout.addWidget(table_group)
         
         # === STATISTIQUES ===
-        stats_group = QGroupBox("Résumé de la journée")
+        stats_group = QGroupBox("Résumé de la période")
         stats_layout = QHBoxLayout(stats_group)
         
         # Total Entrées
@@ -472,7 +486,8 @@ class EntreeSortieIndex(QWidget):
         # === CONNEXIONS SIGNAUX ===
         self.add_depense_btn.clicked.connect(self.show_depense_dialog)
         self.export_pdf_btn.clicked.connect(self.export_to_pdf)
-        self.date_filter.dateChanged.connect(self.filter_journal)
+        self.date_debut_filter.dateChanged.connect(self.filter_journal)
+        self.date_fin_filter.dateChanged.connect(self.filter_journal)
         self.type_filter.currentTextChanged.connect(self.filter_journal)
         self.search_edit.textChanged.connect(self.filter_journal)
     
@@ -481,19 +496,23 @@ class EntreeSortieIndex(QWidget):
         Charger les données du journal depuis les tables métier
         - event_expenses (sorties)
         - event_payments (entrées)
-        Filtrées par POS courant et date sélectionnée
+        Filtrées par POS courant et plage de dates sélectionnée
         """
         try:
-            # Obtenir la date sélectionnée
-            if hasattr(self, 'date_filter'):
-                qdate = self.date_filter.date()
-                selected_date = date(qdate.year(), qdate.month(), qdate.day())
+            # Obtenir les dates de début et fin sélectionnées
+            if hasattr(self, 'date_debut_filter') and hasattr(self, 'date_fin_filter'):
+                qdate_debut = self.date_debut_filter.date()
+                qdate_fin = self.date_fin_filter.date()
+                start_date = date(qdate_debut.year(), qdate_debut.month(), qdate_debut.day())
+                end_date = date(qdate_fin.year(), qdate_fin.month(), qdate_fin.day())
             else:
-                selected_date = date.today()
+                # Valeurs par défaut si les filtres n'existent pas
+                end_date = date.today()
+                start_date = end_date
             
-            # Définir les bornes de la journée pour les requêtes SQL
-            start_datetime = datetime.combine(selected_date, datetime.min.time())
-            end_datetime = datetime.combine(selected_date, datetime.max.time())
+            # Définir les bornes de la période pour les requêtes SQL
+            start_datetime = datetime.combine(start_date, datetime.min.time())
+            end_datetime = datetime.combine(end_date, datetime.max.time())
             
             # Initialiser la liste des données
             self.journal_data = []
@@ -502,24 +521,35 @@ class EntreeSortieIndex(QWidget):
             try:
                 pos_id = getattr(self.main_controller, 'pos_id', 1)
                 entre_sortie_controller = EntreSortieController(pos_id=pos_id)
-                expenses = entre_sortie_controller.get_expenses_by_date_and_pos(
-                    selected_date, 
-                    pos_id
-                )
+                # Utiliser une requête directe avec plage de dates
+                from ayanna_erp.database.database_manager import DatabaseManager
+                db_manager = DatabaseManager()
+                session = db_manager.get_session()
+                
+                # Récupérer les dépenses pour la plage de dates
+                from ayanna_erp.modules.salle_fete.model.salle_fete import EventExpense
+                expenses = session.query(EventExpense)\
+                    .filter(
+                        EventExpense.pos_id == pos_id,
+                        EventExpense.expense_date.between(start_datetime, end_datetime)
+                    )\
+                    .all()
                 
                 for expense in expenses:
                     entry = {
                         'id': f'EXP_{expense.id}',
-                        'datetime': expense.date_creation,
+                        'datetime': expense.expense_date,
                         'type': 'Sortie',
-                        'libelle': expense.libelle,
-                        'categorie': expense.categorie,
+                        'libelle': expense.description,
+                        'categorie': expense.expense_type,
                         'montant_entree': 0.0,
-                        'montant_sortie': float(expense.montant),
-                        'utilisateur': getattr(expense, 'utilisateur_nom', 'Utilisateur'),
-                        'description': expense.description or ''
+                        'montant_sortie': float(expense.amount),
+                        'utilisateur': getattr(expense, 'created_by', 'Utilisateur'),
+                        'description': ''
                     }
                     self.journal_data.append(entry)
+                
+                session.close()
                     
             except Exception as e:
                 print(f"Erreur lors du chargement des dépenses: {e}")
@@ -528,24 +558,36 @@ class EntreeSortieIndex(QWidget):
             try:
                 pos_id = getattr(self.main_controller, 'pos_id', 1)
                 paiement_controller = PaiementController(pos_id=pos_id)
-                payments = paiement_controller.get_payments_by_date_and_pos(
-                    selected_date,
-                    pos_id
-                )
+                # Utiliser une requête directe avec plage de dates
+                from ayanna_erp.database.database_manager import DatabaseManager
+                db_manager = DatabaseManager()
+                session = db_manager.get_session()
+                
+                # Récupérer les paiements pour la plage de dates
+                from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
+                payments = session.query(EventPayment)\
+                    .join(EventPayment.reservation)\
+                    .filter(
+                        EventPayment.reservation.has(pos_id=pos_id),
+                        EventPayment.payment_date.between(start_datetime, end_datetime)
+                    )\
+                    .all()
                 
                 for payment in payments:
                     entry = {
                         'id': f'PAY_{payment.id}',
-                        'datetime': payment.date_paiement,
+                        'datetime': payment.payment_date,
                         'type': 'Entrée',
-                        'libelle': f'Paiement {payment.mode_paiement}',
+                        'libelle': f'Paiement {payment.payment_method}',
                         'categorie': 'Paiement client',
-                        'montant_entree': float(payment.montant),
+                        'montant_entree': float(payment.amount),
                         'montant_sortie': 0.0,
-                        'utilisateur': getattr(payment, 'utilisateur_nom', 'Utilisateur'),
+                        'utilisateur': getattr(payment, 'user_id', 'Utilisateur'),
                         'description': f'Réservation #{payment.reservation_id}' if payment.reservation_id else ''
                     }
                     self.journal_data.append(entry)
+                
+                session.close()
                     
             except Exception as e:
                 print(f"Erreur lors du chargement des paiements: {e}")
@@ -691,12 +733,14 @@ class EntreeSortieIndex(QWidget):
         """Obtenir les données filtrées selon les critères"""
         filtered_data = self.journal_data.copy()
         
-        # Filtre par date
-        if hasattr(self, 'date_filter'):
-            qdate = self.date_filter.date()
-            selected_date = date(qdate.year(), qdate.month(), qdate.day())
+        # Filtre par plage de dates
+        if hasattr(self, 'date_debut_filter') and hasattr(self, 'date_fin_filter'):
+            qdate_debut = self.date_debut_filter.date()
+            qdate_fin = self.date_fin_filter.date()
+            start_date = date(qdate_debut.year(), qdate_debut.month(), qdate_debut.day())
+            end_date = date(qdate_fin.year(), qdate_fin.month(), qdate_fin.day())
             filtered_data = [entry for entry in filtered_data 
-                           if entry['datetime'].date() == selected_date]
+                           if start_date <= entry['datetime'].date() <= end_date]
         
         # Filtre par type
         if hasattr(self, 'type_filter'):
@@ -757,7 +801,28 @@ class EntreeSortieIndex(QWidget):
     
     def filter_journal(self):
         """Appliquer les filtres et mettre à jour l'affichage"""
-        self.load_journal_data()
+        # Vérifier si la plage de dates a changé
+        if hasattr(self, 'date_debut_filter') and hasattr(self, 'date_fin_filter'):
+            qdate_debut = self.date_debut_filter.date()
+            qdate_fin = self.date_fin_filter.date()
+            new_start_date = date(qdate_debut.year(), qdate_debut.month(), qdate_debut.day())
+            new_end_date = date(qdate_fin.year(), qdate_fin.month(), qdate_fin.day())
+            
+            # Recharger les données seulement si la plage de dates a changé
+            if (not hasattr(self, '_current_start_date') or 
+                not hasattr(self, '_current_end_date') or
+                self._current_start_date != new_start_date or 
+                self._current_end_date != new_end_date):
+                
+                self._current_start_date = new_start_date
+                self._current_end_date = new_end_date
+                self.load_journal_data()
+            else:
+                # Juste mettre à jour l'affichage avec les filtres actuels
+                self.update_journal_display()
+        else:
+            # Fallback: recharger les données
+            self.load_journal_data()
     
     def show_depense_dialog(self):
         """Afficher le dialog pour enregistrer une dépense"""
@@ -799,10 +864,18 @@ class EntreeSortieIndex(QWidget):
             from reportlab.lib.units import inch
             import os
             
-            # Nom du fichier
-            qdate = self.date_filter.date()
-            selected_date = date(qdate.year(), qdate.month(), qdate.day())
-            filename = f"journal_caisse_{selected_date.strftime('%Y%m%d')}.pdf"
+            # Nom du fichier et titre
+            qdate_debut = self.date_debut_filter.date()
+            qdate_fin = self.date_fin_filter.date()
+            start_date = date(qdate_debut.year(), qdate_debut.month(), qdate_debut.day())
+            end_date = date(qdate_fin.year(), qdate_fin.month(), qdate_fin.day())
+            
+            if start_date == end_date:
+                filename = f"journal_caisse_{start_date.strftime('%Y%m%d')}.pdf"
+                period_title = f"Journal de Caisse - {start_date.strftime('%d/%m/%Y')}"
+            else:
+                filename = f"journal_caisse_{start_date.strftime('%Y%m%d')}_au_{end_date.strftime('%Y%m%d')}.pdf"
+                period_title = f"Journal de Caisse - Du {start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}"
             
             # Créer le document
             doc = SimpleDocTemplate(filename, pagesize=A4)
@@ -819,7 +892,7 @@ class EntreeSortieIndex(QWidget):
             )
             
             # Titre
-            title = Paragraph(f"Journal de Caisse - {selected_date.strftime('%d/%m/%Y')}", title_style)
+            title = Paragraph(period_title, title_style)
             story.append(title)
             story.append(Spacer(1, 12))
             
