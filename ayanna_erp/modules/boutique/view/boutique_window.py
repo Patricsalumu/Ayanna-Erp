@@ -149,9 +149,9 @@ class BoutiqueWindow(QMainWindow):
             self.caisse_widget = EntreeSortieIndex(self.boutique_controller, self.current_user)
             self.tab_widget.addTab(self.caisse_widget, "👥 Caisse")
 
-            # Onglet Rapports - Analyses et rapports
-            self.rapports_widget = RapportIndexWidget(self)
-            self.tab_widget.addTab(self.rapports_widget, "📈 Rapports")
+            # # Onglet Rapports - Analyses et rapports
+            # self.rapports_widget = RapportIndexWidget(self)
+            # self.tab_widget.addTab(self.rapports_widget, "📈 Rapports")
             
             # Définir l'onglet par défaut (Vente)
             self.tab_widget.setCurrentIndex(0)

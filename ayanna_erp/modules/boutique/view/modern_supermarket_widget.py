@@ -21,6 +21,7 @@ from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ..model.models import ShopClient, ShopPanier, ShopService
 from ayanna_erp.modules.salle_fete.model.salle_fete import EventService
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ..utils.invoice_printer import InvoicePrintManager
 from .client_index import ClientFormDialog
 
 
@@ -39,6 +40,7 @@ class ModernSupermarketWidget(QWidget):
         self.pos_id = pos_id
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
+        self.invoice_printer = InvoicePrintManager(enterprise_id=self.pos_id)
         
         # Variables d'état
         self.current_cart = []  # Liste des articles du panier
@@ -1838,106 +1840,94 @@ class ModernSupermarketWidget(QWidget):
             # Ne pas faire échouer la vente pour un problème comptable
     
     def _show_sale_receipt(self, sale_data, payment_data):
-        """Affiche le reçu de vente avec en-tête d'entreprise"""
-        
-        # Récupérer les informations de l'entreprise
-        enterprise_info = self.enterprise_controller.get_current_enterprise()
-        
+        """Affiche le reçu de vente avec en-tête d'entreprise en utilisant InvoicePrintManager"""
+
         # Générer un numéro de commande unique (basé sur timestamp + POS)
         from datetime import datetime
         order_number = f"CMD-{self.pos_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-        
-        # Construire l'en-tête d'entreprise avec logo
-        receipt_text = f"""===============================
-{enterprise_info['name']}
-===============================
 
-Adresse: {enterprise_info['address']}
-Téléphone: {enterprise_info['phone']}
-Email: {enterprise_info['email']}
-RCCM: {enterprise_info['rccm']}
+        # Préparer les données de la facture
+        invoice_data = {
+            'reference': order_number,
+            'order_date': sale_data['sale_date'],
+            'created_at': sale_data['sale_date'],
+            'status': 'Payée',
+            'client_nom': getattr(self.selected_client, 'nom', 'Client anonyme') if self.selected_client else 'Client anonyme',
+            'client_telephone': getattr(self.selected_client, 'telephone', '') if self.selected_client else '',
+            'client_email': getattr(self.selected_client, 'email', '') if self.selected_client else '',
+            'client_adresse': getattr(self.selected_client, 'adresse', '') if self.selected_client else '',
+            'items': self.current_cart,
+            'subtotal_ht': sale_data['subtotal'],
+            'tax_amount': 0.0,  # Pas de TVA pour l'instant
+            'total_ttc': sale_data['total_amount'],
+            'discount_amount': sale_data['discount_amount'],
+            'total_net': sale_data['total_amount'],
+            'notes': f"Vente effectuée par {getattr(self.current_user, 'name', 'Utilisateur')} - POS #{self.pos_id}",
+            'payments': [{
+                'payment_date': sale_data['sale_date'],
+                'amount': payment_data['amount_received'],
+                'payment_method': payment_data['method'],
+                'user_name': getattr(self.current_user, 'name', 'Utilisateur')
+            }]
+        }
 
-===== REÇU DE VENTE =====
-
-N° Commande: {order_number}
-Date: {sale_data['sale_date'].strftime('%d/%m/%Y %H:%M')}
-POS: #{self.pos_id}
-Vendeur: {getattr(self.current_user, 'name', 'Utilisateur')}
-
---- DÉTAIL DES ARTICLES ---
-"""
-        
-        # Formater les produits avec alignement correct
-        for item in self.current_cart:
-            product_name = item.get('name', '')[:25] + '...' if len(item.get('name', '')) > 25 else item.get('name', '')
-            quantity = item.get('quantity', 0)
-            unit_price = item.get('unit_price', 0.0)
-            total_price = unit_price * quantity
-            
-            # Formatage aligné avec espaces
-            line = f"{product_name:<28} {quantity:>3} x {unit_price:>6.0f} = {total_price:>8.0f} FC\n"
-            receipt_text += line
-        
-        receipt_text += f"""
---- TOTAUX ---
-Sous-total:              {sale_data['subtotal']:>8.0f} FC
-Remise appliquée:        -{sale_data['discount_amount']:>8.0f} FC
-TOTAL À PAYER:           {sale_data['total_amount']:>8.0f} FC
-
---- PAIEMENT ---
-Méthode:                 {payment_data['method']}
-Montant reçu:            {payment_data['amount_received']:>8.0f} FC
-Monnaie rendue:          {payment_data['change']:>8.0f} FC
-
-Merci pour votre achat !
-Bonne journée.
-
-===============================
-Généré par Ayanna ERP©
-Tous droits réservés
-===============================
-"""
-        
-        # Afficher dans un dialogue
+        # Créer le dialogue d'impression
         receipt_dialog = QDialog(self)
         receipt_dialog.setWindowTitle("🧾 Reçu de vente")
-        receipt_dialog.setFixedSize(500, 700)
-        
+        receipt_dialog.setFixedSize(500, 400)
+
         layout = QVBoxLayout(receipt_dialog)
-        
-        # Tentative d'affichage du logo (optionnel)
-        try:
-            logo_path = enterprise_info.get('logo_path', '')
-            if logo_path and os.path.exists(logo_path):
-                logo_label = QLabel()
-                pixmap = QPixmap(logo_path)
-                if not pixmap.isNull():
-                    # Redimensionner le logo
-                    scaled_pixmap = pixmap.scaled(100, 50, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-                    logo_label.setPixmap(scaled_pixmap)
-                    logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    layout.addWidget(logo_label)
-        except Exception as e:
-            print(f"⚠️ Logo non affiché: {e}")
-        
-        receipt_display = QTextEdit()
-        receipt_display.setPlainText(receipt_text)
-        receipt_display.setReadOnly(True)
-        receipt_display.setStyleSheet("""
+
+        # Titre
+        title_label = QLabel("Impression du reçu")
+        title_label.setStyleSheet("font-size: 16px; font-weight: bold; margin-bottom: 10px;")
+        layout.addWidget(title_label)
+
+        # Options d'impression
+        options_group = QGroupBox("Options d'impression")
+        options_layout = QVBoxLayout(options_group)
+
+        # Format d'impression
+        format_layout = QHBoxLayout()
+        format_layout.addWidget(QLabel("Format:"))
+
+        self.print_format_combo = QComboBox()
+        self.print_format_combo.addItems(["Reçu 53mm (ticket)", "Facture A4 (complet)"])
+        format_layout.addWidget(self.print_format_combo)
+        options_layout.addLayout(format_layout)
+
+        # Aperçu du contenu
+        preview_label = QLabel("Contenu du reçu généré:")
+        preview_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+        options_layout.addWidget(preview_label)
+
+        # Aperçu simplifié
+        preview_text = f"""
+N° Commande: {order_number}
+Client: {invoice_data['client_nom']}
+Total: {sale_data['total_amount']:.0f} FC
+Paiement: {payment_data['method']}
+        """.strip()
+
+        preview_display = QTextEdit()
+        preview_display.setPlainText(preview_text)
+        preview_display.setReadOnly(True)
+        preview_display.setMaximumHeight(100)
+        preview_display.setStyleSheet("""
             QTextEdit {
-                font-family: 'Courier New', 'Consolas', monospace;
-                font-size: 12px;
-                background-color: white;
-                line-height: 1.3;
-                padding: 10px;
+                font-family: 'Courier New', monospace;
+                font-size: 10px;
+                background-color: #f5f5f5;
                 border: 1px solid #ddd;
             }
         """)
-        layout.addWidget(receipt_display)
-        
+        options_layout.addWidget(preview_display)
+
+        layout.addWidget(options_group)
+
         # Boutons
         buttons_layout = QHBoxLayout()
-        
+
         print_btn = QPushButton("🖨️ Imprimer")
         print_btn.setStyleSheet("""
             QPushButton {
@@ -1952,9 +1942,9 @@ Tous droits réservés
                 background-color: #1976D2;
             }
         """)
-        print_btn.clicked.connect(lambda: self._print_receipt(receipt_text))
+        print_btn.clicked.connect(lambda: self._print_invoice_receipt(invoice_data, receipt_dialog))
         buttons_layout.addWidget(print_btn)
-        
+
         close_btn = QPushButton("✅ Fermer")
         close_btn.setStyleSheet("""
             QPushButton {
@@ -1972,16 +1962,99 @@ Tous droits réservés
         close_btn.clicked.connect(receipt_dialog.accept)
         close_btn.setDefault(True)
         buttons_layout.addWidget(close_btn)
-        
+
         layout.addLayout(buttons_layout)
-        
+
         receipt_dialog.exec()
-    
+
+    def _print_invoice_receipt(self, invoice_data, dialog):
+        """Imprime la facture/reçu en utilisant InvoicePrintManager"""
+        try:
+            # Déterminer le format d'impression
+            format_choice = self.print_format_combo.currentText()
+
+            # Générer un nom de fichier
+            from datetime import datetime
+            import tempfile
+            import os
+
+            # Déterminer le répertoire de destination
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            if "53mm" in format_choice:
+                # Pour les tickets 53mm : dossier temporaire (pour impression directe)
+                temp_dir = tempfile.gettempdir()
+                filename = os.path.join(temp_dir, f"receipt_{timestamp}.pdf")
+                printed_file = self.invoice_printer.print_receipt_53mm(
+                    invoice_data,
+                    invoice_data['payments'],
+                    getattr(self.current_user, 'name', 'Utilisateur'),
+                    filename
+                )
+                print_type = "ticket 53mm"
+            else:
+                # Pour les factures A4 : dossier racine du projet
+                invoices_dir = os.path.join(os.getcwd(), "factures_export")
+                os.makedirs(invoices_dir, exist_ok=True)  # Créer le dossier s'il n'existe pas
+                filename = os.path.join(invoices_dir, f"facture_{invoice_data.get('reference', 'UNKNOWN')}_{timestamp}.pdf")
+                printed_file = self.invoice_printer.print_invoice_a4(
+                    invoice_data,
+                    filename
+                )
+                print_type = "facture A4"
+
+            if os.path.exists(printed_file):
+                if "53mm" in format_choice:
+                    # Pour les tickets 53mm : imprimer directement
+                    try:
+                        import subprocess
+                        # Ouvrir le PDF avec l'application par défaut (qui permet l'impression)
+                        subprocess.run(['start', '', printed_file], shell=True, check=True)
+                        QMessageBox.information(
+                            self,
+                            "Impression lancée",
+                            f"Le ticket 53mm a été généré et l'impression a été lancée automatiquement !\\n\\n"
+                            f"Fichier: {printed_file}"
+                        )
+                    except Exception as print_error:
+                        QMessageBox.warning(
+                            self,
+                            "Impression manuelle requise",
+                            f"Le ticket 53mm a été généré avec succès !\\n\\n"
+                            f"Fichier: {printed_file}\\n\\n"
+                            f"Erreur d'impression automatique: {print_error}\\n"
+                            "Veuillez imprimer manuellement depuis votre lecteur PDF."
+                        )
+                else:
+                    # Pour les factures A4 : juste exporter
+                    QMessageBox.information(
+                        self,
+                        "Export réussi",
+                        f"La facture A4 a été exportée avec succès !\\n\\n"
+                        f"Fichier: {printed_file}\\n\\n"
+                        "Vous pouvez l'ouvrir et l'imprimer selon vos besoins."
+                    )
+            else:
+                QMessageBox.warning(
+                    self,
+                    "Erreur d'export",
+                    f"Impossible de générer le document."
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Erreur d'impression",
+                f"Une erreur s'est produite lors de l'impression:\\n{str(e)}"
+            )
+            import traceback
+            traceback.print_exc()
+
     def _print_receipt(self, receipt_text):
-        """Imprime le reçu (fonction placeholder)"""
+        """Imprime le reçu (fonction placeholder - conservée pour compatibilité)"""
         QMessageBox.information(
-            self, 
-            "Impression", 
+            self,
+            "Impression",
             "Fonction d'impression à implémenter\\n"
             "Le reçu peut être copié depuis la fenêtre"
         )
