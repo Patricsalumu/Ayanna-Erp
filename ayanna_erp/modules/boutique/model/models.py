@@ -84,6 +84,9 @@ class ShopPanier(Base):
     created_at = Column(DateTime, default=func.current_timestamp())
     updated_at = Column(DateTime, default=func.current_timestamp(), onupdate=func.current_timestamp())
     
+    # Notes sur la commande
+    notes = Column(Text)  # Notes détaillées sur la commande (supporte retours à la ligne)
+    
     # Relations
     client = relationship("ShopClient", back_populates="paniers")
     products = relationship("ShopPanierProduct", back_populates="panier", cascade="all, delete-orphan")

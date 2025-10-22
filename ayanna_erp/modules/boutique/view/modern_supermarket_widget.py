@@ -448,7 +448,37 @@ class ModernSupermarketWidget(QWidget):
         """)
         cart_layout.addWidget(cart_title)
         
-        # Sélection client avec recherche avancée
+        # Zone scrollable pour client, produits et notes
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setMaximumHeight(400)  # Hauteur maximale pour le scroll
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                background-color: white;
+            }
+            QScrollBar:vertical {
+                width: 12px;
+                background-color: #F0F0F0;
+            }
+            QScrollBar::handle:vertical {
+                background-color: #C0C0C0;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background-color: #A0A0A0;
+            }
+        """)
+
+        # Contenu scrollable
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_layout.setSpacing(8)
+
+        # Sélection client
         client_frame = QFrame()
         client_layout = QHBoxLayout(client_frame)
         client_layout.setContentsMargins(5, 5, 5, 5)
@@ -486,84 +516,185 @@ class ModernSupermarketWidget(QWidget):
         self.add_client_btn.clicked.connect(self.create_new_client)
         client_layout.addWidget(self.add_client_btn)
 
-        cart_layout.addWidget(client_frame)
-        
+        scroll_layout.addWidget(client_frame)
+
         # Liste des articles du panier
         self.cart_table = QTableWidget(0, 4)
         self.cart_table.setHorizontalHeaderLabels(["Produit", "Qté", "Prix", "Total"])
         self.cart_table.horizontalHeader().setStretchLastSection(True)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.setAlternatingRowColors(True)
-        cart_layout.addWidget(self.cart_table)
-        
-        # Zone totaux
+        self.cart_table.setMinimumHeight(150)  # Hauteur minimale
+        scroll_layout.addWidget(self.cart_table)
+
+        # Section notes sur la commande
+        notes_frame = QFrame()
+        notes_frame.setFrameStyle(QFrame.Shape.StyledPanel)
+        notes_layout = QVBoxLayout(notes_frame)
+        notes_layout.setContentsMargins(5, 5, 5, 5)
+
+        # Titre de la section notes
+        notes_title = QLabel("📝 Notes sur la commande")
+        notes_title.setStyleSheet("font-weight: bold; color: #333; margin-bottom: 5px;")
+        notes_layout.addWidget(notes_title)
+
+        # Zone de texte pour les notes avec scroll
+        self.notes_text = QTextEdit()
+        self.notes_text.setPlaceholderText("Ajoutez ici des notes détaillées sur la commande...\n\nPar exemple :\n- Type d'habit pour pressing\n- Instructions spéciales\n- Préférences client\n- Commentaires...")
+        self.notes_text.setMaximumHeight(120)  # Hauteur maximale avec scroll
+        self.notes_text.setStyleSheet("""
+            QTextEdit {
+                border: 1px solid #E0E0E0;
+                border-radius: 4px;
+                padding: 5px;
+                background-color: #FAFAFA;
+                font-family: 'Segoe UI', sans-serif;
+                font-size: 11px;
+            }
+            QTextEdit:focus {
+                border-color: #2196F3;
+                background-color: white;
+            }
+        """)
+        notes_layout.addWidget(self.notes_text)
+
+        scroll_layout.addWidget(notes_frame)
+
+        # Définir le contenu scrollable
+        scroll_area.setWidget(scroll_content)
+        cart_layout.addWidget(scroll_area)
+
+        # Zone totaux (statique - pas dans le scroll)
         totals_frame = self.create_totals_section()
         cart_layout.addWidget(totals_frame)
-        
-        # Boutons d'action
+
+        # Boutons d'action (statiques - pas dans le scroll)
         actions_frame = self.create_actions_section()
         cart_layout.addWidget(actions_frame)
-        
+
         return cart_widget
     
     def create_totals_section(self):
-        """Crée la section des totaux avec remise"""
+        """Crée la section des totaux avec remise en ligne horizontale"""
         totals_frame = QFrame()
-        totals_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        totals_layout = QFormLayout(totals_frame)
-        
+        totals_layout = QVBoxLayout(totals_frame)
+
+        # Première ligne : Sous-total, Remise, Net à payer
+        top_line_frame = QFrame()
+        top_line_layout = QHBoxLayout(top_line_frame)
+        top_line_layout.setContentsMargins(0, 0, 0, 0)
+        top_line_layout.setSpacing(15)
+
         # Sous-total
+        subtotal_frame = QFrame()
+        subtotal_layout = QVBoxLayout(subtotal_frame)
+        subtotal_layout.setContentsMargins(0, 0, 0, 0)
+        subtotal_label_title = QLabel("Sous-total:")
+        subtotal_label_title.setStyleSheet("font-weight: bold; color: #666;")
         self.subtotal_label = QLabel("0.00 FC")
-        totals_layout.addRow("Sous-total:", self.subtotal_label)
-        
-        # Remise globale
-        discount_widget = QWidget()
-        discount_layout = QHBoxLayout(discount_widget)
+        self.subtotal_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+        subtotal_layout.addWidget(subtotal_label_title)
+        subtotal_layout.addWidget(self.subtotal_label)
+        top_line_layout.addWidget(subtotal_frame)
+
+        # Remise
+        discount_frame = QFrame()
+        discount_layout = QVBoxLayout(discount_frame)
         discount_layout.setContentsMargins(0, 0, 0, 0)
-        
+        discount_label_title = QLabel("Remise:")
+        discount_label_title.setStyleSheet("font-weight: bold; color: #666;")
         self.discount_spin = QDoubleSpinBox()
         self.discount_spin.setRange(0, 999999)
         self.discount_spin.setSuffix(" FC")
-        # Application automatique de la remise lors du changement de valeur
+        self.discount_spin.setFixedWidth(100)
         self.discount_spin.valueChanged.connect(self.apply_discount_auto)
-        
-        # Suppression du bouton "Appliquer" - remise automatique
+        discount_layout.addWidget(discount_label_title)
         discount_layout.addWidget(self.discount_spin)
-        
-        totals_layout.addRow("Remise:", discount_widget)
-        
-        # Montant de la remise
-        self.discount_amount_label = QLabel("0.00 FC")
-        totals_layout.addRow("Montant remise:", self.discount_amount_label)
-        
-        # Total final
+        top_line_layout.addWidget(discount_frame)
+
+        # Net à payer
+        net_frame = QFrame()
+        net_layout = QVBoxLayout(net_frame)
+        net_layout.setContentsMargins(0, 0, 0, 0)
+        net_label_title = QLabel("Net à payer:")
+        net_label_title.setStyleSheet("font-weight: bold; color: #666;")
+        self.net_total_label = QLabel("0.00 FC")
+        self.net_total_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
+        net_layout.addWidget(net_label_title)
+        net_layout.addWidget(self.net_total_label)
+        top_line_layout.addWidget(net_frame)
+
+        totals_layout.addWidget(top_line_frame)
+
+        # Ligne de séparation
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        separator.setStyleSheet("color: #E0E0E0;")
+        totals_layout.addWidget(separator)
+
+        # Total final (deuxième ligne)
+        total_frame = QFrame()
+        total_layout = QHBoxLayout(total_frame)
+        total_layout.setContentsMargins(0, 0, 0, 0)
+
+        total_label_title = QLabel("TOTAL À PAYER:")
+        total_label_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
         self.total_label = QLabel("0.00 FC")
         self.total_label.setStyleSheet("""
             QLabel {
-                font-size: 16px;
+                font-size: 18px;
                 font-weight: bold;
                 color: #4CAF50;
             }
         """)
-        totals_layout.addRow("TOTAL:", self.total_label)
-        
+
+        total_layout.addStretch()
+        total_layout.addWidget(total_label_title)
+        total_layout.addWidget(self.total_label)
+        total_layout.addStretch()
+
+        totals_layout.addWidget(total_frame)
+
         return totals_frame
     
     def create_actions_section(self):
-        """Crée la section des boutons d'action"""
+        """Crée la section des boutons d'action côte à côte"""
         actions_frame = QFrame()
-        actions_layout = QVBoxLayout(actions_frame)
-        actions_layout.setSpacing(8)
-        
-        # Bouton valider commande
-        validate_btn = QPushButton("💳 Valider & Payer")
+        actions_layout = QHBoxLayout(actions_frame)
+        actions_layout.setSpacing(10)
+
+        # Bouton vider panier (à gauche)
+        clear_btn = QPushButton("�️ Vider le panier")
+        clear_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-size: 12px;
+                padding: 10px 15px;
+                border: none;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        clear_btn.clicked.connect(self.clear_cart)
+        actions_layout.addWidget(clear_btn)
+
+        # Espace extensible
+        actions_layout.addStretch()
+
+        # Bouton valider commande (à droite)
+        validate_btn = QPushButton("� Valider & Payer")
         validate_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
                 font-size: 14px;
                 font-weight: bold;
-                padding: 12px;
+                padding: 12px 20px;
                 border: none;
                 border-radius: 6px;
             }
@@ -576,25 +707,7 @@ class ModernSupermarketWidget(QWidget):
         """)
         validate_btn.clicked.connect(self.validate_and_pay)
         actions_layout.addWidget(validate_btn)
-        
-        # Bouton vider panier
-        clear_btn = QPushButton("🗑️ Vider le panier")
-        clear_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-size: 12px;
-                padding: 8px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
-        clear_btn.clicked.connect(self.clear_cart)
-        actions_layout.addWidget(clear_btn)
-        
+
         return actions_frame
     
     def create_product_card(self, product):
@@ -1406,7 +1519,7 @@ class ModernSupermarketWidget(QWidget):
 
         # Mettre à jour les labels
         self.subtotal_label.setText(f"{subtotal:.0f} FC")
-        self.discount_amount_label.setText(f"{discount_amount:.0f} FC")
+        self.net_total_label.setText(f"{total:.0f} FC")
         self.total_label.setText(f"{total:.0f} FC")
     
     def apply_discount_auto(self):
@@ -1426,6 +1539,7 @@ class ModernSupermarketWidget(QWidget):
         self.current_cart = []
         self.global_discount = Decimal('0.00')
         self.discount_spin.setValue(0)
+        self.notes_text.clear()  # Vider aussi le champ notes
         self.update_cart_display()
         self.update_totals()
         self.cart_updated.emit()
@@ -1550,9 +1664,9 @@ class ModernSupermarketWidget(QWidget):
                 panier_result = session.execute(text("""
                     INSERT INTO shop_paniers 
                     (pos_id, client_id, numero_commande, status, payment_method, 
-                     subtotal, remise_amount, total_final, user_id, created_at, updated_at)
+                     subtotal, remise_amount, total_final, user_id, created_at, updated_at, notes)
                     VALUES (:pos_id, :client_id, :numero_commande, :status, :payment_method,
-                            :subtotal, :remise_amount, :total_final, :user_id, :created_at, :updated_at)
+                            :subtotal, :remise_amount, :total_final, :user_id, :created_at, :updated_at, :notes)
                 """), {
                     'pos_id': self.pos_id,
                     'client_id': sale_data['client_id'],
@@ -1564,7 +1678,8 @@ class ModernSupermarketWidget(QWidget):
                     'total_final': sale_data['total_amount'],
                     'user_id': sale_data['user_id'],
                     'created_at': datetime.now(),
-                    'updated_at': datetime.now()
+                    'updated_at': datetime.now(),
+                    'notes': self.notes_text.toPlainText().strip()  # Récupérer la note du champ texte
                 })
                 
                 session.flush()
@@ -1846,6 +1961,22 @@ class ModernSupermarketWidget(QWidget):
         from datetime import datetime
         order_number = f"CMD-{self.pos_id}-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
+        # Récupérer la note depuis la base de données (panier le plus récent)
+        panier_notes = ""
+        try:
+            with self.db_manager.get_session() as session:
+                from sqlalchemy import text
+                notes_result = session.execute(text("""
+                    SELECT notes FROM shop_paniers 
+                    WHERE pos_id = :pos_id AND status = 'completed' 
+                    ORDER BY created_at DESC LIMIT 1
+                """), {'pos_id': self.pos_id})
+                notes_row = notes_result.fetchone()
+                if notes_row and notes_row[0]:
+                    panier_notes = notes_row[0]
+        except Exception as e:
+            print(f"Erreur récupération notes panier: {e}")
+
         # Préparer les données de la facture
         invoice_data = {
             'reference': order_number,
@@ -1862,7 +1993,7 @@ class ModernSupermarketWidget(QWidget):
             'total_ttc': sale_data['total_amount'],
             'discount_amount': sale_data['discount_amount'],
             'total_net': sale_data['total_amount'],
-            'notes': f"Vente effectuée par {getattr(self.current_user, 'name', 'Utilisateur')} - POS #{self.pos_id}",
+            'notes': panier_notes if panier_notes else f"Vente effectuée par {getattr(self.current_user, 'name', 'Utilisateur')} - POS #{self.pos_id}",
             'payments': [{
                 'payment_date': sale_data['sale_date'],
                 'amount': payment_data['amount_received'],

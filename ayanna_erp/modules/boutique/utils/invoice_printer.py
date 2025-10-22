@@ -592,6 +592,36 @@ class InvoicePrintManager:
         c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
         y_position -= 3*mm
 
+        # Section Notes (si présentes)
+        notes = invoice_data.get('notes', '').strip()
+        if notes and notes != f"Vente effectuée par {user_name} - POS #{invoice_data.get('pos_id', 'N/A')}":
+            c.setFont('Helvetica-Bold', 6)
+            c.drawString(2*mm, y_position, "NOTES:")
+            y_position -= 3*mm
+
+            c.setFont('Helvetica', 5)
+            # Diviser les notes en lignes si nécessaire (limiter la longueur)
+            words = notes.split()
+            current_line = ""
+            for word in words:
+                test_line = current_line + " " + word if current_line else word
+                if c.stringWidth(test_line, 'Helvetica', 5) < TICKET_WIDTH - 4*mm:
+                    current_line = test_line
+                else:
+                    if current_line:
+                        c.drawString(3*mm, y_position, current_line.strip())
+                        y_position -= 2.5*mm
+                    current_line = word
+
+            # Dernière ligne
+            if current_line:
+                c.drawString(3*mm, y_position, current_line.strip())
+                y_position -= 3*mm
+
+            # Ligne de séparation après les notes
+            c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+            y_position -= 3*mm
+
         c.setFont('Helvetica-Bold', 6)
         c.drawString(2*mm, y_position, "RECAPITULATIF:")
         y_position -= 3*mm
