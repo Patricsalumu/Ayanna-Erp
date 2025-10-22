@@ -11,6 +11,7 @@ from PyQt6.QtCore import Qt, QDate, pyqtSignal
 from PyQt6.QtGui import QFont, QPalette, QColor
 from datetime import datetime, timedelta
 from decimal import Decimal
+import os
 from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
 from ayanna_erp.modules.boutique.view.modern_supermarket_widget import PaymentDialog
 
@@ -981,7 +982,7 @@ Notes: {notes_preview}
             print(f"❌ Erreur _print_commande_invoice: {e}")
             
     def export_commandes(self):
-        """Exporter les commandes"""
+        """Exporter les commandes en PDF professionnel"""
         try:
             # Récupérer les commandes actuelles (avec filtres appliqués)
             date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
@@ -997,14 +998,327 @@ Notes: {notes_preview}
                 limit=1000  # Plus de données pour l'export
             )
             
-            # Utiliser le contrôleur pour l'export
-            result = self.commande_controller.export_commandes(commandes, 'csv')
-            QMessageBox.information(self, "Export", result)
+            if not commandes:
+                QMessageBox.warning(self, "Aucune donnée", "Aucune commande à exporter avec les filtres actuels.")
+                return
+            
+            # Générer le PDF
+            pdf_filename = self._generate_commandes_pdf(commandes, date_debut, date_fin, search_term, payment_filter)
+            
+            if pdf_filename and os.path.exists(pdf_filename):
+                # Ouvrir le dossier contenant le PDF
+                try:
+                    import subprocess
+                    subprocess.run(['explorer', '/select,', pdf_filename], shell=True, check=True)
+                    QMessageBox.information(self, "Export réussi",
+                                          f"Les commandes ont été exportées avec succès !\n\n"
+                                          f"Fichier: {pdf_filename}\n\n"
+                                          "Le dossier contenant l'export a été ouvert.")
+                except Exception as open_error:
+                    QMessageBox.information(self, "Export réussi",
+                                          f"Les commandes ont été exportées avec succès !\n\n"
+                                          f"Fichier: {pdf_filename}\n\n"
+                                          f"Erreur ouverture dossier: {open_error}")
+            else:
+                QMessageBox.warning(self, "Erreur", "Impossible de générer le fichier PDF d'export.")
             
         except Exception as e:
-            QMessageBox.warning(self, "Erreur", f"Erreur lors de l'export: {e}")
-            print(f"❌ Erreur export_commandes: {e}")
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export PDF: {e}")
+            print(f"❌ Erreur export_commandes PDF: {e}")
+            import traceback
+            traceback.print_exc()
         
+    def _generate_commandes_pdf(self, commandes, date_debut, date_fin, search_term, payment_filter):
+        """Générer un PDF professionnel d'export des commandes"""
+        try:
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import inch, cm
+            from reportlab.lib.colors import HexColor, black, white, gray
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            
+            # Créer le dossier d'export s'il n'existe pas
+            export_dir = os.path.join(os.getcwd(), "exports_commandes")
+            os.makedirs(export_dir, exist_ok=True)
+            
+            # Générer le nom du fichier
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = os.path.join(export_dir, f"export_commandes_{timestamp}.pdf")
+
+            # Créer le document PDF
+            doc = SimpleDocTemplate(filename, pagesize=landscape(A4))
+            elements = []
+            
+            # Styles personnalisés
+            styles = getSampleStyleSheet()
+            styles.add(ParagraphStyle(
+                name='CompanyTitle',
+                fontSize=18,
+                fontName='Helvetica-Bold',
+                textColor=HexColor('#2C3E50'),
+                alignment=TA_CENTER,
+                spaceAfter=10
+            ))
+            styles.add(ParagraphStyle(
+                name='ReportTitle',
+                fontSize=16,
+                fontName='Helvetica-Bold',
+                textColor=HexColor('#1976D2'),
+                alignment=TA_CENTER,
+                spaceAfter=20
+            ))
+            styles.add(ParagraphStyle(
+                name='SectionHeader',
+                fontSize=12,
+                fontName='Helvetica-Bold',
+                textColor=HexColor('#34495E'),
+                spaceAfter=10
+            ))
+            styles.add(ParagraphStyle(
+                name='NormalText',
+                fontSize=9,
+                fontName='Helvetica',
+                spaceAfter=5
+            ))
+            
+            # Informations de l'entreprise
+            enterprise_controller = EntrepriseController()
+            company_info = enterprise_controller.get_company_info_for_pdf(1)  # POS ID par défaut
+
+            # Variables pour gérer le fichier temporaire du logo
+            temp_logo_file = None
+            logo_path = None
+
+            # En-tête avec logo et informations entreprise
+            header_data = []
+
+            # Logo (si disponible)
+            if company_info.get('logo'):
+                try:
+                    # Créer un fichier temporaire pour le logo (garder ouvert)
+                    import tempfile
+                    temp_logo_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+                    temp_logo_file.write(company_info['logo'])
+                    logo_path = temp_logo_file.name
+                    temp_logo_file.close()  # Fermer mais ne pas supprimer
+
+                    logo = Image(logo_path, width=2*cm, height=2*cm)
+                    header_data.append([logo, Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText'])])
+
+                except Exception as e:
+                    print(f"Erreur logo: {e}")
+                    # Nettoyer en cas d'erreur
+                    if temp_logo_file:
+                        try:
+                            os.unlink(logo_path)
+                        except:
+                            pass
+                    header_data.append([Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText']), ''])
+            else:
+                header_data.append([Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText']), ''])
+            
+            header_table = Table(header_data, colWidths=[3*cm, 12*cm])
+            header_table.setStyle(TableStyle([
+                ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+            ]))
+            elements.append(header_table)
+            elements.append(Spacer(1, 0.5*cm))
+            
+            # Titre du rapport
+            elements.append(Paragraph("RAPPORT D'EXPORT DES COMMANDES", styles['ReportTitle']))
+            
+            # Informations sur les filtres appliqués
+            filter_info = []
+            if date_debut:
+                filter_info.append(f"Du: {date_debut.strftime('%d/%m/%Y')}")
+            if date_fin:
+                filter_info.append(f"Au: {date_fin.strftime('%d/%m/%Y')}")
+            if search_term:
+                filter_info.append(f"Recherche: '{search_term}'")
+            if payment_filter and payment_filter != "Tous":
+                filter_info.append(f"Paiement: {payment_filter}")
+            
+            if filter_info:
+                elements.append(Paragraph(f"<b>Filtres appliqués:</b> {' | '.join(filter_info)}", styles['SectionHeader']))
+            else:
+                elements.append(Paragraph("<b>Période:</b> Toutes les commandes", styles['SectionHeader']))
+            
+            elements.append(Paragraph(f"<b>Date d'export:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['NormalText']))
+            elements.append(Paragraph(f"<b>Nombre de commandes:</b> {len(commandes)}", styles['NormalText']))
+            elements.append(Spacer(1, 0.5*cm))
+            
+            # Statistiques générales
+            stats = self.commande_controller.get_commandes_statistics(commandes)
+            stats_data = [
+                ['Statistiques générales', ''],
+                ['Total CA:', f"{stats['total_ca']:.0f} FC"],
+                ['Créances:', f"{stats['total_creances']:.0f} FC"],
+                ['Commandes payées:', f"{stats['commandes_payees']}"],
+                ['Commandes non payées:', f"{stats['commandes_non_payees']}"]
+            ]
+            
+            stats_table = Table(stats_data, colWidths=[4*cm, 4*cm])
+            stats_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (1, 0), HexColor('#ECF0F1')),
+                ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                ('GRID', (0, 0), (-1, -1), 0.5, black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            elements.append(stats_table)
+            elements.append(Spacer(1, 0.5*cm))
+            
+            # Tableau des commandes
+            table_data = [
+                ['N° Commande', 'Date/Heure', 'Client', 'Produits/Services', 'Sous-total', 'Remise', 'Total', 'Payé']
+            ]
+            
+            for commande in commandes:
+                # Formatage de la date
+                date_str = ""
+                created_at = commande.get('created_at')
+                if created_at:
+                    if isinstance(created_at, str):
+                        try:
+                            date_obj = datetime.strptime(created_at[:19], "%Y-%m-%d %H:%M:%S")
+                            date_str = date_obj.strftime("%d/%m/%Y\n%H:%M")
+                        except:
+                            date_str = created_at[:16].replace(' ', '\n')
+                    else:
+                        date_str = created_at.strftime("%d/%m/%Y\n%H:%M")
+
+                # Formatage des produits/services avec retours à la ligne
+                produits_raw = str(commande.get('produits', ''))
+                produits_formatted = self._format_produits_services(produits_raw)
+
+                row = [
+                    str(commande.get('numero_commande') or f"CMD-{commande.get('id')}"),
+                    date_str,
+                    str(commande.get('client_name', '')),
+                    produits_formatted,
+                    f"{commande.get('subtotal', 0):.0f} FC",
+                    f"{commande.get('remise_amount', 0):.0f} FC",
+                    f"{commande.get('total_final', 0):.0f} FC",
+                    f"{commande.get('montant_paye', 0):.0f} FC"
+                ]
+                table_data.append(row)
+            
+            # Créer le tableau avec des largeurs appropriées
+            col_widths = [3*cm, 2*cm, 3*cm, 7*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm]
+            commandes_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+            
+            # Style du tableau
+            table_style = TableStyle([
+                # En-tête
+                ('BACKGROUND', (0, 0), (-1, 0), HexColor('#34495E')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 8),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+                
+                # Corps du tableau
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 7),
+                ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # N° Commande
+                ('ALIGN', (1, 0), (1, -1), 'CENTER'),  # Date
+                ('ALIGN', (2, 0), (2, -1), 'LEFT'),    # Client
+                ('ALIGN', (3, 0), (3, -1), 'LEFT'),    # Produits
+                ('ALIGN', (4, 0), (7, -1), 'RIGHT'),   # Montants
+                ('ALIGN', (8, 0), (8, -1), 'CENTER'),  # Statut
+                
+                # Bordures
+                ('GRID', (0, 0), (-1, -1), 0.5, black),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                
+                # Espacement des cellules
+                ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                ('TOPPADDING', (0, 0), (-1, -1), 2),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+            ])
+            
+            # Ajouter les lignes alternées dynamiquement
+            if len(table_data) > 2:  # En-tête + au moins 1 ligne de données
+                for i in range(2, len(table_data), 2):  # Commencer à 1 (après en-tête) et alterner
+                    table_style.add('BACKGROUND', (0, i), (-1, i), HexColor('#F8F9FA'))
+            
+            commandes_table.setStyle(table_style)
+            elements.append(commandes_table)
+            
+            # Pied de page avec informations supplémentaires
+            elements.append(Spacer(1, 0.5*cm))
+            elements.append(Paragraph(f"<i>Rapport généré By Ayanna ERP APP, le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')} - {len(commandes)} commandes exportées</i>", styles['NormalText']))
+            
+            # Générer le PDF
+            doc.build(elements)
+
+            return filename
+            
+        except Exception as e:
+            print(f"❌ Erreur génération PDF: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        
+        finally:
+            # Nettoyer le fichier temporaire du logo
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception as cleanup_error:
+                    print(f"Avertissement nettoyage logo: {cleanup_error}")
+    
+    def _format_produits_services(self, produits_raw):
+        """Formate les produits/services avec des retours à la ligne"""
+        if not produits_raw or produits_raw.strip() == '':
+            return ''
+
+        # Nettoyer la chaîne d'entrée
+        produits_raw = produits_raw.strip()
+
+        # Gérer les cas spéciaux où les virgules sont collées
+        produits_raw = produits_raw.replace(',Location', ', Location')
+        produits_raw = produits_raw.replace(',Simba', ', Simba')
+
+        # Essayer différents séparateurs pour diviser les produits
+        separators = ['\n', '; ', ', ', ',', ' - ', '|']
+
+        items = []
+        for sep in separators:
+            if sep in produits_raw:
+                # Pour les virgules sans espace, diviser et nettoyer
+                if sep == ',':
+                    temp_items = produits_raw.split(',')
+                    items = [item.strip() for item in temp_items if item.strip()]
+                else:
+                    items = [item.strip() for item in produits_raw.split(sep) if item.strip()]
+                break
+        else:
+            # Si aucun séparateur trouvé, traiter comme un seul élément
+            items = [produits_raw]
+
+        # Nettoyer et formater chaque élément
+        formatted_items = []
+        for item in items:
+            item = item.strip()
+            if item:
+                # Détecter si c'est un service ou un produit
+                item_lower = item.lower()
+                if any(keyword in item_lower for keyword in ['service', 'prestation', 'location', 'soirée', 'événement', 'fête']):
+                    formatted_items.append(f"• Service: {item}")
+                else:
+                    formatted_items.append(f"• Produit: {item}")
+
+        # Joindre avec des retours à la ligne
+        return '\n'.join(formatted_items)
+    
     def refresh_data(self):
         """Actualiser les données (interface publique)"""
         self.load_commandes()

@@ -176,6 +176,22 @@ class CommandeController:
         total_ca = sum(c['total_final'] for c in commandes)
         total_creances = sum(c['total_final'] for c in commandes if c['payment_method'] == 'Crédit')
 
+        # Calculer les statistiques de paiement
+        commandes_payees = 0
+        commandes_non_payees = 0
+        commandes_partielles = 0
+
+        for c in commandes:
+            montant_paye = c.get('montant_paye', 0)
+            total_final = c.get('total_final', 0)
+
+            if montant_paye >= total_final:
+                commandes_payees += 1
+            elif montant_paye > 0:
+                commandes_partielles += 1
+            else:
+                commandes_non_payees += 1
+
         # Calculer les commandes d'aujourd'hui
         commandes_aujourd_hui = 0
         today = datetime.now().date()
@@ -201,6 +217,9 @@ class CommandeController:
         return {
             'total_ca': total_ca,
             'total_creances': total_creances,
+            'commandes_payees': commandes_payees,
+            'commandes_non_payees': commandes_non_payees,
+            'commandes_partielles': commandes_partielles,
             'commandes_aujourd_hui': commandes_aujourd_hui,
             'nb_commandes': nb_commandes,
             'panier_moyen': panier_moyen

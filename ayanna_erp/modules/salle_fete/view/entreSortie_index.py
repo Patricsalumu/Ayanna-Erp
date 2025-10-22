@@ -855,112 +855,289 @@ class EntreeSortieIndex(QWidget):
             QMessageBox.critical(self, "Erreur", f"Impossible d'enregistrer la dépense: {str(e)}")
     
     def export_to_pdf(self):
-        """Exporter le journal en PDF"""
+        """Exporter le journal de caisse en PDF professionnel"""
         try:
-            from reportlab.lib.pagesizes import A4, letter
-            from reportlab.lib import colors
+            from reportlab.lib.pagesizes import A4, landscape
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-            from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
-            from reportlab.lib.units import inch
+            from reportlab.lib.units import inch, cm
+            from reportlab.lib.colors import HexColor, black, white, gray
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
             import os
-            
-            # Nom du fichier et titre
+            import tempfile
+
+            # Créer le dossier d'export s'il n'existe pas
+            export_dir = os.path.join(os.getcwd(), "exports_caisse")
+            os.makedirs(export_dir, exist_ok=True)
+
+            # Générer le nom du fichier
             qdate_debut = self.date_debut_filter.date()
             qdate_fin = self.date_fin_filter.date()
             start_date = date(qdate_debut.year(), qdate_debut.month(), qdate_debut.day())
             end_date = date(qdate_fin.year(), qdate_fin.month(), qdate_fin.day())
-            
+
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             if start_date == end_date:
-                filename = f"journal_caisse_{start_date.strftime('%Y%m%d')}.pdf"
+                filename = os.path.join(export_dir, f"journal_caisse_{start_date.strftime('%Y%m%d')}_{timestamp}.pdf")
                 period_title = f"Journal de Caisse - {start_date.strftime('%d/%m/%Y')}"
             else:
-                filename = f"journal_caisse_{start_date.strftime('%Y%m%d')}_au_{end_date.strftime('%Y%m%d')}.pdf"
+                filename = os.path.join(export_dir, f"journal_caisse_{start_date.strftime('%Y%m%d')}_au_{end_date.strftime('%Y%m%d')}_{timestamp}.pdf")
                 period_title = f"Journal de Caisse - Du {start_date.strftime('%d/%m/%Y')} au {end_date.strftime('%d/%m/%Y')}"
-            
-            # Créer le document
-            doc = SimpleDocTemplate(filename, pagesize=A4)
-            story = []
-            
-            # Styles
-            styles = getSampleStyleSheet()
-            title_style = ParagraphStyle(
-                'CustomTitle',
-                parent=styles['Heading1'],
-                fontSize=18,
-                spaceAfter=30,
-                alignment=1  # Center
-            )
-            
-            # Titre
-            title = Paragraph(period_title, title_style)
-            story.append(title)
-            story.append(Spacer(1, 12))
-            
-            # Données filtrées
-            filtered_data = self.get_filtered_data()
-            
-            # Créer le tableau
-            currency_symbol = self.get_currency_symbol()
-            data = [["Date/Heure", "Type", "Libellé", "Catégorie", f"Entrée ({currency_symbol})", f"Sortie ({currency_symbol})", "Utilisateur"]]
-            
-            for entry in filtered_data:
-                row = [
-                    entry['datetime'].strftime("%d/%m/%Y %H:%M"),
-                    entry['type'],
-                    entry['libelle'][:30] + "..." if len(entry['libelle']) > 30 else entry['libelle'],
-                    entry['categorie'],
-                    f"{entry['montant_entree']:.2f}" if entry['montant_entree'] > 0 else "-",
-                    f"{entry['montant_sortie']:.2f}" if entry['montant_sortie'] > 0 else "-",
-                    entry['utilisateur']
-                ]
-                data.append(row)
-            
-            # Style du tableau
-            table = Table(data)
-            table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, 0), 12),
-                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            
-            story.append(table)
-            story.append(Spacer(1, 20))
-            
-            # Statistiques
-            total_entrees = sum(entry['montant_entree'] for entry in filtered_data)
-            total_sorties = sum(entry['montant_sortie'] for entry in filtered_data)
-            solde = total_entrees - total_sorties
-            
-            currency_symbol = self.get_currency_symbol()
-            stats_data = [
-                ["Total Entrées", f"{total_entrees:.2f} {currency_symbol}"],
-                ["Total Sorties", f"{total_sorties:.2f} {currency_symbol}"],
-                ["Solde", f"{solde:.2f} {currency_symbol}"]
-            ]
-            
-            stats_table = Table(stats_data)
-            stats_table.setStyle(TableStyle([
-                ('BACKGROUND', (0, 0), (-1, -1), colors.lightgrey),
-                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 12),
-                ('GRID', (0, 0), (-1, -1), 1, colors.black)
-            ]))
-            
-            story.append(stats_table)
-            
-            # Générer le PDF
-            doc.build(story)
-            
-            QMessageBox.information(self, "Export réussi", f"Journal exporté vers: {filename}")
-            
+
+            # Variables pour gérer le fichier temporaire du logo
+            temp_logo_file = None
+            logo_path = None
+
+            try:
+                # Créer le document PDF
+                doc = SimpleDocTemplate(filename, pagesize=A4, leftMargin=5*cm, rightMargin=5*cm, topMargin=2*cm, bottomMargin=2*cm)
+                elements = []
+
+                # Styles personnalisés
+                styles = getSampleStyleSheet()
+                styles.add(ParagraphStyle(
+                    name='CompanyTitle',
+                    fontSize=18,
+                    fontName='Helvetica-Bold',
+                    textColor=HexColor('#2C3E50'),
+                    alignment=TA_CENTER,
+                    spaceAfter=10
+                ))
+                styles.add(ParagraphStyle(
+                    name='ReportTitle',
+                    fontSize=16,
+                    fontName='Helvetica-Bold',
+                    textColor=HexColor('#1976D2'),
+                    alignment=TA_CENTER,
+                    spaceAfter=20
+                ))
+                styles.add(ParagraphStyle(
+                    name='SectionHeader',
+                    fontSize=12,
+                    fontName='Helvetica-Bold',
+                    textColor=HexColor('#34495E'),
+                    spaceAfter=10
+                ))
+                styles.add(ParagraphStyle(
+                    name='NormalText',
+                    fontSize=9,
+                    fontName='Helvetica',
+                    spaceAfter=5
+                ))
+                styles.add(ParagraphStyle(
+                    name='FooterText',
+                    fontSize=8,
+                    fontName='Helvetica-Oblique',
+                    textColor=gray,
+                    alignment=TA_CENTER,
+                    spaceAfter=5
+                ))
+
+                # Informations de l'entreprise
+                enterprise_controller = EntrepriseController()
+                company_info = enterprise_controller.get_company_info_for_pdf(1)  # POS ID par défaut
+
+                # En-tête avec logo et informations entreprise
+                header_data = []
+
+                # Logo (si disponible)
+                if company_info.get('logo'):
+                    try:
+                        # Créer un fichier temporaire pour le logo (garder ouvert)
+                        temp_logo_file = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+                        temp_logo_file.write(company_info['logo'])
+                        logo_path = temp_logo_file.name
+                        temp_logo_file.close()  # Fermer mais ne pas supprimer
+
+                        logo = Image(logo_path, width=2*cm, height=2*cm)
+                        header_data.append([logo, Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText'])])
+
+                    except Exception as e:
+                        print(f"Erreur logo: {e}")
+                        # Nettoyer en cas d'erreur
+                        if temp_logo_file:
+                            try:
+                                os.unlink(logo_path)
+                            except:
+                                pass
+                        header_data.append([Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText']), ''])
+                else:
+                    header_data.append([Paragraph(f"<b>{company_info.get('name', 'AYANNA ERP')}</b><br/>{company_info.get('address', '')}<br/>{company_info.get('city', '')}<br/>Tel: {company_info.get('phone', '')}", styles['NormalText']), ''])
+
+                header_table = Table(header_data, colWidths=[3*cm, 12*cm])
+                header_table.setStyle(TableStyle([
+                    ('ALIGN', (0, 0), (0, 0), 'LEFT'),
+                    ('ALIGN', (1, 0), (1, 0), 'LEFT'),
+                    ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ]))
+                elements.append(header_table)
+                elements.append(Spacer(1, 0.5*cm))
+
+                # Titre du rapport
+                elements.append(Paragraph(period_title, styles['ReportTitle']))
+
+                # Informations sur les filtres appliqués
+                filter_info = []
+                type_filter = self.type_filter.currentText() if hasattr(self, 'type_filter') else None
+                search_text = self.search_edit.text().strip() if hasattr(self, 'search_edit') and self.search_edit.text().strip() else None
+
+                if type_filter and type_filter != "Tous":
+                    filter_info.append(f"Type: {type_filter}")
+                if search_text:
+                    filter_info.append(f"Recherche: '{search_text}'")
+
+                if filter_info:
+                    elements.append(Paragraph(f"<b>Filtres appliqués:</b> {' | '.join(filter_info)}", styles['SectionHeader']))
+                else:
+                    elements.append(Paragraph("<b>Toutes les opérations</b>", styles['SectionHeader']))
+
+                elements.append(Paragraph(f"<b>Date d'export:</b> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['NormalText']))
+                elements.append(Spacer(1, 0.5*cm))
+
+                # Données filtrées
+                filtered_data = self.get_filtered_data()
+
+                if not filtered_data:
+                    elements.append(Paragraph("Aucune opération trouvée pour cette période.", styles['NormalText']))
+                else:
+                    # Statistiques générales
+                    total_entrees = sum(entry['montant_entree'] for entry in filtered_data)
+                    total_sorties = sum(entry['montant_sortie'] for entry in filtered_data)
+                    solde = total_entrees - total_sorties
+
+                    currency_symbol = self.get_currency_symbol()
+                    stats_data = [
+                        ['Résumé de la période', ''],
+                        ['Total Entrées:', f"{total_entrees:.2f} {currency_symbol}"],
+                        ['Total Sorties:', f"{total_sorties:.2f} {currency_symbol}"],
+                        ['Solde:', f"{solde:.2f} {currency_symbol}"]
+                    ]
+
+                    stats_table = Table(stats_data, colWidths=[6*cm, 6*cm])
+                    stats_table.setStyle(TableStyle([
+                        ('BACKGROUND', (0, 0), (1, 0), HexColor('#ECF0F1')),
+                        ('FONTNAME', (0, 0), (1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, -1), 10),
+                        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+                        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+                        ('GRID', (0, 0), (-1, -1), 0.5, black),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ]))
+                    elements.append(stats_table)
+                    elements.append(Spacer(2, 2*cm))
+
+                    # Tableau des opérations
+                    table_data = [
+                        ['Date/Heure', 'Type', 'Libellé', 'Catégorie', f'Entrée ({currency_symbol})', f'Sortie ({currency_symbol})', 'Utilisateur']
+                    ]
+
+                    for entry in filtered_data:
+                        # Formatage des montants avec couleurs conditionnelles
+                        if entry['montant_entree'] > 0:
+                            entree_str = f"{entry['montant_entree']:.2f}"
+                            sortie_str = "-"
+                        elif entry['montant_sortie'] > 0:
+                            entree_str = "-"
+                            sortie_str = f"{entry['montant_sortie']:.2f}"
+                        else:
+                            entree_str = "-"
+                            sortie_str = "-"
+
+                        row = [
+                            entry['datetime'].strftime("%d/%m/%Y\n%H:%M"),
+                            entry['type'],
+                            entry['libelle'],
+                            entry['categorie'],
+                            entree_str,
+                            sortie_str,
+                            entry['utilisateur']
+                        ]
+                        table_data.append(row)
+
+                    # Créer le tableau avec des largeurs appropriées
+                    col_widths = [2.5*cm, 2*cm, 6*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm]
+                    operations_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+                    # Style du tableau
+                    table_style = TableStyle([
+                        # En-tête
+                        ('BACKGROUND', (0, 0), (-1, 0), HexColor('#34495E')),
+                        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                        ('FONTSIZE', (0, 0), (-1, 0), 8),
+                        ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                        ('VALIGN', (0, 0), (-1, 0), 'MIDDLE'),
+
+                        # Corps du tableau
+                        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                        ('FONTSIZE', (0, 1), (-1, -1), 7),
+                        ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Date
+                        ('ALIGN', (1, 0), (1, -1), 'CENTER'),  # Type
+                        ('ALIGN', (2, 0), (2, -1), 'LEFT'),    # Libellé
+                        ('ALIGN', (3, 0), (3, -1), 'LEFT'),    # Catégorie
+                        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),   # Montants
+                        ('ALIGN', (6, 0), (6, -1), 'CENTER'),  # Utilisateur
+
+                        # Bordures
+                        ('GRID', (0, 0), (-1, -1), 0.5, black),
+                        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+
+                        # Espacement des cellules
+                        ('LEFTPADDING', (0, 0), (-1, -1), 3),
+                        ('RIGHTPADDING', (0, 0), (-1, -1), 3),
+                        ('TOPPADDING', (0, 0), (-1, -1), 2),
+                        ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
+                    ])
+
+                    # Ajouter les lignes alternées dynamiquement
+                    if len(table_data) > 2:  # En-tête + au moins 1 ligne de données
+                        for i in range(2, len(table_data), 2):  # Commencer à 1 (après en-tête) et alterner
+                            table_style.add('BACKGROUND', (0, i), (-1, i), HexColor('#F8F9FA'))
+
+                    operations_table.setStyle(table_style)
+                    elements.append(operations_table)
+                    elements.append(Spacer(1, 1*cm))
+
+                # Pied de page avec informations de génération
+                elements.append(Spacer(1, 1*cm))
+                elements.append(Paragraph(f"<i>Généré par Ayanna ERP App - {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}</i>", styles['FooterText']))
+
+                # Générer le PDF
+                doc.build(elements)
+
+                # Nettoyer le fichier temporaire du logo
+                if logo_path and os.path.exists(logo_path):
+                    try:
+                        os.unlink(logo_path)
+                    except Exception as cleanup_error:
+                        print(f"Avertissement nettoyage logo: {cleanup_error}")
+
+                # Ouvrir le dossier contenant le PDF
+                try:
+                    import subprocess
+                    subprocess.run(['explorer', '/select,', filename], shell=True, check=True)
+                    QMessageBox.information(self, "Export réussi",
+                                          f"Le journal de caisse a été exporté avec succès !\n\n"
+                                          f"Fichier: {filename}\n\n"
+                                          "Le dossier contenant l'export a été ouvert.")
+                except Exception as open_error:
+                    QMessageBox.information(self, "Export réussi",
+                                          f"Le journal de caisse a été exporté avec succès !\n\n"
+                                          f"Fichier: {filename}\n\n"
+                                          f"Erreur ouverture dossier: {open_error}")
+
+            except Exception as e:
+                # Nettoyer en cas d'erreur
+                if logo_path and os.path.exists(logo_path):
+                    try:
+                        os.unlink(logo_path)
+                    except:
+                        pass
+                raise e
+
         except ImportError:
             QMessageBox.warning(self, "Erreur", "La bibliothèque reportlab n'est pas installée.\nInstallez-la avec: pip install reportlab")
         except Exception as e:
-            print(f"Erreur lors de l'export PDF: {e}")
+            print(f"❌ Erreur génération PDF caisse: {e}")
             QMessageBox.critical(self, "Erreur", f"Impossible d'exporter le PDF: {str(e)}")
