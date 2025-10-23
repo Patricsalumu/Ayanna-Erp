@@ -541,13 +541,13 @@ class MainWindow(QMainWindow):
                 self.ensure_boutique_module_registered()
                 
                 from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
-                window = BoutiqueWindow(self.current_user)
+                window = BoutiqueWindow(self.current_user, pos_id=2)
             elif module_name == "Pharmacie":
                 # Enregistrer le module s'il n'existe pas déjà
                 self.ensure_boutique_module_registered()
                 
                 from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
-                window = BoutiqueWindow(self.current_user, pos_id=1)
+                window = BoutiqueWindow(self.current_user, pos_id=3)
             elif module_name == "Restaurant":
                 from ayanna_erp.modules.restaurant.restaurant_window import RestaurantWindow
                 window = RestaurantWindow(self.current_user)

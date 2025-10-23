@@ -6,6 +6,7 @@ Design épuré avec catalogue de produits et panier de vente
 import os
 from decimal import Decimal
 from typing import List, Dict, Optional
+from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QFrame, QLabel, QPushButton, QLineEdit, QComboBox, QSpinBox,
@@ -23,6 +24,7 @@ from ayanna_erp.modules.salle_fete.model.salle_fete import EventService
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ..utils.invoice_printer import InvoicePrintManager
 from .client_index import ClientFormDialog
+from ..controller.vente_controller import VenteController
 
 
 class ModernSupermarketWidget(QWidget):
@@ -41,6 +43,7 @@ class ModernSupermarketWidget(QWidget):
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
         self.invoice_printer = InvoicePrintManager(enterprise_id=self.pos_id)
+        self.vente_controller = VenteController(self.pos_id, self.current_user)
         
         # Variables d'état
         self.current_cart = []  # Liste des articles du panier
@@ -939,8 +942,9 @@ class ModernSupermarketWidget(QWidget):
         """Charge la liste des clients dans le combo"""
         try:
             with self.db_manager.get_session() as session:
+                # Charger tous les clients actifs, peu importe leur pos_id
+                # pour permettre le partage des clients entre modules
                 clients = session.query(ShopClient).filter_by(
-                    pos_id=self.pos_id,
                     is_active=True
                 ).all()
 
@@ -967,7 +971,6 @@ class ModernSupermarketWidget(QWidget):
                     # Si le texte est vide, commencer par l'option anonyme puis tous les clients
                     self.client_combo.addItem("Client anonyme", None)
                     clients = session.query(ShopClient).filter_by(
-                        pos_id=self.pos_id,
                         is_active=True
                     ).all()
 
@@ -978,7 +981,6 @@ class ModernSupermarketWidget(QWidget):
 
                 # Recherche par téléphone (priorité)
                 client_by_phone = session.query(ShopClient).filter(
-                    ShopClient.pos_id == self.pos_id,
                     ShopClient.is_active == True,
                     ShopClient.telephone.like(f"%{text}%")
                 ).first()
@@ -993,7 +995,6 @@ class ModernSupermarketWidget(QWidget):
 
                 # Recherche par nom/prénom
                 clients_by_name = session.query(ShopClient).filter(
-                    ShopClient.pos_id == self.pos_id,
                     ShopClient.is_active == True,
                     (ShopClient.nom.like(f"%{text}%") | ShopClient.prenom.like(f"%{text}%"))
                 ).limit(10).all()
@@ -1622,410 +1623,55 @@ class ModernSupermarketWidget(QWidget):
         if not self.current_cart:
             QMessageBox.warning(self, "Panier vide", "Veuillez ajouter des produits au panier")
             return
-        
-        # Vérifier la disponibilité du stock avant de procéder
-        stock_validation = self._validate_stock_availability()
-        if not stock_validation['valid']:
+
+        # Validation du stock via le contrôleur
+        stock_valid, stock_message = self.vente_controller.validate_stock_availability(self.current_cart)
+        if not stock_valid:
             QMessageBox.warning(
-                self, 
-                "Stock insuffisant", 
-                f"Stock insuffisant pour :\n{stock_validation['message']}\n\n"
+                self,
+                "Stock insuffisant",
+                f"Stock insuffisant pour :\n{stock_message}\n\n"
                 "Veuillez ajuster les quantités ou retirer les produits concernés."
             )
             return
-        
+
         # Ouvrir le dialogue de paiement
         payment_dialog = PaymentDialog(self, self.current_cart, self.global_discount)
         if payment_dialog.exec() == QDialog.DialogCode.Accepted:
-            # Traiter la vente
-            self.process_sale(payment_dialog.get_payment_data())
-    
-    def _validate_stock_availability(self):
-        """Valide que tous les produits du panier sont disponibles en stock"""
-        try:
-            with self.db_manager.get_session() as session:
-                from sqlalchemy import text
-                
-                # Chercher l'entrepôt POS_2
-                warehouse_result = session.execute(text("""
-                    SELECT id FROM stock_warehouses 
-                    WHERE code = 'POS_2' AND is_active = 1
-                    LIMIT 1
-                """))
-                
-                warehouse_row = warehouse_result.fetchone()
-                if not warehouse_row:
-                    return {
-                        'valid': False,
-                        'message': "Entrepôt POS_2 non trouvé ou inactif"
-                    }
-                
-                warehouse_id = warehouse_row[0]
-                unavailable_products = []
-                
-                for item in self.current_cart:
-                    # Ne vérifier que les produits physiques
-                    if item.get('type') != 'product':
-                        continue
+            payment_data = payment_dialog.get_payment_data()
 
-                    product_id = item.get('id')
-                    required_qty = item.get('quantity')
-
-                    # Vérifier le stock disponible
-                    stock_result = session.execute(text("""
-                        SELECT COALESCE(quantity, 0) as available_qty
-                        FROM stock_produits_entrepot 
-                        WHERE product_id = :product_id AND warehouse_id = :warehouse_id
-                    """), {
-                        'product_id': product_id,
-                        'warehouse_id': warehouse_id
-                    })
-
-                    stock_row = stock_result.fetchone()
-                    available_qty = stock_row[0] if stock_row else 0
-
-                    # Bloquer si stock insuffisant (y compris stocks négatifs)
-                    if available_qty <= 0 or available_qty < required_qty:
-                        unavailable_products.append(
-                            f"• {item.get('name', '')}: "
-                            f"Demandé {required_qty}, Disponible {max(0, available_qty)}"
-                        )
-                
-                if unavailable_products:
-                    return {
-                        'valid': False,
-                        'message': '\n'.join(unavailable_products)
-                    }
-                
-                return {'valid': True, 'message': 'Stock suffisant'}
-                
-        except Exception as e:
-            return {
-                'valid': False,
-                'message': f"Erreur lors de la vérification du stock: {e}"
+            # Préparer les données de vente pour le contrôleur
+            subtotal = float(sum(item['unit_price'] * item['quantity'] for item in self.current_cart))
+            total_amount = subtotal - float(self.global_discount)
+            
+            sale_data = {
+                'cart_items': self.current_cart,
+                'payment_data': payment_data,
+                'client_id': self.client_combo.currentData(),
+                'subtotal': subtotal,
+                'total_amount': total_amount,
+                'discount_amount': float(self.global_discount),
+                'notes': self.notes_text.toPlainText().strip(),
+                'sale_date': datetime.now()
             }
-    
-    def process_sale(self, payment_data):
-        """Traite la vente et met à jour le stock"""
-        try:
-            with self.db_manager.get_session() as session:
-                from datetime import datetime
-                from sqlalchemy import text
-                
-                # Calculer les totaux avec remise en montant (forcer float)
-                subtotal = float(sum(item['unit_price'] * item['quantity'] for item in self.current_cart))
-                discount_amount = float(self.global_discount) if isinstance(self.global_discount, Decimal) else float(self.global_discount)
-                total_amount = float(subtotal - discount_amount)
-                
-                # 1. Créer la vente principale (utiliser une table temporaire ou existante)
-                sale_data = {
-                    'pos_id': self.pos_id,
-                    'client_id': self.client_combo.currentData(),
-                    'user_id': getattr(self.current_user, 'id', 1),
-                    'subtotal': float(subtotal),
-                    'discount_amount': float(discount_amount),
-                    'total_amount': float(total_amount),
-                    'payment_method': payment_data['method'],
-                    'amount_received': payment_data['amount_received'],
-                    'change_amount': payment_data['change'],
-                    'sale_date': datetime.now(),
-                    'status': 'completed'
-                }
-                
-                # Créer un panier temporaire pour tracer la vente
-                panier_result = session.execute(text("""
-                    INSERT INTO shop_paniers 
-                    (pos_id, client_id, numero_commande, status, payment_method, 
-                     subtotal, remise_amount, total_final, user_id, created_at, updated_at, notes)
-                    VALUES (:pos_id, :client_id, :numero_commande, :status, :payment_method,
-                            :subtotal, :remise_amount, :total_final, :user_id, :created_at, :updated_at, :notes)
-                """), {
-                    'pos_id': self.pos_id,
-                    'client_id': sale_data['client_id'],
-                    'numero_commande': f"CMD-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-                    'status': 'completed',
-                    'payment_method': sale_data['payment_method'],
-                    'subtotal': sale_data['subtotal'],
-                    'remise_amount': sale_data['discount_amount'],
-                    'total_final': sale_data['total_amount'],
-                    'user_id': sale_data['user_id'],
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now(),
-                    'notes': self.notes_text.toPlainText().strip()  # Récupérer la note du champ texte
-                })
-                
-                session.flush()
-                
-                # Récupérer l'ID du panier créé
-                panier_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                panier_id = panier_id_result.fetchone()[0]
-                
-                # 2. Créer les lignes de vente et gérer le stock
-                for item in self.current_cart:
-                    if item.get('type') == 'product':
-                        product_id = item.get('id')
-                        quantity = item.get('quantity')
-                        unit_price = item.get('unit_price')
-                        line_total = unit_price * quantity
 
-                        # Créer la ligne de panier produits
-                        session.execute(text("""
-                            INSERT INTO shop_paniers_products 
-                            (panier_id, product_id, quantity, price_unit, total_price)
-                            VALUES (:panier_id, :product_id, :quantity, :price_unit, :total_price)
-                        """), {
-                            'panier_id': panier_id,
-                            'product_id': product_id,
-                            'quantity': quantity,
-                            'price_unit': float(unit_price),
-                            'total_price': float(line_total)
-                        })
+            # Traiter la vente via le contrôleur
+            success, message, panier_id = self.vente_controller.process_sale(sale_data)
 
-                        # 3. Gérer le stock POS (sortie de stock)
-                        self._update_pos_stock(session, product_id, quantity)
+            if success:
+                # Afficher le reçu seulement si il y a eu un paiement
+                if payment_data['amount_received'] > 0:
+                    self._show_sale_receipt(sale_data, payment_data)
 
-                    elif item.get('type') == 'service':
-                        quantity = item.get('quantity')
-                        unit_price = item.get('unit_price')
-                        line_total = unit_price * quantity
-
-                        # Déterminer l'ID du ShopService : si source == 'event' -> mapper par nom
-                        service_id = None
-                        if item.get('source') == 'shop':
-                            service_id = item.get('id')
-                        elif item.get('source') == 'event':
-                            # Chercher ShopService existant par nom
-                            svc = session.query(ShopService).filter(ShopService.name == item.get('name')).first()
-                            if not svc:
-                                svc = ShopService(
-                                    pos_id=self.pos_id,
-                                    name=item.get('name'),
-                                    description='',
-                                    cost=0.0,
-                                    price=unit_price,
-                                    is_active=True
-                                )
-                                session.add(svc)
-                                session.flush()
-                                session.refresh(svc)
-                            service_id = svc.id
-
-                        # Insérer la ligne de service
-                        session.execute(text("""
-                            INSERT INTO shop_paniers_services
-                            (panier_id, service_id, quantity, price_unit, total_price)
-                            VALUES (:panier_id, :service_id, :quantity, :price_unit, :total_price)
-                        """), {
-                            'panier_id': panier_id,
-                            'service_id': service_id,
-                            'quantity': quantity,
-                            'price_unit': float(unit_price),
-                            'total_price': float(line_total)
-                        })
-                
-                # 4. Enregistrer le paiement
-                session.execute(text("""
-                    INSERT INTO shop_payments 
-                    (panier_id, amount, payment_method, payment_date, reference)
-                    VALUES (:panier_id, :amount, :payment_method, :payment_date, :reference)
-                """), {
-                    'panier_id': panier_id,
-                    'amount': sale_data['total_amount'],
-                    'payment_method': sale_data['payment_method'],
-                    'payment_date': datetime.now(),
-                    'reference': f"VENTE-{panier_id}"
-                })
-                
-                # 5. Créer les écritures comptables si le module comptabilité est configuré
-                self._create_sale_accounting_entries(session, sale_data, panier_id)
-                
-                # Valider la transaction
-                session.commit()
-                
-                # Afficher le reçu
-                self._show_sale_receipt(sale_data, payment_data)
-                
-                # Nettoyer le panier automatiquement après le reçu
+                # Nettoyer le panier automatiquement après le traitement
                 self.clear_cart()
-                
-                # Feedback discret - juste l'émission du signal
-                print(f"✅ Vente #{panier_id} complétée - {total_amount:.0f} FC")
+
+                # Feedback
+                print(message)
                 self.sale_completed.emit(panier_id)
-                
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de la vente: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def _update_pos_stock(self, session, product_id, quantity_sold):
-        """Met à jour le stock POS (soustraction automatique depuis l'entrepôt POS_2)"""
-        try:
-            from sqlalchemy import text
-            
-            # Chercher l'entrepôt avec le code POS_2 (entrepôt boutique)
-            warehouse_result = session.execute(text("""
-                SELECT id FROM stock_warehouses 
-                WHERE code = 'POS_2' AND is_active = 1
-                LIMIT 1
-            """))
-            
-            warehouse_row = warehouse_result.fetchone()
-            if not warehouse_row:
-                print(f"⚠️ Entrepôt boutique (POS_2) non trouvé ou inactif")
-                return
-            
-            warehouse_id = warehouse_row[0]
-            
-            # Vérifier le stock disponible avant la vente
-            stock_check = session.execute(text("""
-                SELECT quantity FROM stock_produits_entrepot 
-                WHERE product_id = :product_id AND warehouse_id = :warehouse_id
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id
-            })
-            
-            stock_row = stock_check.fetchone()
-            current_stock = stock_row[0] if stock_row else 0
-            
-            # Cette vérification est faite en amont, on peut procéder directement
-            print(f"📦 Stock POS_2 avant vente: Produit {product_id}, Stock: {current_stock}, Vente: {quantity_sold}")
-            
-            # Mettre à jour le stock produit-entrepôt
-            session.execute(text("""
-                UPDATE stock_produits_entrepot 
-                SET quantity = quantity - :quantity_sold,
-                    last_movement_date = CURRENT_TIMESTAMP
-                WHERE product_id = :product_id AND warehouse_id = :warehouse_id
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id,
-                'quantity_sold': quantity_sold
-            })
-            
-            # Créer un mouvement de stock (sortie/vente)
-            session.execute(text("""
-                INSERT INTO stock_mouvements 
-                (product_id, warehouse_id, destination_warehouse_id, movement_type, 
-                 quantity, unit_cost, total_cost, reference, description, movement_date, user_id)
-                VALUES (:product_id, :warehouse_id, NULL, 'SORTIE', :quantity, 
-                        :unit_cost, :total_cost, :reference, :description, CURRENT_TIMESTAMP, :user_id)
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id,
-                'quantity': -quantity_sold,  # Négatif pour sortie
-                'unit_cost': self._get_product_cost(session, product_id),
-                'total_cost': -quantity_sold * self._get_product_cost(session, product_id),
-                'reference': f"VENTE-BOUTIQUE-{self.pos_id}",
-                'description': f"Vente boutique depuis entrepôt POS_2",
-                'user_id': getattr(self.current_user, 'id', 1)
-            })
-            
-            print(f"✅ Stock boutique (POS_2) mis à jour: Produit {product_id}, Quantité: -{quantity_sold}")
-            
-        except Exception as e:
-            print(f"❌ Erreur mise à jour stock boutique: {e}")
-            import traceback
-            traceback.print_exc()
-            # Ne pas faire échouer la vente pour un problème de stock
-    
-    def _get_product_cost(self, session, product_id):
-        """Récupère le coût du produit"""
-        try:
-            from sqlalchemy import text
-            result = session.execute(text("""
-                SELECT COALESCE(cost, price_unit) FROM core_products WHERE id = :product_id
-            """), {'product_id': product_id})
-            
-            row = result.fetchone()
-            return float(row[0]) if row else 0.0
-        except:
-            return 0.0
-    
-    def _create_sale_accounting_entries(self, session, sale_data, sale_id):
-        """Crée les écritures comptables pour la vente"""
-        try:
-            from sqlalchemy import text
-            from datetime import datetime
-            
-            # Vérifier si la configuration comptable existe
-            config_result = session.execute(text("""
-                SELECT compte_vente_id, compte_caisse_id 
-                FROM compta_config 
-                WHERE enterprise_id = (SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id)
-                LIMIT 1
-            """), {'pos_id': self.pos_id})
-            
-            config_row = config_result.fetchone()
-            if not config_row or not config_row[0]:
-                print("⚠️ Configuration comptable manquante pour les ventes")
-                return
-            
-            compte_vente_id = config_row[0]
-            compte_caisse_id = config_row[1] or compte_vente_id  # Fallback
-            
-            # Créer le journal comptable
-            journal_result = session.execute(text("""
-                INSERT INTO compta_journaux 
-                (date_operation, libelle, montant, type_operation, reference, description, 
-                 enterprise_id, user_id, date_creation, date_modification)
-                VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, 
-                        :description, :enterprise_id, :user_id, :date_creation, :date_modification)
-            """), {
-                'date_operation': datetime.now(),
-                'libelle': f"Vente POS {self.pos_id} - #{sale_id}",
-                'montant': sale_data['total_amount'],
-                'type_operation': 'entree',
-                'reference': f"VENTE-{sale_id}",
-                'description': f"Vente boutique - Paiement: {sale_data['payment_method']}",
-                'enterprise_id': 1,  # TODO: Récupérer dynamiquement
-                'user_id': sale_data['user_id'],
-                'date_creation': datetime.now(),
-                'date_modification': datetime.now()
-            })
-            
-            session.flush()
-            
-            # Récupérer l'ID du journal
-            journal_id_result = session.execute(text("SELECT last_insert_rowid()"))
-            journal_id = journal_id_result.fetchone()[0]
-            
-            # Écriture débit : Caisse (entrée d'argent)
-            session.execute(text("""
-                INSERT INTO compta_ecritures 
-                (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-            """), {
-                'journal_id': journal_id,
-                'compte_id': compte_caisse_id,
-                'debit': sale_data['total_amount'],
-                'credit': 0,
-                'ordre': 1,
-                'libelle': f"Encaissement vente - {sale_data['payment_method']}",
-                'date_creation': datetime.now()
-            })
-            
-            # Écriture crédit : Vente (produit vendu)
-            session.execute(text("""
-                INSERT INTO compta_ecritures 
-                (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-            """), {
-                'journal_id': journal_id,
-                'compte_id': compte_vente_id,
-                'debit': 0,
-                'credit': sale_data['total_amount'],
-                'ordre': 2,
-                'libelle': f"Vente produits POS {self.pos_id}",
-                'date_creation': datetime.now()
-            })
-            
-            print(f"✅ Écritures comptables créées - Journal ID: {journal_id}")
-            
-        except Exception as e:
-            print(f"❌ Erreur écritures comptables vente: {e}")
-            # Ne pas faire échouer la vente pour un problème comptable
-    
+            else:
+                QMessageBox.critical(self, "Erreur de vente", message)
+
     def _show_sale_receipt(self, sale_data, payment_data):
         """Affiche le reçu de vente avec en-tête d'entreprise en utilisant InvoicePrintManager"""
 

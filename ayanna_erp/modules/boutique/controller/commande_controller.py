@@ -72,7 +72,6 @@ class CommandeController:
                         ) as montant_paye
                     FROM shop_paniers sp
                     LEFT JOIN shop_clients sc ON sp.client_id = sc.id
-                    WHERE sp.status = 'completed'
                 """
 
                 conditions = []
