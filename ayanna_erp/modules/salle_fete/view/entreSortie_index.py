@@ -636,9 +636,9 @@ class EntreeSortieIndex(QWidget):
                     .join(ShopPanier)\
                     .outerjoin(ShopClient)\
                     .filter(
-                        ShopPanier.pos_id == pos_id,
+                        # ShopPanier.pos_id == pos_id,
                         ShopPayment.payment_date.between(start_datetime, end_datetime),
-                        ShopPanier.status.in_(['validé', 'payé', 'completed'])
+                        ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending'])
                     )\
                     .all()
                 
