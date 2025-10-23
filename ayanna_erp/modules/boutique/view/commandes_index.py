@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                             QTableWidgetItem, QPushButton, QLabel, QDateEdit, 
                             QLineEdit, QComboBox, QGroupBox, QGridLayout, QFormLayout,
                             QHeaderView, QFrame, QSplitter, QMessageBox, QScrollArea, QDialog, QTextEdit)
-from PyQt6.QtCore import Qt, QDate, pyqtSignal
+from PyQt6.QtCore import Qt, QDate, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPalette, QColor
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -112,7 +112,11 @@ class CommandesIndexWidget(QWidget):
         filters_layout.addWidget(QLabel("Recherche :"), 1, 0)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Chercher par client, produit, numéro commande...")
-        self.search_input.textChanged.connect(self.filter_commandes)
+        # Ajouter un délai pour éviter les appels trop fréquents
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self.filter_commandes)
+        self.search_input.textChanged.connect(lambda: self.search_timer.start(300))  # 300ms de délai
         filters_layout.addWidget(self.search_input, 1, 1, 1, 2)
         
         # Filtre par statut paiement
@@ -477,10 +481,30 @@ Panier moyen: 0 FC
         self.stats_text.setText(stats_text.strip())
         
     def filter_commandes(self):
-        """Filtrer les commandes selon les critères"""
-        # TODO: Implémenter le filtrage en temps réel
-        # Pour l'instant, on recharge tout
-        self.load_commandes()
+        """Filtrer les commandes selon les critères actuels"""
+        try:
+            # Récupérer les filtres actuels
+            date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
+            date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
+            search_term = self.search_input.text().strip() if hasattr(self, 'search_input') and self.search_input.text().strip() else None
+            payment_filter = self.payment_filter.currentText() if hasattr(self, 'payment_filter') else None
+
+            # Utiliser le contrôleur pour récupérer les commandes filtrées
+            commandes = self.commande_controller.get_commandes(
+                date_debut=date_debut,
+                date_fin=date_fin,
+                search_term=search_term,
+                payment_filter=payment_filter
+            )
+
+            # Mettre à jour le tableau sans déclencher de signaux problématiques
+            self.commandes_table.setRowCount(0)  # Vider le tableau proprement
+            self.populate_table(commandes)
+            self.update_statistics(commandes)
+
+        except Exception as e:
+            QMessageBox.warning(self, "Erreur", f"Erreur lors du filtrage des commandes: {e}")
+            print(f"❌ Erreur filter_commandes: {e}")
         
     def on_commande_selected(self):
         """Gérer la sélection d'une commande dans le tableau"""
@@ -692,24 +716,18 @@ Panier moyen: 0 FC
                 QMessageBox.warning(self, "Erreur", f"Le montant saisi ({amount:.0f} FC) dépasse le restant dû ({montant_restant:.0f} FC).")
                 return
             
-            # Enregistrer le paiement dans la base de données
-            with self.commande_controller.db_manager.get_session() as session:
-                from sqlalchemy import text
-                
-                # Insérer le paiement
-                insert_payment = text("""
-                    INSERT INTO shop_payments (panier_id, payment_method, amount, payment_date)
-                    VALUES (:panier_id, :payment_method, :amount, :payment_date)
-                """)
-                
-                session.execute(insert_payment, {
-                    'panier_id': commande_details['id'],
-                    'payment_method': payment_method,
-                    'amount': amount,
-                    'payment_date': datetime.now()
-                })
-                
-                session.commit()
+            # Utiliser le contrôleur pour traiter le paiement avec logique comptable
+            success, message = self.commande_controller.process_commande_payment(
+                commande_id=commande_details['id'],
+                payment_method=payment_method,
+                amount=amount,
+                pos_id=self.boutique_controller.pos_id,
+                current_user=self.current_user
+            )
+            
+            if not success:
+                QMessageBox.critical(self, "Erreur", message)
+                return
             
             # Rafraîchir l'affichage
             self.load_commandes()
@@ -720,7 +738,7 @@ Panier moyen: 0 FC
                 if commande_details:
                     self.update_details(commande_details)
             
-            QMessageBox.information(self, "Succès", f"Paiement de {amount:.0f} FC enregistré avec succès.")
+            QMessageBox.information(self, "Succès", message)
             
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'enregistrement du paiement: {e}")

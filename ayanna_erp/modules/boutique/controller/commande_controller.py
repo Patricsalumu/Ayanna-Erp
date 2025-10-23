@@ -109,7 +109,7 @@ class CommandeController:
 
                 # Ajouter les conditions à la requête
                 if conditions:
-                    base_query += " AND " + " AND ".join(conditions)
+                    base_query += " WHERE " + " AND ".join(conditions)
 
                 # Tri et limite
                 base_query += " ORDER BY sp.created_at DESC LIMIT :limit"
@@ -385,3 +385,131 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
         except Exception as e:
             print(f"❌ Erreur get_commande_details: {e}")
             return None
+
+    def process_commande_payment(self, commande_id: int, payment_method: str, amount: float, 
+                                pos_id: int, current_user) -> tuple[bool, str]:
+        """
+        Traiter le paiement d'une commande existante avec logique comptable
+        
+        Args:
+            commande_id: ID de la commande
+            payment_method: Méthode de paiement
+            amount: Montant payé
+            pos_id: ID du point de vente
+            current_user: Utilisateur actuel
+            
+        Returns:
+            Tuple (succès, message)
+        """
+        try:
+            with self.db_manager.get_session() as session:
+                # Vérifier que la commande existe
+                commande_result = session.execute(text("""
+                    SELECT id, numero_commande, total_final, 
+                           (SELECT COALESCE(SUM(amount), 0) FROM shop_payments WHERE panier_id = sp.id) as montant_paye,
+                           (SELECT sc.nom || ' ' || COALESCE(sc.prenom, '') FROM shop_clients sc WHERE sc.id = sp.client_id) as client_name
+                    FROM shop_paniers sp 
+                    WHERE id = :commande_id
+                """), {'commande_id': commande_id})
+                
+                commande = commande_result.fetchone()
+                if not commande:
+                    return False, "Commande introuvable"
+                
+                montant_paye = commande.montant_paye or 0
+                total_final = commande.total_final or 0
+                montant_restant = total_final - montant_paye
+                
+                # Vérifier que le montant ne dépasse pas le restant dû
+                if amount > montant_restant:
+                    return False, f"Le montant saisi ({amount:.0f} FC) dépasse le restant dû ({montant_restant:.0f} FC)."
+                
+                # Insérer le paiement
+                insert_payment = text("""
+                    INSERT INTO shop_payments (panier_id, payment_method, amount, payment_date)
+                    VALUES (:panier_id, :payment_method, :amount, :payment_date)
+                """)
+                
+                session.execute(insert_payment, {
+                    'panier_id': commande_id,
+                    'payment_method': payment_method,
+                    'amount': amount,
+                    'payment_date': datetime.now()
+                })
+                
+                # === LOGIQUE COMPTABLE POUR PAIEMENT DE COMMANDE ===
+                # Récupérer la configuration comptable pour ce POS
+                config_result = session.execute(text("""
+                    SELECT compte_caisse_id, compte_client_id
+                    FROM compta_config
+                    WHERE pos_id = :pos_id
+                    LIMIT 1
+                """), {'pos_id': pos_id})
+                
+                config_row = config_result.fetchone()
+                if config_row:
+                    compte_caisse_id = config_row[0]
+                    compte_client_id = config_row[1]
+                    
+                    if compte_caisse_id and compte_client_id:
+                        # Créer le journal de paiement
+                        numero_commande = commande.numero_commande or f"CMD-{commande.id}"
+                        journal_payment_result = session.execute(text("""
+                            INSERT INTO compta_journaux
+                            (date_operation, libelle, montant, type_operation, reference, description,
+                             enterprise_id, user_id, date_creation, date_modification)
+                            VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
+                                    :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                        """), {
+                            'date_operation': datetime.now(),
+                            'libelle': f"Paiement commande {numero_commande}",
+                            'montant': amount,
+                            'type_operation': 'entree',
+                            'reference': f"PAI-{numero_commande}",
+                            'description': f"Paiement commande - {payment_method}",
+                            'enterprise_id': 1,  # TODO: Récupérer dynamiquement
+                            'user_id': getattr(current_user, 'id', 1),
+                            'date_creation': datetime.now(),
+                            'date_modification': datetime.now()
+                        })
+                        
+                        session.flush()
+                        journal_payment_id_result = session.execute(text("SELECT last_insert_rowid()"))
+                        journal_payment_id = journal_payment_id_result.fetchone()[0]
+                        
+                        # Écriture débit : Compte de caisse (augmente la trésorerie)
+                        session.execute(text("""
+                            INSERT INTO compta_ecritures
+                            (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                            VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                        """), {
+                            'journal_id': journal_payment_id,
+                            'compte_id': compte_caisse_id,
+                            'debit': amount,
+                            'credit': 0,
+                            'ordre': 1,
+                            'libelle': f"Paiement commande {numero_commande}",
+                            'date_creation': datetime.now()
+                        })
+                        
+                        # Écriture crédit : Compte client (diminue la dette du client)
+                        session.execute(text("""
+                            INSERT INTO compta_ecritures
+                            (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                            VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                        """), {
+                            'journal_id': journal_payment_id,
+                            'compte_id': compte_client_id,
+                            'debit': 0,
+                            'credit': amount,
+                            'ordre': 2,
+                            'libelle': f"Règlement client - {commande.client_name or 'Client anonyme'}",
+                            'date_creation': datetime.now()
+                        })
+                
+                session.commit()
+                return True, f"Paiement de {amount:.0f} FC enregistré avec succès."
+                
+        except Exception as e:
+            print(f"❌ Erreur process_commande_payment: {e}")
+            return False, f"Erreur lors de l'enregistrement du paiement: {str(e)}"
