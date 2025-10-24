@@ -1899,16 +1899,6 @@ Paiement: {payment_data['method']}
             import traceback
             traceback.print_exc()
 
-    def _print_receipt(self, receipt_text):
-        """Imprime le reçu (fonction placeholder - conservée pour compatibilité)"""
-        QMessageBox.information(
-            self,
-            "Impression",
-            "Fonction d'impression à implémenter\\n"
-            "Le reçu peut être copié depuis la fenêtre"
-        )
-
-
 class QuantityDialog(QDialog):
     """Dialogue pour saisir la quantité d'un produit"""
     

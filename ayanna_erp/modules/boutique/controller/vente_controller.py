@@ -276,11 +276,13 @@ class VenteController:
             amount_received = sale_data['amount_received']
             discount_amount = sale_data['discount_amount']
             cart_items = sale_data['cart_items']
+            # Sous-total fourni par le caller (prix unitaires * quantités)
+            subtotal = sale_data.get('subtotal', float(sum(item['unit_price'] * item['quantity'] for item in cart_items)))
             client_id = sale_data['client_id']
 
-            # Récupérer la configuration comptable
+            # Récupérer la configuration comptable (incluant compte stock et compte charge pour inventaire permanent)
             config_result = session.execute(text("""
-                SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id
+                SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id
                 FROM compta_config
                 WHERE pos_id = :pos_id
                 LIMIT 1
@@ -294,6 +296,8 @@ class VenteController:
             compte_caisse_id = config_row[1]
             compte_client_id = config_row[2]
             compte_remise_id = config_row[3]
+            compte_stock_id = config_row[4]
+            compte_variation_stock_id = config_row[5]
 
             # Validation : si remise et pas de compte remise configuré, refuser
             if discount_amount > 0 and not compte_remise_id:
@@ -304,7 +308,12 @@ class VenteController:
             if total_cart_weight == 0:
                 return False, "Panier vide"
 
-            # 3. Créer les écritures de VENTE (toujours, même pour paiement partiel)
+            # Si on a des produits physiques, s'assurer que les comptes stock/charge sont configurés
+            has_product_items = any(item.get('type') == 'product' for item in cart_items)
+            if has_product_items and (not compte_stock_id or not compte_variation_stock_id):
+                return False, "Inventaire permanent requis: configurez les comptes stock et compte_variation_stock_id (compte_stock_id, compte_variation_stock_id) dans la configuration comptable."
+
+            # 3. Créer les écritures de VENTE (journal de vente) - toujours, même si paiement partiel
             # Journal de vente
             journal_sale_result = session.execute(text("""
                 INSERT INTO compta_journaux
@@ -314,9 +323,9 @@ class VenteController:
                         :description, :enterprise_id, :user_id, :date_creation, :date_modification)
             """), {
                 'date_operation': sale_data['sale_date'],
-                'libelle': f"Vente {numero_commande}",
+                'libelle': f"Vente -{numero_commande}",
                 'montant': total_amount,
-                'type_operation': 'entree',
+                'type_operation': 'vente',
                 'reference': numero_commande,
                 'description': f"Vente boutique - {len(cart_items)} articles",
                 'enterprise_id': 1,  # TODO: Récupérer dynamiquement
@@ -331,51 +340,56 @@ class VenteController:
 
             ordre = 1
 
-            # Écritures de vente : créditer TOUJOURS les comptes produits/services de leur sous-total complet
+            # Écritures de vente : créditer les comptes produits/services (revenus)
             for item in cart_items:
                 item_total = item['unit_price'] * item['quantity']
+                # montant de la ligne (revenu) — garder en float pour insertion SQL
+                item_sale_amount = float(item_total)
 
-                # TOUJOURS créditer le montant complet de l'item (logique simplifiée)
-                item_sale_amount = item_total
 
-                # Déterminer le compte comptable pour cet article
-                compte_item_id = None
+                # Par défaut, utiliser le compte de vente général
+                compte_item_id = compte_vente_id
 
+                # Si c'est un produit et qu'un compte spécifique est configuré, l'utiliser
                 if item.get('type') == 'product':
-                    # Récupérer le compte produit depuis la base
                     product_result = session.execute(text("""
                         SELECT compte_produit_id FROM core_products
                         WHERE id = :product_id
                     """), {'product_id': item['id']})
                     product_row = product_result.fetchone()
-                    compte_item_id = product_row[0] if product_row and product_row[0] else compte_vente_id
+                    if product_row and product_row[0]:
+                        compte_item_id = product_row[0]
 
-                    # Validation: si pas de compte_produit_id et pas de compte_vente_id, erreur
-                    if not compte_item_id:
-                        return False, f"Produit '{item.get('name', 'N/A')}' n'a pas de compte comptable configuré et aucun compte de vente par défaut n'est défini."
-
+                # Si c'est un service, tenter de récupérer un compte spécifique (ex: table event_services)
                 elif item.get('type') == 'service':
-                    # Pour les services, utiliser le compte de vente par défaut
-                    compte_item_id = compte_vente_id
-                    if not compte_item_id:
-                        return False, f"Service '{item.get('name', 'N/A')}' : aucun compte de vente par défaut configuré."
+                    # Cas fréquent : services provenant d'un évènement (table event_services) qui peut contenir compte_produit_id
+                    evt_result = session.execute(text("""
+                        SELECT compte_produit_id FROM event_services
+                        WHERE id = :service_id
+                    """), {'service_id': item['id']})
+                    evt_row = evt_result.fetchone()
+                    if evt_row and evt_row[0]:
+                        compte_item_id = evt_row[0]
 
-                if compte_item_id:
-                    # Écriture crédit : Compte produit/service
-                    session.execute(text("""
-                        INSERT INTO compta_ecritures
-                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-                    """), {
-                        'journal_id': journal_sale_id,
-                        'compte_id': compte_item_id,
-                        'debit': 0,
-                        'credit': item_sale_amount,
-                        'ordre': ordre,
-                        'libelle': f"Vente {item.get('name', 'Article')} (x{item['quantity']})",
-                        'date_creation': datetime.now()
-                    })
-                    ordre += 1
+                # Vérification finale : s'il n'y a toujours pas de compte, erreur
+                if not compte_item_id:
+                    return False, f"Article '{item.get('name', 'N/A')}' n'a pas de compte comptable configuré et aucun compte de vente par défaut n'est défini."
+
+                # Insérer l'écriture crédit (revenu)
+                session.execute(text("""
+                    INSERT INTO compta_ecritures
+                    (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                    VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                """), {
+                    'journal_id': journal_sale_id,
+                    'compte_id': compte_item_id,
+                    'debit': 0,
+                    'credit': item_sale_amount,
+                    'ordre': ordre,
+                    'libelle': f"Vente {item.get('name', 'Article')} (x{item['quantity']})",
+                    'date_creation': datetime.now()
+                })
+                ordre += 1
 
             # Écriture débit : Compte client (montant total de la vente)
             if compte_client_id:
@@ -403,13 +417,93 @@ class VenteController:
                 """), {
                     'journal_id': journal_sale_id,
                     'compte_id': compte_remise_id,
-                    'debit': discount_amount,  # Débiter le compte remise
+                    'debit': discount_amount,
                     'credit': 0,
                     'ordre': ordre,
                     'libelle': f"Remise accordée {numero_commande}",
                     'date_creation': datetime.now()
                 })
                 ordre += 1
+
+            # 4. Créer un journal de sortie stock (inventaire permanent) et écrire les mouvements COGS / Stock
+            if has_product_items:
+                journal_stock_result = session.execute(text("""
+                    INSERT INTO compta_journaux
+                    (date_operation, libelle, montant, type_operation, reference, description,
+                     enterprise_id, user_id, date_creation, date_modification)
+                    VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
+                            :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                """), {
+                    'date_operation': sale_data['sale_date'],
+                    'libelle': f"Sortie stock -{numero_commande}",
+                    'montant': subtotal,
+                    'type_operation': 'stock',
+                    'reference': numero_commande,
+                    'description': f"Sortie stock (COGS) - {len([i for i in cart_items if i.get('type')=='product'])} produits",
+                    'enterprise_id': 1,
+                    'user_id': getattr(self.current_user, 'id', 1),
+                    'date_creation': datetime.now(),
+                    'date_modification': datetime.now()
+                })
+
+                session.flush()
+                journal_stock_id_result = session.execute(text("SELECT last_insert_rowid()"))
+                journal_stock_id = journal_stock_id_result.fetchone()[0]
+
+                ordre_stock = 1
+                # Pour chaque produit, débiter compte charge (COGS) et créditer compte stock
+                for item in cart_items:
+                    if item.get('type') != 'product':
+                        continue
+
+                    product_id = item.get('id')
+                    qty = item.get('quantity', 0)
+
+                    # Récupérer le prix d'achat (cost) du produit
+                    cost_result = session.execute(text("""
+                        SELECT cost, name FROM core_products
+                        WHERE id = :product_id
+                    """), {'product_id': product_id})
+                    cost_row = cost_result.fetchone()
+                    unit_cost = float(cost_row[0]) if cost_row and cost_row[0] is not None else 0.0
+                    product_name = cost_row[1] if cost_row and len(cost_row) > 1 else item.get('name', f'Produit {product_id}')
+
+                    cogs_amount = unit_cost * qty
+                    if cogs_amount <= 0:
+                        # Si pas de coût renseigné on saute (ne doit pas arrêter la vente)
+                        continue
+
+                    # Débit : Compte charge (COGS)
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_stock_id,
+                        'compte_id': compte_variation_stock_id,
+                        'debit': cogs_amount,
+                        'credit': 0,
+                        'ordre': ordre_stock,
+                        'libelle': f"COGS {product_name} (x{qty})",
+                        'date_creation': datetime.now()
+                    })
+                    ordre_stock += 1
+
+                    # Crédit : Compte stock (réduction de l'actif stock)
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_stock_id,
+                        'compte_id': compte_stock_id,
+                        'debit': 0,
+                        'credit': cogs_amount,
+                        'ordre': ordre_stock,
+                        'libelle': f"Sortie stock {product_name} (x{qty})",
+                        'date_creation': datetime.now()
+                    })
+                    ordre_stock += 1
 
             # 4. Créer les écritures de PAIEMENT (seulement si paiement reçu)
             payment_method = sale_data.get('payment_method')
@@ -425,7 +519,7 @@ class VenteController:
                     'date_operation': sale_data['sale_date'],
                     'libelle': f"Paiement {numero_commande}",
                     'montant': amount_received,
-                    'type_operation': 'entree',
+                    'type_operation': 'paiement',
                     'reference': f"PAI-{numero_commande}",
                     'description': f"Paiement vente - {sale_data['payment_method']}",
                     'enterprise_id': 1,

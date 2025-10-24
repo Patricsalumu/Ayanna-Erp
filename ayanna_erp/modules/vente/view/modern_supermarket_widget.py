@@ -13,13 +13,17 @@ from PyQt6.QtWidgets import (
     QSplitter, QGroupBox, QFormLayout, QDoubleSpinBox, QTextEdit,
     QDialog, QDialogButtonBox
 )
+
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont, QPixmap, QIcon, QPalette, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+from ..model.models import ShopClient, ShopPanier, ShopService
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-from ayanna_erp.modules.boutique.model.models import ShopClient, ShopPanier
+from ..controller.vente_controller import VenteController
+from .client_index import ClientFormDialog
+from ..utils.invoice_printer import InvoicePrintManager
 
 
 class ModernSupermarketWidget(QWidget):
@@ -30,13 +34,16 @@ class ModernSupermarketWidget(QWidget):
     cart_updated = pyqtSignal()
     sale_completed = pyqtSignal(int)  # sale_id
     
-    def __init__(self, boutique_controller, current_user, pos_id=1):
+    def __init__(self, boutique_controller_or_none, current_user, pos_id=1):
         super().__init__()
-        self.boutique_controller = boutique_controller
+        # Controller param kept for backward compatibility
+        self.boutique_controller = boutique_controller_or_none
         self.current_user = current_user
         self.pos_id = pos_id
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
+        self.invoice_printer = InvoicePrintManager(enterprise_id=self.pos_id)
+        self.vente_controller = VenteController(self.pos_id, self.current_user)
         
         # Variables d'état
         self.current_cart = []  # Liste des articles du panier
@@ -44,119 +51,12 @@ class ModernSupermarketWidget(QWidget):
         self.global_discount = Decimal('0.00')
         self.categories = []
         self.products = []
-        
+        # catalogue mode: 'products' or 'services'
+        self.catalog_mode = 'products'
+
         self.init_ui()
         self.apply_modern_style()
         self.load_initial_data()
-    
-    def init_ui(self):
-        """Initialise l'interface utilisateur moderne"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(10, 10, 10, 10)
-        main_layout.setSpacing(10)
-        
-        # Header avec informations de session
-        self.create_header(main_layout)
-        
-        # Conteneur principal avec splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        main_layout.addWidget(splitter)
-        
-        # Zone catalogue (gauche - 70%)
-        catalog_widget = self.create_catalog_section()
-        splitter.addWidget(catalog_widget)
-        
-        # Zone panier (droite - 30%)
-        cart_widget = self.create_cart_section()
-        splitter.addWidget(cart_widget)
-        
-        # Définir les proportions
-        splitter.setSizes([700, 300])
-    
-    def create_header(self, layout):
-        """Crée l'en-tête moderne avec informations de session"""
-        header_frame = QFrame()
-        header_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        header_frame.setStyleSheet("""
-            QFrame {
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #2196F3, stop:1 #1976D2);
-                border-radius: 8px;
-                padding: 10px;
-            }
-        """)
-        
-        header_layout = QHBoxLayout(header_frame)
-        
-        # Titre principal
-        title_label = QLabel("🛒 Ayanna Supermarché")
-        title_label.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 24px;
-                font-weight: bold;
-                background: transparent;
-            }
-        """)
-        header_layout.addWidget(title_label)
-        
-        header_layout.addStretch()
-        
-        # Informations utilisateur
-        user_info = QLabel(f"👤 {getattr(self.current_user, 'name', 'Utilisateur')} | POS #{self.pos_id}")
-        user_info.setStyleSheet("""
-            QLabel {
-                color: white;
-                font-size: 14px;
-                background: transparent;
-            }
-        """)
-        header_layout.addWidget(user_info)
-        
-        layout.addWidget(header_frame)
-    
-    def create_catalog_section(self):
-        """Crée la section catalogue avec filtres et produits"""
-        catalog_widget = QWidget()
-        catalog_layout = QVBoxLayout(catalog_widget)
-        
-        # Barre de recherche et filtres
-        filters_frame = QFrame()
-        filters_frame.setFrameStyle(QFrame.Shape.StyledPanel)
-        filters_layout = QHBoxLayout(filters_frame)
-        
-        # Recherche
-        search_label = QLabel("🔍 Rechercher:")
-        self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Nom du produit...")
-        self.search_edit.textChanged.connect(self.filter_products)
-        
-        # Filtre par catégorie
-        category_label = QLabel("📂 Catégorie:")
-        self.category_combo = QComboBox()
-        self.category_combo.currentTextChanged.connect(self.filter_products)
-        
-        filters_layout.addWidget(search_label)
-        filters_layout.addWidget(self.search_edit, 2)
-        filters_layout.addWidget(category_label)
-        filters_layout.addWidget(self.category_combo, 1)
-        filters_layout.addStretch()
-        
-        catalog_layout.addWidget(filters_frame)
-        
-        # Zone de produits (grille scrollable)
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        
-        self.products_grid_widget = QWidget()
-        self.products_grid_layout = QGridLayout(self.products_grid_widget)
-        self.products_grid_layout.setSpacing(15)
-        
-        scroll_area.setWidget(self.products_grid_widget)
-        catalog_layout.addWidget(scroll_area)
-        
-        return catalog_widget
     
     def create_cart_section(self):
         """Crée la section panier avec total et paiement"""
@@ -747,23 +647,69 @@ class ModernSupermarketWidget(QWidget):
         if not self.current_cart:
             QMessageBox.warning(self, "Panier vide", "Veuillez ajouter des produits au panier")
             return
-        
-        # Vérifier la disponibilité du stock avant de procéder
-        stock_validation = self._validate_stock_availability()
-        if not stock_validation['valid']:
+        # Vérifier la disponibilité du stock via le controller
+        stock_valid, stock_message = self.vente_controller.validate_stock_availability(self.current_cart)
+        if not stock_valid:
             QMessageBox.warning(
-                self, 
-                "Stock insuffisant", 
-                f"Stock insuffisant pour :\n{stock_validation['message']}\n\n"
-                "Veuillez ajuster les quantités ou retirer les produits concernés."
+                self,
+                "Stock insuffisant",
+                f"Stock insuffisant pour :\n{stock_message}\n\nVeuillez ajuster les quantités ou retirer les produits concernés."
             )
             return
-        
+
         # Ouvrir le dialogue de paiement
         payment_dialog = PaymentDialog(self, self.current_cart, self.global_discount)
         if payment_dialog.exec() == QDialog.DialogCode.Accepted:
-            # Traiter la vente
-            self.process_sale(payment_dialog.get_payment_data())
+            payment_data = payment_dialog.get_payment_data()
+
+            # Construire la structure attendue par VenteController
+            cart_items = []
+            for it in self.current_cart:
+                cart_items.append({
+                    'type': 'product',
+                    'id': it.get('product_id'),
+                    'name': it.get('product_name'),
+                    'quantity': it.get('quantity'),
+                    'unit_price': it.get('unit_price')
+                })
+
+            from datetime import datetime
+            subtotal = sum(i['unit_price'] * i['quantity'] for i in cart_items)
+            discount_amount = float(self.global_discount)
+            total_amount = float(subtotal - discount_amount)
+
+            sale_data = {
+                'cart_items': cart_items,
+                'discount_amount': discount_amount,
+                'payment_data': payment_data,
+                'client_id': self.client_combo.currentData(),
+                'notes': '',
+                'sale_date': datetime.now()
+            }
+
+            success, message, panier_id = self.vente_controller.process_sale(sale_data)
+
+            if success:
+                QMessageBox.information(self, "Vente", message)
+                try:
+                    # Afficher reçu (UI via utilitaire partagé)
+                    receipt_sale_data = {
+                        'cart_items': cart_items,
+                        'subtotal': subtotal,
+                        'discount_amount': discount_amount,
+                        'total_amount': total_amount,
+                        'sale_date': sale_data['sale_date'] if 'sale_date' in sale_data else None,
+                        'notes': sale_data.get('notes','')
+                    }
+                    show_sale_receipt(self, receipt_sale_data, payment_data, self.enterprise_controller, self.current_user, self.pos_id)
+                except Exception:
+                    pass
+                # Nettoyer le panier
+                self.clear_cart()
+                if panier_id:
+                    self.sale_completed.emit(panier_id)
+            else:
+                QMessageBox.critical(self, "Erreur vente", message)
     
     def _validate_stock_availability(self):
         """Valide que tous les produits du panier sont disponibles en stock"""
@@ -827,187 +773,57 @@ class ModernSupermarketWidget(QWidget):
             }
     
     def process_sale(self, payment_data):
-        """Traite la vente et met à jour le stock"""
+        """Compatibility wrapper: delegate sale processing to VenteController."""
+        # Wrapper kept for backward compatibility. Prefer using VenteController directly.
         try:
-            with self.db_manager.get_session() as session:
-                from datetime import datetime
-                from sqlalchemy import text
-                
-                # Calculer les totaux avec remise en montant
-                subtotal = sum(item['unit_price'] * item['quantity'] for item in self.current_cart)
-                discount_amount = self.global_discount  # Montant fixe
-                total_amount = subtotal - discount_amount
-                
-                # 1. Créer la vente principale (utiliser une table temporaire ou existante)
-                sale_data = {
-                    'pos_id': self.pos_id,
-                    'client_id': self.client_combo.currentData(),
-                    'user_id': getattr(self.current_user, 'id', 1),
-                    'subtotal': float(subtotal),
-                    'discount_amount': float(discount_amount),
-                    'total_amount': float(total_amount),
-                    'payment_method': payment_data['method'],
-                    'amount_received': payment_data['amount_received'],
-                    'change_amount': payment_data['change'],
-                    'sale_date': datetime.now(),
-                    'status': 'completed'
-                }
-                
-                # Créer un panier temporaire pour tracer la vente
-                panier_result = session.execute(text("""
-                    INSERT INTO shop_paniers 
-                    (pos_id, client_id, numero_commande, status, payment_method, 
-                     subtotal, remise_amount, total_final, user_id, created_at, updated_at)
-                    VALUES (:pos_id, :client_id, :numero_commande, :status, :payment_method,
-                            :subtotal, :remise_amount, :total_final, :user_id, :created_at, :updated_at)
-                """), {
-                    'pos_id': self.pos_id,
-                    'client_id': sale_data['client_id'],
-                    'numero_commande': f"CMD-{datetime.now().strftime('%Y%m%d-%H%M%S')}",
-                    'status': 'completed',
-                    'payment_method': sale_data['payment_method'],
-                    'subtotal': sale_data['subtotal'],
-                    'remise_amount': sale_data['discount_amount'],
-                    'total_final': sale_data['total_amount'],
-                    'user_id': sale_data['user_id'],
-                    'created_at': datetime.now(),
-                    'updated_at': datetime.now()
+            payment = payment_data
+            cart_items = []
+            for it in self.current_cart:
+                cart_items.append({
+                    'type': 'product',
+                    'id': it.get('product_id'),
+                    'name': it.get('product_name'),
+                    'quantity': it.get('quantity'),
+                    'unit_price': it.get('unit_price')
                 })
-                
-                session.flush()
-                
-                # Récupérer l'ID du panier créé
-                panier_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                panier_id = panier_id_result.fetchone()[0]
-                
-                # 2. Créer les lignes de vente et gérer le stock
-                for item in self.current_cart:
-                    product_id = item['product_id']
-                    quantity = item['quantity']
-                    unit_price = item['unit_price']
-                    line_total = unit_price * quantity
-                    
-                    # Créer la ligne de panier
-                    session.execute(text("""
-                        INSERT INTO shop_paniers_products 
-                        (panier_id, product_id, quantity, price_unit, total_price)
-                        VALUES (:panier_id, :product_id, :quantity, :price_unit, :total_price)
-                    """), {
-                        'panier_id': panier_id,
-                        'product_id': product_id,
-                        'quantity': quantity,
-                        'price_unit': float(unit_price),
-                        'total_price': float(line_total)
-                    })
-                    
-                    # 3. Gérer le stock POS (sortie de stock)
-                    self._update_pos_stock(session, product_id, quantity)
-                
-                # 4. Enregistrer le paiement
-                session.execute(text("""
-                    INSERT INTO shop_payments 
-                    (panier_id, amount, payment_method, payment_date, reference)
-                    VALUES (:panier_id, :amount, :payment_method, :payment_date, :reference)
-                """), {
-                    'panier_id': panier_id,
-                    'amount': sale_data['total_amount'],
-                    'payment_method': sale_data['payment_method'],
-                    'payment_date': datetime.now(),
-                    'reference': f"VENTE-{panier_id}"
-                })
-                
-                # 5. Créer les écritures comptables si le module comptabilité est configuré
-                self._create_sale_accounting_entries(session, sale_data, panier_id)
-                
-                # Valider la transaction
-                session.commit()
-                
-                # Afficher le reçu
-                self._show_sale_receipt(sale_data, payment_data)
-                
-                # Nettoyer le panier automatiquement après le reçu
+
+            sale_data = {
+                'cart_items': cart_items,
+                'discount_amount': float(self.global_discount),
+                'payment_data': payment,
+                'client_id': self.client_combo.currentData(),
+                'notes': '',
+            }
+
+            success, message, panier_id = self.vente_controller.process_sale(sale_data)
+            if success:
+                QMessageBox.information(self, "Vente", message)
+                # Optionnel: afficher reçu UI
+                try:
+                    from datetime import datetime
+                    subtotal = sum(i['unit_price'] * i['quantity'] for i in cart_items)
+                    receipt_sale_data = {
+                        'subtotal': subtotal,
+                        'discount_amount': float(self.global_discount),
+                        'total_amount': subtotal - float(self.global_discount),
+                        'sale_date': datetime.now()
+                    }
+                    self._show_sale_receipt(receipt_sale_data, payment)
+                except Exception:
+                    pass
                 self.clear_cart()
-                
-                # Feedback discret - juste l'émission du signal
-                print(f"✅ Vente #{panier_id} complétée - {total_amount:.0f} FC")
-                self.sale_completed.emit(panier_id)
-                
+                if panier_id:
+                    self.sale_completed.emit(panier_id)
+            else:
+                QMessageBox.critical(self, "Erreur vente", message)
         except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de la vente: {e}")
-            import traceback
-            traceback.print_exc()
+            QMessageBox.critical(self, "Erreur", f"Erreur lors du traitement de la vente: {e}")
     
     def _update_pos_stock(self, session, product_id, quantity_sold):
         """Met à jour le stock POS (soustraction automatique depuis l'entrepôt POS_2)"""
-        try:
-            from sqlalchemy import text
-            
-            # Chercher l'entrepôt avec le code POS_2 (entrepôt boutique)
-            warehouse_result = session.execute(text("""
-                SELECT id FROM stock_warehouses 
-                WHERE code = 'POS_2' AND is_active = 1
-                LIMIT 1
-            """))
-            
-            warehouse_row = warehouse_result.fetchone()
-            if not warehouse_row:
-                print(f"⚠️ Entrepôt boutique (POS_2) non trouvé ou inactif")
-                return
-            
-            warehouse_id = warehouse_row[0]
-            
-            # Vérifier le stock disponible avant la vente
-            stock_check = session.execute(text("""
-                SELECT quantity FROM stock_produits_entrepot 
-                WHERE product_id = :product_id AND warehouse_id = :warehouse_id
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id
-            })
-            
-            stock_row = stock_check.fetchone()
-            current_stock = stock_row[0] if stock_row else 0
-            
-            # Cette vérification est faite en amont, on peut procéder directement
-            print(f"📦 Stock POS_2 avant vente: Produit {product_id}, Stock: {current_stock}, Vente: {quantity_sold}")
-            
-            # Mettre à jour le stock produit-entrepôt
-            session.execute(text("""
-                UPDATE stock_produits_entrepot 
-                SET quantity = quantity - :quantity_sold,
-                    last_movement_date = CURRENT_TIMESTAMP
-                WHERE product_id = :product_id AND warehouse_id = :warehouse_id
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id,
-                'quantity_sold': quantity_sold
-            })
-            
-            # Créer un mouvement de stock (sortie/vente)
-            session.execute(text("""
-                INSERT INTO stock_mouvements 
-                (product_id, warehouse_id, destination_warehouse_id, movement_type, 
-                 quantity, unit_cost, total_cost, reference, description, movement_date, user_id)
-                VALUES (:product_id, :warehouse_id, NULL, 'SORTIE', :quantity, 
-                        :unit_cost, :total_cost, :reference, :description, CURRENT_TIMESTAMP, :user_id)
-            """), {
-                'product_id': product_id,
-                'warehouse_id': warehouse_id,
-                'quantity': -quantity_sold,  # Négatif pour sortie
-                'unit_cost': self._get_product_cost(session, product_id),
-                'total_cost': -quantity_sold * self._get_product_cost(session, product_id),
-                'reference': f"VENTE-BOUTIQUE-{self.pos_id}",
-                'description': f"Vente boutique depuis entrepôt POS_2",
-                'user_id': getattr(self.current_user, 'id', 1)
-            })
-            
-            print(f"✅ Stock boutique (POS_2) mis à jour: Produit {product_id}, Quantité: -{quantity_sold}")
-            
-        except Exception as e:
-            print(f"❌ Erreur mise à jour stock boutique: {e}")
-            import traceback
-            traceback.print_exc()
-            # Ne pas faire échouer la vente pour un problème de stock
+        # Deprecated in-view stock update. Stock management is handled by `VenteController`.
+        # Kept as a no-op to avoid duplicate logic.
+        return
     
     def _get_product_cost(self, session, product_id):
         """Récupère le coût du produit"""
@@ -1024,87 +840,9 @@ class ModernSupermarketWidget(QWidget):
     
     def _create_sale_accounting_entries(self, session, sale_data, sale_id):
         """Crée les écritures comptables pour la vente"""
-        try:
-            from sqlalchemy import text
-            from datetime import datetime
-            
-            # Vérifier si la configuration comptable existe
-            config_result = session.execute(text("""
-                SELECT compte_vente_id, compte_caisse_id 
-                FROM compta_config 
-                WHERE enterprise_id = (SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id)
-                LIMIT 1
-            """), {'pos_id': self.pos_id})
-            
-            config_row = config_result.fetchone()
-            if not config_row or not config_row[0]:
-                print("⚠️ Configuration comptable manquante pour les ventes")
-                return
-            
-            compte_vente_id = config_row[0]
-            compte_caisse_id = config_row[1] or compte_vente_id  # Fallback
-            
-            # Créer le journal comptable
-            journal_result = session.execute(text("""
-                INSERT INTO compta_journaux 
-                (date_operation, libelle, montant, type_operation, reference, description, 
-                 enterprise_id, user_id, date_creation, date_modification)
-                VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, 
-                        :description, :enterprise_id, :user_id, :date_creation, :date_modification)
-            """), {
-                'date_operation': datetime.now(),
-                'libelle': f"Vente POS {self.pos_id} - #{sale_id}",
-                'montant': sale_data['total_amount'],
-                'type_operation': 'entree',
-                'reference': f"VENTE-{sale_id}",
-                'description': f"Vente boutique - Paiement: {sale_data['payment_method']}",
-                'enterprise_id': 1,  # TODO: Récupérer dynamiquement
-                'user_id': sale_data['user_id'],
-                'date_creation': datetime.now(),
-                'date_modification': datetime.now()
-            })
-            
-            session.flush()
-            
-            # Récupérer l'ID du journal
-            journal_id_result = session.execute(text("SELECT last_insert_rowid()"))
-            journal_id = journal_id_result.fetchone()[0]
-            
-            # Écriture débit : Caisse (entrée d'argent)
-            session.execute(text("""
-                INSERT INTO compta_ecritures 
-                (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-            """), {
-                'journal_id': journal_id,
-                'compte_id': compte_caisse_id,
-                'debit': sale_data['total_amount'],
-                'credit': 0,
-                'ordre': 1,
-                'libelle': f"Encaissement vente - {sale_data['payment_method']}",
-                'date_creation': datetime.now()
-            })
-            
-            # Écriture crédit : Vente (produit vendu)
-            session.execute(text("""
-                INSERT INTO compta_ecritures 
-                (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-            """), {
-                'journal_id': journal_id,
-                'compte_id': compte_vente_id,
-                'debit': 0,
-                'credit': sale_data['total_amount'],
-                'ordre': 2,
-                'libelle': f"Vente produits POS {self.pos_id}",
-                'date_creation': datetime.now()
-            })
-            
-            print(f"✅ Écritures comptables créées - Journal ID: {journal_id}")
-            
-        except Exception as e:
-            print(f"❌ Erreur écritures comptables vente: {e}")
-            # Ne pas faire échouer la vente pour un problème comptable
+        # Deprecated: accounting entries for sale are handled by VenteController.
+        # Keep as no-op to avoid duplicate accounting logic in the view.
+        return
     
     def _show_sale_receipt(self, sale_data, payment_data):
         """Affiche le reçu de vente avec en-tête d'entreprise"""
