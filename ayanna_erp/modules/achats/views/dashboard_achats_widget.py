@@ -38,7 +38,7 @@ class StatCard(QFrame):
 
         layout = QVBoxLayout(self)
         # Marges plus petites
-        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
         
         # Icône et valeur
         header_layout = QHBoxLayout()
@@ -109,7 +109,7 @@ class DashboardAchatsWidget(QWidget):
         # Titre
         title_row = QHBoxLayout()
         title_label = QLabel("📊 Dashboard Achats")
-        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #2C3E50; margin-bottom: 20px;")
+        title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #2C3E50; margin-bottom: 10px;")
         title_row.addWidget(title_label)
         title_row.addStretch()
         # Bouton rafraîchir
@@ -169,7 +169,7 @@ class DashboardAchatsWidget(QWidget):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
         
         self.recent_table.setAlternatingRowColors(True)
-        self.recent_table.setMaximumHeight(300)
+        self.recent_table.setMaximumHeight(400)
         
         recent_layout.addWidget(self.recent_table)
         tables_layout.addWidget(recent_group, 2)
@@ -191,7 +191,7 @@ class DashboardAchatsWidget(QWidget):
         supplier_header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         
         self.suppliers_table.setAlternatingRowColors(True)
-        self.suppliers_table.setMaximumHeight(300)
+        self.suppliers_table.setMaximumHeight(400)
         
         suppliers_layout.addWidget(self.suppliers_table)
         tables_layout.addWidget(suppliers_group, 1)

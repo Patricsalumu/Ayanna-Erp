@@ -14,6 +14,7 @@ from datetime import datetime
 
 from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models.achats_models import AchatCommande, EtatCommande
+from ayanna_erp.core.config import Config
 
 
 class PaiementDialog(QDialog):
@@ -159,12 +160,16 @@ class CommandesWidget(QWidget):
         self.detail_entrepot = QLabel("-")
         self.detail_date = QLabel("-")
         self.detail_montant = QLabel("-")
+        self.detail_statut_paiement = QLabel("-")
+        self.detail_total_paye = QLabel("-")
         self.detail_etat = QLabel("-")
         info_form.addRow("Numéro:", self.detail_numero)
         info_form.addRow("Fournisseur:", self.detail_fournisseur)
         info_form.addRow("Entrepôt:", self.detail_entrepot)
         info_form.addRow("Date:", self.detail_date)
         info_form.addRow("Montant:", self.detail_montant)
+        info_form.addRow("Montant payé:", self.detail_total_paye)
+        info_form.addRow("Statut paiement:", self.detail_statut_paiement)
         info_form.addRow("État:", self.detail_etat)
         tabs.addTab(info_w, "Infos")
 
@@ -325,6 +330,27 @@ class CommandesWidget(QWidget):
             self.detail_entrepot.setText(str(cmd.entrepot_id or "Non spécifié"))
             self.detail_date.setText(cmd.date_commande.strftime("%d/%m/%Y %H:%M"))
             self.detail_montant.setText(f"{cmd.montant_total:.2f} €")
+            # calculs paiements
+            try:
+                total_paye = cmd.total_paye if hasattr(cmd, 'total_paye') else (sum(d.montant for d in cmd.depenses) if cmd.depenses else Decimal('0'))
+            except Exception:
+                try:
+                    total_paye = sum(d.montant for d in cmd.depenses) if cmd.depenses else Decimal('0')
+                except Exception:
+                    total_paye = Decimal('0')
+
+            # statut paiement
+            statut = getattr(cmd, 'statut_paiement', None)
+            if not statut:
+                if total_paye <= 0:
+                    statut = "non_paye"
+                elif total_paye >= cmd.montant_total:
+                    statut = "paye"
+                else:
+                    statut = "partiel"
+
+            self.detail_total_paye.setText(f"{Decimal(total_paye):.2f} €")
+            self.detail_statut_paiement.setText(str(statut).replace('_', ' ').title())
             self.detail_etat.setText(cmd.etat.value.title())
 
             # lignes
@@ -452,32 +478,175 @@ class CommandesWidget(QWidget):
             QMessageBox.critical(self, "Erreur", f"Erreur export: {e}")
 
     def generate_commande_pdf(self, commande, file_path, session):
-        from PyQt6.QtGui import QTextDocument
-        from PyQt6.QtPrintSupport import QPrinter
-        from ayanna_erp.modules.stock.models import StockWarehouse
-        entrepot = session.query(StockWarehouse).filter_by(id=commande.entrepot_id).first()
-        entrepot_nom = entrepot.name if entrepot else "Entrepôt inconnu"
-        html = f"""
-        <html><body>
-        <h2>Bon de commande - {commande.numero}</h2>
-        <p>Fournisseur: {commande.fournisseur.nom if commande.fournisseur else ''}</p>
-        <p>Entrepôt: {entrepot_nom}</p>
-        <p>Date: {commande.date_commande.strftime('%d/%m/%Y %H:%M')}</p>
-        <table border='1' cellpadding='4' cellspacing='0'><tr><th>Produit</th><th>Qté</th><th>PU</th><th>Total</th></tr>
-        """
-        for l in commande.lignes:
+        # Utiliser reportlab pour un rendu professionnel similaire à celui d'EntreeSortie
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.units import mm
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            import tempfile
+            import os
+
+            # Récupérer infos entreprise (logo BLOB possible)
+            ent_ctrl = EntrepriseController()
+            comp = ent_ctrl.get_company_info_for_pdf()
+
+            # Préparer logo si BLOB
+            temp_logo = None
+            logo_path = None
+            if comp and comp.get('logo'):
+                try:
+                    blob = comp.get('logo')
+                    # écrire dans un fichier temporaire
+                    fd, temp_logo = tempfile.mkstemp(suffix='.png')
+                    with os.fdopen(fd, 'wb') as f:
+                        f.write(blob)
+                    logo_path = temp_logo
+                except Exception:
+                    logo_path = None
+
+            # Informations entrepôt
+            from ayanna_erp.modules.stock.models import StockWarehouse
+            entrepot = session.query(StockWarehouse).filter_by(id=commande.entrepot_id).first()
+            entrepot_nom = entrepot.name if entrepot else 'Entrepôt inconnu'
+
+            # Paiements
             try:
-                pname = l.product.name if l.product else f"Produit {l.produit_id}"
-            except:
-                pname = f"Produit {l.produit_id}"
-            html += f"<tr><td>{pname}</td><td>{l.quantite}</td><td>{l.prix_unitaire:.2f}</td><td>{l.total_ligne:.2f}</td></tr>"
-        html += f"</table><h3>Total: {commande.montant_total:.2f} €</h3></body></html>"
-        doc = QTextDocument()
-        doc.setHtml(html)
-        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
-        printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
-        printer.setOutputFileName(file_path)
-        doc.print(printer)
+                total_paye = commande.total_paye if hasattr(commande, 'total_paye') else (sum(d.montant for d in commande.depenses) if commande.depenses else Decimal('0'))
+            except Exception:
+                total_paye = Decimal('0')
+
+            statut = getattr(commande, 'statut_paiement', None)
+            if not statut:
+                if total_paye <= 0:
+                    statut = 'non_paye'
+                elif total_paye >= commande.montant_total:
+                    statut = 'paye'
+                else:
+                    statut = 'partiel'
+
+            # Création du document
+            doc = SimpleDocTemplate(file_path, pagesize=A4,
+                                    rightMargin=15*mm, leftMargin=15*mm,
+                                    topMargin=15*mm, bottomMargin=20*mm)
+            styles = getSampleStyleSheet()
+            normal = styles['Normal']
+            normal.fontName = 'Helvetica'
+            normal.fontSize = 11
+            heading = ParagraphStyle('Heading', parent=styles['Heading1'], fontName='Helvetica-Bold', fontSize=18, leading=22)
+            small = ParagraphStyle('Small', parent=styles['Normal'], fontSize=9)
+
+            flow = []
+
+            # Header: logo + company info
+            header_cells = []
+            if logo_path:
+                try:
+                    img = Image(logo_path, width=45*mm, height=45*mm)
+                    header_cells.append(img)
+                except Exception:
+                    header_cells.append(Paragraph(f"<b>{comp.get('name','')}</b>", heading))
+            else:
+                header_cells.append(Paragraph(f"<b>{comp.get('name','')}</b>", heading))
+
+            company_info = f"<b>{comp.get('name','')}</b><br/>{comp.get('address','')}<br/>Tel: {comp.get('phone','')}<br/>{comp.get('email','')}"
+            header_cells.append(Paragraph(company_info, normal))
+
+            header_table = Table([[header_cells[0], header_cells[1]]], colWidths=[50*mm, None])
+            header_table.setStyle(TableStyle([('VALIGN',(0,0),(-1,-1),'TOP'), ('LEFTPADDING',(0,0),(-1,-1),0)]))
+            flow.append(header_table)
+            flow.append(Spacer(1, 6))
+
+            # Title
+            flow.append(Paragraph(f"Bon de commande - <b>{commande.numero}</b>", heading))
+            flow.append(Spacer(1, 8))
+
+            # Meta table
+            meta_data = [
+                ['Fournisseur', commande.fournisseur.nom if commande.fournisseur else ''],
+                ['Entrepôt', entrepot_nom],
+                ['Date', commande.date_commande.strftime('%d/%m/%Y %H:%M')],
+                ['État', commande.etat.value.title()],
+                ['Statut paiement', str(statut).replace('_',' ').title()],
+                ['Montant payé', f"{Decimal(total_paye):.2f} {ent_ctrl.get_currency_symbol()}"]
+            ]
+            meta_table = Table(meta_data, colWidths=[80*mm, None])
+            meta_table.setStyle(TableStyle([
+                ('VALIGN',(0,0),(-1,-1),'TOP'),
+                ('FONTNAME',(0,0),(-1,-1),'Helvetica'),
+                ('FONTSIZE',(0,0),(-1,-1),11),
+                ('BOTTOMPADDING',(0,0),(-1,-1),6),
+            ]))
+            flow.append(meta_table)
+            flow.append(Spacer(1, 8))
+
+            # Lines table header
+            items = [['Produit','Qté','PU','Remise','Total']]
+            for l in commande.lignes:
+                try:
+                    pname = l.product.name if l.product else f"Produit {l.produit_id}"
+                except Exception:
+                    pname = f"Produit {l.produit_id}"
+                items.append([pname, str(l.quantite), f"{l.prix_unitaire:.2f}", f"{getattr(l,'remise_ligne',0):.2f}", f"{l.total_ligne:.2f}"])
+
+            tbl = Table(items, colWidths=[None, 25*mm, 30*mm, 30*mm, 35*mm])
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND',(0,0),(-1,0),colors.HexColor('#f4f6f8')),
+                ('TEXTCOLOR',(0,0),(-1,0),colors.black),
+                ('GRID',(0,0),(-1,-1),0.5,colors.HexColor('#dddddd')),
+                ('FONTNAME',(0,0),(-1,-1),'Helvetica'),
+                ('FONTSIZE',(0,0),(-1,-1),10),
+                ('ALIGN',(1,1),(-1,-1),'RIGHT'),
+            ]))
+            flow.append(tbl)
+            flow.append(Spacer(1, 8))
+
+            # Totals
+            remainder = Decimal(commande.montant_total) - Decimal(total_paye)
+            totals_paras = []
+            totals_paras.append(Paragraph(f"<b>Total commande: {commande.montant_total:.2f} {ent_ctrl.get_currency_symbol()}</b>", normal))
+            totals_paras.append(Paragraph(f"Montant payé: {Decimal(total_paye):.2f} {ent_ctrl.get_currency_symbol()}", normal))
+            totals_paras.append(Paragraph(f"<b>Reste à payer: {remainder:.2f} {ent_ctrl.get_currency_symbol()}</b>", normal))
+            for p in totals_paras:
+                flow.append(p)
+                flow.append(Spacer(1,4))
+
+            # Watermark/footer on each page
+            def _footer(canvas, doc):
+                canvas.saveState()
+                canvas.setFont('Helvetica', 8)
+                canvas.setFillColor(colors.HexColor('#9aa0a6'))
+                footer_text = f"Généré par {Config.APP_NAME} — Tous droits réservés"
+                canvas.drawCentredString(doc.leftMargin + doc.width/2, 12*mm, footer_text)
+                canvas.restoreState()
+
+            doc.build(flow, onFirstPage=_footer, onLaterPages=_footer)
+
+            # Nettoyer fichier logo temporaire
+            if temp_logo:
+                try:
+                    os.remove(temp_logo)
+                except Exception:
+                    pass
+
+        except ImportError:
+            # reportlab non installé: retomber sur le rendu HTML/QPrinter existant
+            try:
+                from PyQt6.QtGui import QTextDocument
+                from PyQt6.QtPrintSupport import QPrinter
+                # Simple fallback: utiliser le HTML minimal
+                html = f"<html><body><h2>Bon de commande - {commande.numero}</h2><p>Installez reportlab pour un rendu PDF professionnel (pip install reportlab).</p></body></html>"
+                doc = QTextDocument()
+                doc.setHtml(html)
+                printer = QPrinter()
+                printer.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+                printer.setOutputFileName(file_path)
+                doc.print(printer)
+            except Exception:
+                # Renvoyer l'exception si tout échoue
+                raise
 
     def reception_selected_commande(self):
         sel = self.table.selectionModel().selectedRows()
