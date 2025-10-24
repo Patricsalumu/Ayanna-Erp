@@ -530,7 +530,7 @@ class EntreeSortieIndex(QWidget):
                 from ayanna_erp.modules.salle_fete.model.salle_fete import EventExpense
                 expenses = session.query(EventExpense)\
                     .filter(
-                        EventExpense.pos_id == pos_id,
+                        # EventExpense.pos_id == pos_id,
                         EventExpense.expense_date.between(start_datetime, end_datetime)
                     )\
                     .all()
@@ -655,7 +655,7 @@ class EntreeSortieIndex(QWidget):
                         'datetime': payment.payment_date,
                         'type': 'Entrée',
                         'libelle': f'[BOUTIQUE] Paiement {payment.reference} - {client_name}',
-                        'categorie': 'Paiement boutique',
+                        'categorie': 'VENTE',
                         'montant_entree': float(payment.amount),
                         'montant_sortie': 0.0,
                         'utilisateur': 'Système',  # Pas d'info utilisateur pour les paiements boutique

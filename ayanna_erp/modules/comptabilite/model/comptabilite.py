@@ -112,6 +112,7 @@ class ComptaConfig(Base):
     pos_id = Column(Integer, ForeignKey('core_pos_points.id'), nullable=False)  # Point de vente
     compte_caisse_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte caisse (classe 5)
     compte_banque_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte banque (classe 5)
+    compte_stock_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte stock (classe 3)
     compte_client_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte client (classe 4)
     compte_fournisseur_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)  # Compte fournisseur (classe 4)
     compte_vente_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte vente (classe 7)

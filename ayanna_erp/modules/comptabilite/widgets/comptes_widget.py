@@ -255,6 +255,9 @@ class ComptesWidget(QWidget):
         comptes_tva = self.controller.get_comptes_par_classe(self.entreprise_id, '44')    # Classe 44: TVA
         comptes_achat = self.controller.get_comptes_par_classe(self.entreprise_id, '6')   # Classe 6: Achats/Charges
         comptes_vente = self.controller.get_comptes_par_classe(self.entreprise_id, '7')   # Classe 7: Ventes/Produits/Remises
+        compte_remise = self.controller.get_comptes_par_classe(self.entreprise_id, '6')  # Classe 6 aussi pour remises
+        compte_stock = self.controller.get_comptes_par_classe(self.entreprise_id, '3')  # Classe 3: Stocks
+        
         
         # Créer les ComboBox pour chaque type de compte
         caisse_combo = QComboBox()
@@ -272,6 +275,12 @@ class ComptesWidget(QWidget):
         for c in comptes_client:
             if str(c.numero).startswith('41'):  # Clients généralement 411
                 client_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+        
+        stock_combo = QComboBox()
+        stock_combo.addItem("-- Sélectionner --", None)
+        for c in compte_stock:
+            if str(c.numero).startswith('3'):  # Stocks généralement 3xx
+                stock_combo.addItem(f"{c.numero} - {c.nom}", c.id)
                 
         fournisseur_combo = QComboBox()
         fournisseur_combo.addItem("-- Sélectionner --", None)
@@ -291,9 +300,13 @@ class ComptesWidget(QWidget):
             
         remise_combo = QComboBox()
         remise_combo.addItem("-- Sélectionner --", None)
-        for c in comptes_vente:
-            if 'remise' in c.nom.lower() or 'rabais' in c.nom.lower() or str(c.numero).startswith('709'):  # Généralement 709x pour remises
+        for c in compte_remise:
                 remise_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+                
+        vente_combo = QComboBox()
+        vente_combo.addItem("-- Sélectionner --", None)
+        for c in comptes_vente:
+            vente_combo.addItem(f"{c.numero} - {c.nom}", c.id)
         
         # Ajouter les champs au formulaire
         layout.addRow(QLabel("Compte caisse (classe 5) :"), caisse_combo)
@@ -302,7 +315,9 @@ class ComptesWidget(QWidget):
         layout.addRow(QLabel("Compte fournisseur (classe 4) :"), fournisseur_combo)
         layout.addRow(QLabel("Compte TVA (classe 44) :"), tva_combo)
         layout.addRow(QLabel("Compte achat (classe 6) :"), achat_combo)
-        layout.addRow(QLabel("Compte remise (classe 7) :"), remise_combo)
+        layout.addRow(QLabel("Compte remise (classe 6) :"), remise_combo)
+        layout.addRow(QLabel("Compte stock (classe 3) :"), stock_combo)
+        layout.addRow(QLabel("Compte Vente (Classe 7) :"), vente_combo)
         
         # Fonction pour charger la configuration d'un POS
         def load_config_for_pos():
@@ -318,9 +333,11 @@ class ComptesWidget(QWidget):
                     self._set_combo_value(tva_combo, config.compte_tva_id)
                     self._set_combo_value(achat_combo, config.compte_achat_id)
                     self._set_combo_value(remise_combo, config.compte_remise_id)
+                    self._set_combo_value(stock_combo, config.compte_stock_id)
+                    self._set_combo_value(vente_combo, config.compte_vente_id)
                 else:
                     # Remettre à zéro si pas de config
-                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo, remise_combo]:
+                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo, stock_combo, vente_combo, remise_combo]:
                         combo.setCurrentIndex(0)  # "-- Sélectionner --"
         
         # Connecter le changement de POS
@@ -351,7 +368,9 @@ class ComptesWidget(QWidget):
                     compte_fournisseur_id=fournisseur_combo.currentData(),
                     compte_tva_id=tva_combo.currentData(),
                     compte_achat_id=achat_combo.currentData(),
-                    compte_remise_id=remise_combo.currentData()
+                    compte_remise_id=remise_combo.currentData(),
+                    compte_stock_id=stock_combo.currentData(),
+                    compte_vente_id=vente_combo.currentData() 
                 )
                 QMessageBox.information(self, "Configuration enregistrée", 
                                       f"La configuration des comptes pour le point de vente '{pos_combo.currentText()}' a bien été enregistrée.")
