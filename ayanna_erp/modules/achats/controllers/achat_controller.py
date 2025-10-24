@@ -127,6 +127,9 @@ class AchatController:
         # Recalculer le total
         self.recalculer_total_commande(session, commande.id)
         
+        #Creation d'ecriture comptable de commande
+        self.create_ecriture_comptable_commande(session, commande)
+        
         session.commit()
         session.refresh(commande)
         return commande
@@ -300,6 +303,9 @@ class AchatController:
             session.add(depense)
             session.flush()  # Pour obtenir l'ID
             
+            # Créer l'écriture comptable
+            self.create_ecriture_comptable_achat(session, commande, depense)
+            
             # Si le paiement couvre le montant total, valider la commande
             nouveau_montant_paye = montant_deja_paye + montant
             if nouveau_montant_paye >= commande.montant_total:
@@ -308,10 +314,6 @@ class AchatController:
                 
                 # Créer les mouvements de stock
                 self.create_mouvements_stock(session, commande)
-                
-                # Créer l'écriture comptable
-                self.create_ecriture_comptable_achat(session, commande, depense)
-            
             session.commit()
             return True
             
@@ -320,106 +322,128 @@ class AchatController:
             print(f"Erreur lors du paiement: {e}")
             raise e
     
-    def create_ecriture_comptable_achat(self, session: Session, 
-                                       commande: AchatCommande, depense: AchatDepense):
-        """Crée l'écriture comptable pour un achat"""
+    
+    ##Ecriture comptable creation commande
+    def create_ecriture_comptable_commande(self, session: Session, 
+                                        commande: AchatCommande):
+        """Crée les écritures comptables pour une commande d'achat"""
         try:
-            # Récupérer la configuration comptable
+            # Récupération de la configuration comptable
             config = session.query(ComptaConfig).filter_by(
                 enterprise_id=self.entreprise_id
             ).first()
-            
+
             if not config:
-                error_msg = "⚠️ CONFIGURATION COMPTABLE MANQUANTE ⚠️\n"
-                error_msg += f"Aucune configuration comptable trouvée pour l'entreprise {self.entreprise_id}.\n"
-                error_msg += "Veuillez configurer les comptes comptables dans le module Comptabilité avant de procéder aux achats.\n"
-                error_msg += "Configuration requise: compte d'achat, compte de caisse, compte fournisseur."
-                print(error_msg)
-                # Optionnel: lever une exception pour forcer l'utilisateur à configurer
-                # raise ValueError("Configuration comptable manquante")
+                print("⚠️ Configuration comptable manquante pour cette entreprise.")
                 return
-            
-            # Vérifier que les comptes configurés existent
-            missing_accounts = []
-            if config.compte_achat_id:
-                compte_achat = session.query(ComptaComptes).get(config.compte_achat_id)
-                if not compte_achat:
-                    missing_accounts.append(f"Compte achat (ID: {config.compte_achat_id})")
-            else:
-                missing_accounts.append("Compte achat non configuré")
-                
-            if missing_accounts:
-                error_msg = "⚠️ COMPTES COMPTABLES MANQUANTS ⚠️\n"
-                error_msg += "Les comptes suivants sont manquants ou mal configurés:\n"
-                for account in missing_accounts:
-                    error_msg += f"  - {account}\n"
-                error_msg += "Veuillez vérifier la configuration dans le module Comptabilité."
-                print(error_msg)
-                return
-            
-            # Créer le journal principal
-            journal = ComptaJournaux(
+
+            # === JOURNAL 1 : Achat (stock / charge vs fournisseur) ===
+            journal_commande = ComptaJournaux(
                 date_operation=datetime.now(),
-                libelle=f"Achat - Commande {commande.numero}",
+                libelle=f"Achat marchandises - Commande {commande.numero}",
                 montant=commande.montant_total,
-                type_operation="sortie",
+                type_operation="Commande",
                 reference=commande.numero,
                 description=f"Achat auprès de {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur divers'}",
                 enterprise_id=self.entreprise_id,
                 user_id=commande.utilisateur_id
             )
-            session.add(journal)
-            session.flush()  # Pour obtenir l'ID
-            
-            # Écriture de débit : Compte d'achat (classe 6)
-            if config.compte_achat_id:
-                ecriture_debit = ComptaEcritures(
-                    journal_id=journal.id,
-                    compte_comptable_id=config.compte_achat_id,
-                    debit=commande.montant_total,
-                    credit=Decimal('0'),
-                    ordre=1,
-                    libelle=f"Achat - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
-                )
-                session.add(ecriture_debit)
-            else:
-                print("⚠️ Aucun compte d'achat configuré - écriture débit non créée")
-            
-            # Écriture de crédit : Compte de paiement
-            if config.compte_caisse_id:  # Compte fournisseur - créance
-                # Crédit au compte fournisseur (augmentation de la dette)
-                ecriture_credit = ComptaEcritures(
-                    journal_id=journal.id,
-                    compte_comptable_id=config.compte_caisse_id,
-                    debit=Decimal('0'),
-                    credit=commande.montant_total,
-                    ordre=2,
-                    libelle=f"Dette fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
-                )
-            else:  # Compte de caisse - paiement immédiat
-                # Crédit au compte de caisse (sortie d'argent)
-                ecriture_credit = ComptaEcritures(
-                    journal_id=journal.id,
-                    compte_comptable_id=depense.compte_id,
-                    debit=Decimal('0'),
-                    credit=commande.montant_total,
-                    ordre=2,
-                    libelle=f"Paiement achat - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
-                )
-            
-            session.add(ecriture_credit)
-            
-            session.flush()  # Pour s'assurer que les écritures sont en base
-            
-            print(f"✅ Écriture comptable créée - Journal ID: {journal.id} - Montant: {commande.montant_total}€")
-            
+            session.add(journal_commande)
+            session.flush()
+
+            # Débit : Stock (ou compte achat)
+            ecriture_debit_achat = ComptaEcritures(
+                journal_id=journal_commande.id,
+                compte_comptable_id=config.compte_stock_id or config.compte_achat_id,
+                debit=commande.montant_total,
+                credit=Decimal('0'),
+                ordre=1,
+                libelle=f"Achat marchandises - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+            )
+            session.add(ecriture_debit_achat)
+
+            # Crédit : Fournisseur
+            ecriture_credit_achat = ComptaEcritures(
+                journal_id=journal_commande.id,
+                compte_comptable_id=config.compte_fournisseur_id,
+                debit=Decimal('0'),
+                credit=commande.montant_total,
+                ordre=2,
+                libelle=f"Dette fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+            )
+            session.add(ecriture_credit_achat)
+            print(f"✅ Journal d'achat créé (ID {journal_commande.id}) - {commande.montant_total}$")
+            session.flush()
+            print("✅ Toutes les écritures ont été enregistrées avec succès.")
+
         except Exception as e:
-            print(f"Erreur lors de la création de l'écriture comptable: {e}")
+            print(f"❌ Erreur lors de la création des écritures comptables: {e}")
             import traceback
             traceback.print_exc()
-            # Ne pas faire échouer tout le processus si la comptabilité échoue
-            pass
-    
+            
+            
+    def create_ecriture_comptable_achat(self, session: Session, 
+                                        commande: AchatCommande, depense: AchatDepense):
+        """Crée les écritures comptables pour un achat et son paiement éventuel"""
+        try:
+            # Récupération de la configuration comptable
+            config = session.query(ComptaConfig).filter_by(
+                enterprise_id=self.entreprise_id
+            ).first()
+
+            if not config:
+                print("⚠️ Configuration comptable manquante pour cette entreprise.")
+                return
+
+            # === JOURNAL 2 : Paiement (fournisseur vs caisse) ===
+            if depense and depense.montant and depense.montant > 0:
+                journal_paiement = ComptaJournaux(
+                    date_operation=datetime.now(),
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}",
+                    montant=depense.montant,
+                    type_operation="Sortie",
+                    reference=f"PAY-{commande.numero}",
+                    description=f"Paiement fournisseur pour commande {commande.numero}",
+                    enterprise_id=self.entreprise_id,
+                    user_id=commande.utilisateur_id
+                )
+                session.add(journal_paiement)
+                session.flush()
+
+                # Débit : Fournisseur (on diminue la dette)
+                ecriture_debit_paiement = ComptaEcritures(
+                    journal_id=journal_paiement.id,
+                    compte_comptable_id=config.compte_fournisseur_id,
+                    debit=depense.montant,
+                    credit=Decimal('0'),
+                    ordre=1,
+                    libelle=f"Paiement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+                )
+                session.add(ecriture_debit_paiement)
+
+                # Crédit : Caisse ou banque (sortie d’argent)
+                compte_paiement_id = config.compte_caisse_id
+                ecriture_credit_paiement = ComptaEcritures(
+                    journal_id=journal_paiement.id,
+                    compte_comptable_id=compte_paiement_id,
+                    debit=Decimal('0'),
+                    credit=depense.montant,
+                    ordre=2,
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'} - Commande {commande.numero}"
+                )
+                session.add(ecriture_credit_paiement)
+
+                print(f"✅ Journal de paiement créé (ID {journal_paiement.id}) - {depense.montant}$")
+
+            session.flush()
+            print("✅ Toutes les écritures ont été enregistrées avec succès.")
+
+        except Exception as e:
+            print(f"❌ Erreur lors de la création des écritures comptables: {e}")
+            import traceback
+            traceback.print_exc()
+
+        
     # ================== INTÉGRATION STOCK ==================
     
     def create_mouvements_stock(self, session: Session, commande: AchatCommande):
