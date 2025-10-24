@@ -15,6 +15,14 @@ class EtatCommande(enum.Enum):
     ENCOURS = "encours"
     ANNULE = "annule" 
     VALIDE = "valide"
+    RECEPTIONNE = "receptionne"
+
+
+class StatutPaiement(enum.Enum):
+    """Statut du paiement d'une commande (séparé du statut de la commande)"""
+    NON_PAYE = "non_paye"
+    PARTIEL = "partiel"
+    PAYE = "paye"
 
 
 class CoreFournisseur(Base):
@@ -55,6 +63,8 @@ class AchatCommande(Base):
     remise_global = Column(DECIMAL(12, 2), default=0)
     montant_total = Column(DECIMAL(12, 2), nullable=False)
     etat = Column(Enum(EtatCommande), default=EtatCommande.ENCOURS)
+    # Statut du paiement (non_paye/partiel/paye) distinct de l'état de la commande
+    statut_paiement = Column(String(20), default=StatutPaiement.NON_PAYE.value, nullable=False)
     
     # Métadonnées
     created_at = Column(DateTime, default=func.now())
@@ -72,6 +82,14 @@ class AchatCommande(Base):
         """Calcule le montant total de la commande"""
         total_lignes = sum(ligne.total_ligne for ligne in self.lignes)
         return total_lignes - self.remise_global
+
+    @property
+    def total_paye(self):
+        """Somme des paiements enregistrés pour la commande"""
+        try:
+            return sum(d.montant for d in self.depenses) if self.depenses else 0
+        except Exception:
+            return 0
 
 
 class AchatCommandeLigne(Base):

@@ -6,7 +6,7 @@ Affiche les statistiques et indicateurs clés
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QGroupBox,
     QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QPushButton,
-    QFrame, QScrollArea
+    QFrame, QScrollArea, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QPainter, QPen
@@ -23,44 +23,55 @@ class StatCard(QFrame):
     def __init__(self, title, value, icon="📊", color="#3498DB"):
         super().__init__()
         self.setFrameStyle(QFrame.Shape.StyledPanel)
+        # Style plus compact pour permettre d'afficher 6 cartes sur une ligne
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: white;
-                border: 2px solid {color};
-                border-radius: 8px;
-                padding: 10px;
+                border: 1px solid {color};
+                border-radius: 6px;
+                padding: 6px;
             }}
             QLabel {{
                 border: none;
             }}
         """)
-        
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        # Marges plus petites
+        layout.setContentsMargins(8, 8, 8, 8)
         
         # Icône et valeur
         header_layout = QHBoxLayout()
         
         icon_label = QLabel(icon)
-        icon_label.setStyleSheet(f"font-size: 24px; color: {color};")
-        
+        icon_label.setStyleSheet(f"font-size: 20px; color: {color};")
+
         value_label = QLabel(str(value))
-        value_label.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {color};")
+        # Taille de police réduite pour compacité
+        value_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {color};")
         value_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        
+
         header_layout.addWidget(icon_label)
         header_layout.addStretch()
         header_layout.addWidget(value_label)
-        
+
         # Titre
         title_label = QLabel(title)
-        title_label.setStyleSheet("font-size: 12px; color: #7F8C8D; font-weight: bold;")
+        title_label.setStyleSheet("font-size: 11px; color: #7F8C8D; font-weight: bold;")
         title_label.setWordWrap(True)
         
         layout.addLayout(header_layout)
         layout.addWidget(title_label)
         
         self.value_label = value_label
+        # Taille compacte: permettre au layout de compresser si nécessaire
+        try:
+            # hauteur maximale compacte
+            self.setMaximumHeight(80)
+            # laisser la largeur flexible pour tenir 6 cartes sur une ligne
+            self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        except Exception:
+            pass
     
     def update_value(self, value):
         """Met à jour la valeur affichée"""
@@ -83,7 +94,8 @@ class DashboardAchatsWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Autoriser le défilement horizontal si le contenu dépasse la largeur
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         
         content_widget = QWidget()
         scroll.setWidget(content_widget)
@@ -95,23 +107,44 @@ class DashboardAchatsWidget(QWidget):
         content_layout.setContentsMargins(10, 10, 10, 10)
         
         # Titre
+        title_row = QHBoxLayout()
         title_label = QLabel("📊 Dashboard Achats")
         title_label.setStyleSheet("font-size: 20px; font-weight: bold; color: #2C3E50; margin-bottom: 20px;")
-        content_layout.addWidget(title_label)
-        
+        title_row.addWidget(title_label)
+        title_row.addStretch()
+        # Bouton rafraîchir
+        refresh_btn = QPushButton("🔄 Rafraîchir")
+        refresh_btn.setToolTip("Rafraîchir les indicateurs")
+        refresh_btn.clicked.connect(self.refresh_data)
+        title_row.addWidget(refresh_btn)
+        content_layout.addLayout(title_row)
+
         # Cartes de statistiques
-        stats_layout = QGridLayout()
-        
+        # Utiliser une QHBoxLayout pour forcer une seule ligne et permettre
+        # aux cartes d'adapter leur largeur (shrinking) si nécessaire.
+        stats_layout = QHBoxLayout()
+        # Espacements réduits pour compacité et pour tenir 6 cartes sur une ligne
+        stats_layout.setSpacing(6)
+        stats_layout.setContentsMargins(0, 0, 0, 0)
+
         self.total_commandes_card = StatCard("Total Commandes", "0", "📋", "#3498DB")
         self.commandes_encours_card = StatCard("En Cours", "0", "⏳", "#F39C12")
         self.commandes_validees_card = StatCard("Validées", "0", "✅", "#27AE60")
-        self.total_montant_card = StatCard("Montant Total", "0 €", "💰", "#9B59B6")
-        
-        stats_layout.addWidget(self.total_commandes_card, 0, 0)
-        stats_layout.addWidget(self.commandes_encours_card, 0, 1)
-        stats_layout.addWidget(self.commandes_validees_card, 0, 2)
-        stats_layout.addWidget(self.total_montant_card, 0, 3)
-        
+        # Remplacer 'Montant Total' par 'Total Payés' (somme des AchatDepense)
+        self.total_payes_card = StatCard("Total Payés", "0 €", "💰", "#9B59B6")
+        # Nouvelle carte: Montant non payé (somme des commandes non annulées - total payé)
+        self.total_non_payes_card = StatCard("Montant non payé", "0 €", "❗", "#E74C3C")
+        # Nouvelle carte: nombre de commandes non payées (count)
+        self.commandes_non_payees_card = StatCard("Commandes non payées", "0", "🧾", "#8E44AD")
+
+        # Placer les 6 cartes sur la même ligne (QHBoxLayout gère l'alignement)
+        stats_layout.addWidget(self.total_commandes_card)
+        stats_layout.addWidget(self.commandes_encours_card)
+        stats_layout.addWidget(self.commandes_validees_card)
+        stats_layout.addWidget(self.total_payes_card)
+        stats_layout.addWidget(self.total_non_payes_card)
+        stats_layout.addWidget(self.commandes_non_payees_card)
+
         content_layout.addLayout(stats_layout)
         
         # Section des tables
@@ -190,15 +223,40 @@ class DashboardAchatsWidget(QWidget):
         total_commandes = len(commandes)
         commandes_encours = sum(1 for cmd in commandes if cmd.etat == EtatCommande.ENCOURS)
         commandes_validees = sum(1 for cmd in commandes if cmd.etat == EtatCommande.VALIDE)
-        
-        # Calculer le montant total
-        montant_total = sum(cmd.montant_total for cmd in commandes if cmd.montant_total)
-        
+        # Calculer le total payé (somme de toutes les dépenses liées aux commandes)
+        try:
+            total_payes = sum((sum(d.montant for d in cmd.depenses) if cmd.depenses else 0) for cmd in commandes)
+        except Exception:
+            total_payes = Decimal('0')
+
+        # Somme des montants des commandes non annulées
+        total_non_annule = sum(cmd.montant_total for cmd in commandes if cmd.etat != EtatCommande.ANNULE and cmd.montant_total)
+
+        # Montant non payé = total des commandes non annulées - total payé
+        try:
+            total_non_payes = Decimal(total_non_annule) - Decimal(total_payes)
+        except Exception:
+            total_non_payes = Decimal('0')
+
+        # Nombre de commandes non payées (commande où total payé < montant_total et non annulée)
+        commandes_non_payees_count = 0
+        for cmd in commandes:
+            if cmd.etat == EtatCommande.ANNULE:
+                continue
+            try:
+                paid = sum(d.montant for d in cmd.depenses) if cmd.depenses else Decimal('0')
+            except Exception:
+                paid = Decimal('0')
+            if paid < (cmd.montant_total or Decimal('0')):
+                commandes_non_payees_count += 1
+
         # Mettre à jour les cartes
         self.total_commandes_card.update_value(total_commandes)
         self.commandes_encours_card.update_value(commandes_encours)
         self.commandes_validees_card.update_value(commandes_validees)
-        self.total_montant_card.update_value(f"{montant_total:.2f} €")
+        self.total_payes_card.update_value(f"{Decimal(total_payes):.2f} €")
+        self.total_non_payes_card.update_value(f"{Decimal(total_non_payes):.2f} €")
+        self.commandes_non_payees_card.update_value(str(commandes_non_payees_count))
     
     def update_recent_orders(self, commandes):
         """Met à jour la table des commandes récentes"""

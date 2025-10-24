@@ -307,13 +307,27 @@ class AchatController:
             self.create_ecriture_comptable_achat(session, commande, depense)
             
             # Si le paiement couvre le montant total, valider la commande
+            # Calculer le nouveau total payé et mettre à jour le statut de paiement
             nouveau_montant_paye = montant_deja_paye + montant
-            if nouveau_montant_paye >= commande.montant_total:
-                # Marquer la commande comme validée
-                commande.etat = EtatCommande.VALIDE
-                
-                # Créer les mouvements de stock
-                self.create_mouvements_stock(session, commande)
+            try:
+                # Mettre à jour le champ statut_paiement (s'il existe dans le modèle)
+                if nouveau_montant_paye <= 0:
+                    commande.statut_paiement = 'non_paye'
+                elif nouveau_montant_paye >= commande.montant_total:
+                    commande.statut_paiement = 'paye'
+                    # Si les produits ont déjà été réceptionnés, on peut valider la commande
+                    try:
+                        if commande.etat == EtatCommande.RECEPTIONNE:
+                            commande.etat = EtatCommande.VALIDE
+                    except Exception:
+                        # ignore if enum/field missing
+                        pass
+                else:
+                    commande.statut_paiement = 'partiel'
+
+            except Exception:
+                # Si la colonne/statut n'existe pas, ignorer silencieusement
+                pass
             session.commit()
             return True
             
@@ -508,9 +522,109 @@ class AchatController:
         
         if commande.etat == EtatCommande.VALIDE:
             raise ValueError("Impossible d'annuler une commande déjà validée")
-        
+        # Passer l'état à annulé
         commande.etat = EtatCommande.ANNULE
+
+        # Créer écriture comptable d'annulation (inverse de la création de commande)
+        try:
+            config = session.query(ComptaConfig).filter_by(
+                enterprise_id=self.entreprise_id
+            ).first()
+
+            if config:
+                journal_annulation = ComptaJournaux(
+                    date_operation=datetime.now(),
+                    libelle=f"Annulation commande - {commande.numero}",
+                    montant=commande.montant_total,
+                    type_operation="Annulation",
+                    reference=f"ANN-{commande.numero}",
+                    description=f"Annulation commande {commande.numero}",
+                    enterprise_id=self.entreprise_id,
+                    user_id=commande.utilisateur_id
+                )
+                session.add(journal_annulation)
+                session.flush()
+
+                # Débit : Fournisseur (on recrée la dette inverse)
+                ecriture_debit = ComptaEcritures(
+                    journal_id=journal_annulation.id,
+                    compte_comptable_id=config.compte_fournisseur_id,
+                    debit=commande.montant_total,
+                    credit=Decimal('0'),
+                    ordre=1,
+                    libelle=f"Annulation dette fournisseur - Commande {commande.numero}"
+                )
+                session.add(ecriture_debit)
+
+                # Crédit : Stock/Achat (on annule l'actif créé précédemment)
+                ecriture_credit = ComptaEcritures(
+                    journal_id=journal_annulation.id,
+                    compte_comptable_id=config.compte_stock_id or config.compte_achat_id,
+                    debit=Decimal('0'),
+                    credit=commande.montant_total,
+                    ordre=2,
+                    libelle=f"Annulation achat - Commande {commande.numero}"
+                )
+                session.add(ecriture_credit)
+                session.flush()
+        except Exception as e:
+            print(f"Erreur lors de la création de l'écriture d'annulation: {e}")
+
         session.commit()
+
+    def reception_commande(self, session: Session, commande_id: int) -> bool:
+        """Réceptionne une commande : crée les mouvements de stock si nécessaire et marque la commande comme validée.
+
+        Comportement:
+        - Si la commande n'existe pas -> ValueError
+        - Si la commande est annulée -> ValueError
+        - Si des mouvements d'entrée pour cette commande existent déjà (même référence) -> ne rien faire et retourner False
+        - Sinon : crée les mouvements via create_mouvements_stock(), marque la commande comme VALIDE et commit
+        """
+        from ayanna_erp.modules.stock.models import StockMovement
+
+        commande = session.query(AchatCommande).get(commande_id)
+        if not commande:
+            raise ValueError("Commande introuvable")
+
+        if commande.etat == EtatCommande.ANNULE:
+            raise ValueError("Impossible de réceptionner une commande annulée")
+
+        # Vérifier si des mouvements d'entrée existent déjà pour cette référence
+        existing = session.query(StockMovement).filter(
+            StockMovement.reference == commande.numero,
+            StockMovement.movement_type == 'ENTREE'
+        ).first()
+
+        if existing:
+            # Déjà réceptionnée (mouvements déjà créés)
+            return False
+
+        # Créer mouvements de stock (ajoute les StockMovement et met à jour StockProduitEntrepot)
+        self.create_mouvements_stock(session, commande)
+
+        # Après création des mouvements, déterminer le statut final :
+        # - si la commande est déjà payée à 100% -> VALIDE
+        # - sinon -> RECEPTIONNE
+        try:
+            try:
+                total_paye = sum(d.montant for d in commande.depenses) if commande.depenses else Decimal('0')
+            except Exception:
+                total_paye = Decimal('0')
+
+            if total_paye >= commande.montant_total:
+                commande.etat = EtatCommande.VALIDE
+            else:
+                commande.etat = EtatCommande.RECEPTIONNE
+        except Exception:
+            # Fallback: set to RECEPTIONNE if something goes wrong
+            try:
+                commande.etat = EtatCommande.RECEPTIONNE
+            except Exception:
+                commande.etat = EtatCommande.VALIDE
+
+        session.commit()
+        return True
     
     # ================== UTILITAIRES ==================
     
