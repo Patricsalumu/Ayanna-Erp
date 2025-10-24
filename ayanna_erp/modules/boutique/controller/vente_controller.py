@@ -99,7 +99,7 @@ class VenteController:
                         })
 
                         # Mettre à jour le stock (toujours, même si pas payé)
-                        self._update_pos_stock(session, product_id, quantity)
+                        self._update_pos_stock(session, product_id, quantity, unit_price, line_total, numero_commande)
 
                     elif item.get('type') == 'service':
                         quantity = item.get('quantity')
@@ -227,45 +227,6 @@ class VenteController:
 
         except Exception as e:
             return False, f"Erreur lors de la validation de la configuration comptable: {str(e)}"
-
-    def _update_pos_stock(self, session: Session, product_id: int, quantity_sold: int):
-        """Met à jour le stock POS (soustraction automatique depuis l'entrepôt POS_2)"""
-        try:
-            # Récupérer le stock actuel
-            stock_result = session.execute(text("""
-                SELECT quantity FROM stock_produits_entrepot
-                WHERE product_id = :product_id AND warehouse_id = (
-                    SELECT id FROM stock_warehouses WHERE code = 'POS_2' LIMIT 1
-                )
-                LIMIT 1
-            """), {'product_id': product_id})
-
-            current_stock_row = stock_result.fetchone()
-            if current_stock_row:
-                current_stock = current_stock_row[0]
-                new_stock = max(0, current_stock - quantity_sold)  # Ne pas aller en négatif
-
-                # Mettre à jour le stock
-                session.execute(text("""
-                    UPDATE shop_stock
-                    SET quantity = :new_quantity, updated_at = :updated_at
-                    WHERE product_id = :product_id AND warehouse_id = (
-                        SELECT id FROM core_warehouses WHERE code = 'POS_2' LIMIT 1
-                    )
-                """), {
-                    'product_id': product_id,
-                    'new_quantity': new_stock,
-                    'updated_at': datetime.now()
-                })
-
-                print(f"📦 Stock mis à jour - Produit {product_id}: {current_stock} → {new_stock}")
-
-            else:
-                print(f"⚠️ Aucun stock trouvé pour le produit {product_id} dans POS_2")
-
-        except Exception as e:
-            print(f"❌ Erreur mise à jour stock: {e}")
-            # Ne pas faire échouer la vente pour un problème de stock
 
     def _create_advanced_sale_accounting_entries(self, session: Session, sale_data: Dict) -> Tuple[bool, str]:
         """Crée les écritures comptables avancées avec répartition proportionnelle"""
@@ -569,7 +530,7 @@ class VenteController:
         except Exception as e:
             return False, f"Erreur écritures comptables avancées: {str(e)}"
 
-    def _update_pos_stock(self, session: Session, product_id: int, quantity_sold: int):
+    def _update_pos_stock(self, session: Session, product_id: int, quantity_sold: int, unit_price, line_total, numero_commande):
         """Met à jour le stock POS (soustraction automatique depuis l'entrepôt POS_2)"""
         try:
             # Chercher l'entrepôt avec le code POS_2 (entrepôt boutique)
@@ -625,6 +586,28 @@ class VenteController:
                     'created_at': datetime.now(),
                     'updated_at': datetime.now()
                 })
+            #insertion dans mouvement stock
+            session.execute(text("""
+                        INSERT INTO stock_mouvements(
+                            product_id, warehouse_id, movement_type, quantity, unit_cost, total_cost, 
+                            destination_warehouse_id, reference, description, user_id, created_at
+                        )VALUES(
+                            :product_id, :warehouse_id, :movement_type, :quantity, :unit_cost, :total_cost,
+                            :destination_warehouse_id, :reference, :description, :user_id, :created_at
+                        )"""), {
+                            'product_id': product_id,
+                            'warehouse_id': 2,
+                            'movement_type': 'SORTIE',
+                            'quantity':quantity_sold,
+                            'unit_cost': unit_price,
+                            'total_cost':line_total,
+                            'destination_warehouse_id':warehouse_id,
+                            'reference':numero_commande,
+                            'description':"Vente Commande - " + numero_commande,
+                            'user_id':1, # TODO A implemnter
+                            'created_at': datetime.now()
+                            
+                        })
 
             print(f"📦 Stock mis à jour - Produit {product_id}: {current_stock} → {new_stock}")
 
