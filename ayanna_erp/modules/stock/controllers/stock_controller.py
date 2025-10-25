@@ -344,6 +344,29 @@ class StockController:
             'unit_cost': float(unit_cost),
             'total_cost': new_total_cost
         }
+
+    def set_min_stock_level(self, session: Session, product_id: int, warehouse_id: int, min_value: float) -> None:
+        """Mettre à jour ou insérer le niveau minimum de stock pour un produit dans un entrepôt.
+
+        Si une ligne existe pour (product_id, warehouse_id) on met à jour la colonne min_stock_level,
+        sinon on insère une ligne minimale avec quantity=0 et min_stock_level renseigné.
+        """
+        # Vérifier si la ligne existe
+        existing = session.execute(text(
+            "SELECT 1 FROM stock_produits_entrepot WHERE product_id = :product_id AND warehouse_id = :warehouse_id"
+        ), {"product_id": product_id, "warehouse_id": warehouse_id}).fetchone()
+
+        if existing:
+            session.execute(text(
+                "UPDATE stock_produits_entrepot SET min_stock_level = :min_stock_level, updated_at = CURRENT_TIMESTAMP "
+                "WHERE product_id = :product_id AND warehouse_id = :warehouse_id"
+            ), {"min_stock_level": float(min_value), "product_id": product_id, "warehouse_id": warehouse_id})
+        else:
+            # Insérer une ligne minimale si aucune n'existe
+            session.execute(text(
+                "INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, unit_cost, total_cost, min_stock_level, created_at, updated_at) "
+                "VALUES (:product_id, :warehouse_id, 0, 0, 0, :min_stock_level, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ), {"product_id": product_id, "warehouse_id": warehouse_id, "min_stock_level": float(min_value)})
     
     def transfer_stock(self, session: Session, product_id: int, 
                       warehouse_from_id: int, warehouse_to_id: int,

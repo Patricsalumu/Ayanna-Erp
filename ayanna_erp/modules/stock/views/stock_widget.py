@@ -19,6 +19,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.stock_controller import StockController
 from ayanna_erp.modules.stock.models import StockWarehouse
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class StockLevelsDialog(QDialog):
@@ -36,12 +37,6 @@ class StockLevelsDialog(QDialog):
         """Configuration de l'interface utilisateur"""
         layout = QVBoxLayout(self)
         
-        # Titre
-        title = QLabel("Configurer les Niveaux de Stock")
-        title.setFont(QFont("Arial", 14, QFont.Weight.Bold))
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(title)
-        
         # Formulaire
         form_layout = QFormLayout()
         
@@ -53,13 +48,7 @@ class StockLevelsDialog(QDialog):
         self.min_spinbox.setSuffix(" unités")
         form_layout.addRow("Stock minimum:", self.min_spinbox)
         
-        # Stock maximum
-        self.max_spinbox = QDoubleSpinBox()
-        self.max_spinbox.setRange(0, 999999)
-        self.max_spinbox.setDecimals(2)
-        self.max_spinbox.setValue(current_max)
-        self.max_spinbox.setSuffix(" unités")
-        form_layout.addRow("Stock maximum:", self.max_spinbox)
+        # NOTE: On ne gère que le niveau minimum par entrepôt (pas de maximum)
         
         layout.addLayout(form_layout)
         
@@ -82,19 +71,14 @@ class StockLevelsDialog(QDialog):
     def accept_if_valid(self):
         """Valider et accepter le formulaire"""
         min_value = self.min_spinbox.value()
-        max_value = self.max_spinbox.value()
-        
-        if max_value > 0 and min_value >= max_value:
-            QMessageBox.warning(self, "Validation", "Le stock minimum doit être inférieur au stock maximum.")
-            return
+        # Aucun contrôle de maximum — on n'autorise que le niveau minimum
         
         self.accept()
     
     def get_levels(self):
         """Récupérer les niveaux configurés"""
         return {
-            'minimum': self.min_spinbox.value(),
-            'maximum': self.max_spinbox.value()
+            'minimum': self.min_spinbox.value()
         }
 
 
@@ -105,6 +89,7 @@ class ProductStockDetailDialog(QDialog):
         super().__init__(parent)
         self.product_id = product_id
         self.controller = controller
+        self.ent_ctrl = EntrepriseController()
         self.setWindowTitle("Détails du Stock par Entrepôt")
         self.setFixedSize(800, 600)
         self.setup_ui()
@@ -140,7 +125,8 @@ class ProductStockDetailDialog(QDialog):
         self.total_available_label = QLabel("Disponible: 0")
         summary_layout.addWidget(self.total_available_label)
         
-        self.total_value_label = QLabel("Valeur: 0.00 €")
+        # Valeur initiale — sera mise à jour après chargement
+        self.total_value_label = QLabel("Valeur: 0")
         summary_layout.addWidget(self.total_value_label)
         
         summary_layout.addStretch()
@@ -148,13 +134,15 @@ class ProductStockDetailDialog(QDialog):
         
         # Tableau des entrepôts (détails produit)
         self.warehouses_table = QTableWidget()
-        self.warehouses_table.setColumnCount(5)
+        # Ajouter une colonne Actions (bouton de configuration) en plus
+        self.warehouses_table.setColumnCount(6)
         self.warehouses_table.setHorizontalHeaderLabels([
-            "Entrepôt", "Type", "Quantité", "Min", "Statut"
+            "Entrepôt", "Type", "Quantité", "Min", "Statut", "Actions"
         ])
         self.warehouses_table.setAlternatingRowColors(True)
         # Désactiver l'édition directe pour le tableau de détails
         self.warehouses_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    # (Remplacé) utilisation d'un bouton '⚙️' par ligne pour configurer le min
         wh_header = self.warehouses_table.horizontalHeader()
         wh_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.warehouses_table.setColumnWidth(0, 260)
@@ -176,19 +164,22 @@ class ProductStockDetailDialog(QDialog):
                 
                 # Mise à jour du résumé
                 totals = details['totals']
-                self.total_qty_label.setText(f"Total: {totals['total_quantity']:.2f}")
-                self.total_reserved_label.setText(f"Réservé: {totals['total_reserved']:.2f}")
-                self.total_available_label.setText(f"Disponible: {totals['total_available']:.2f}")
+                # Quantités : formater sans symbole monétaire
+                self.total_qty_label.setText(f"Total: {self.ent_ctrl.format_amount(totals.get('total_quantity', 0), show_symbol=False)}")
+                self.total_reserved_label.setText(f"Réservé: {self.ent_ctrl.format_amount(totals.get('total_reserved', 0), show_symbol=False)}")
+                self.total_available_label.setText(f"Disponible: {self.ent_ctrl.format_amount(totals.get('total_available', 0), show_symbol=False)}")
                 
                 # Calculer la valeur totale
                 total_value = sum(
                     stock['quantity'] * stock['unit_cost'] 
                     for stock in details['warehouse_stocks']
                 )
-                self.total_value_label.setText(f"Valeur: {total_value:.2f} €")
+                # Valeur : formater avec symbole monétaire
+                self.total_value_label.setText(f"Valeur: {self.ent_ctrl.format_amount(total_value)}")
                 
-                # Remplir le tableau
-                self.populate_warehouses_table(details['warehouse_stocks'])
+                # Stocker localement et remplir le tableau
+                self.current_warehouse_stocks = details['warehouse_stocks']
+                self.populate_warehouses_table(self.current_warehouse_stocks)
                 
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des détails:\n{str(e)}")
@@ -207,13 +198,13 @@ class ProductStockDetailDialog(QDialog):
             self.warehouses_table.setItem(row, 1, type_item)
             
             # Quantité
-            qty_item = QTableWidgetItem(f"{stock['quantity']:.2f}")
+            qty_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stock.get('quantity', 0), show_symbol=False)}")
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 2, qty_item)
             
             # Min (compatibilité clés)
             min_val = stock.get('min_stock_level', stock.get('minimum_stock', 0))
-            min_item = QTableWidgetItem(f"{min_val:.2f}")
+            min_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(min_val, show_symbol=False)}")
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 3, min_item)
             
@@ -238,9 +229,97 @@ class ProductStockDetailDialog(QDialog):
                 status_item.setBackground(status_colors[status])
             
             self.warehouses_table.setItem(row, 4, status_item)
-        
+
+            # Actions (bouton config)
+            actions_widget = QWidget()
+            actions_layout = QHBoxLayout(actions_widget)
+            actions_layout.setContentsMargins(2, 2, 2, 2)
+
+            config_btn = QPushButton("⚙️")
+            config_btn.setToolTip("Configurer le stock minimum")
+            config_btn.setMaximumWidth(30)
+            # Capturer la ligne et le stock courant
+            config_btn.clicked.connect(lambda checked, s=stock, r=row: self.open_min_dialog_for_warehouse(s, r))
+            actions_layout.addWidget(config_btn)
+
+            self.warehouses_table.setCellWidget(row, 5, actions_widget)
+
         # Ajuster les colonnes
         self.warehouses_table.resizeColumnsToContents()
+
+    def open_min_dialog_for_warehouse(self, stock: dict, row: int):
+        """Ouvrir le dialogue de configuration du niveau minimum pour un entrepôt donné (bouton '⚙️')."""
+        current_min = stock.get('min_stock_level', stock.get('minimum_stock', 0))
+        dialog = StockLevelsDialog(self, warehouse_id=stock.get('warehouse_id'), product_id=self.product_id, current_min=current_min)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            levels = dialog.get_levels()
+            new_min = levels.get('minimum', current_min)
+
+            # Persister via le contrôleur si possible
+            try:
+                with self.controller.db_manager.get_session() as session:
+                    if hasattr(self.controller, 'set_min_stock_level'):
+                        self.controller.set_min_stock_level(session, self.product_id, stock.get('warehouse_id'), new_min)
+                    else:
+                        session.execute(text("""
+                            UPDATE stock_produit_entrepot SET min_stock_level = :min_stock_level, updated_at = CURRENT_TIMESTAMP
+                            WHERE product_id = :product_id AND warehouse_id = :warehouse_id
+                        """), {"min_stock_level": float(new_min), "product_id": self.product_id, "warehouse_id": stock.get('warehouse_id')})
+                    session.commit()
+            except Exception as e:
+                QMessageBox.warning(self, "Erreur", f"Impossible de sauvegarder le niveau minimum:\n{e}")
+
+            # Mettre à jour les données locales
+            stock['min_stock_level'] = float(new_min)
+            stock['minimum_stock'] = float(new_min)
+
+            # Recalculer le statut pour cette ligne
+            available = stock.get('quantity', 0) - stock.get('reserved_quantity', 0)
+            min_level = float(new_min)
+            if available <= 0:
+                status = 'RUPTURE'
+            elif available <= min_level:
+                status = 'FAIBLE'
+            elif available <= min_level * 1.5:
+                status = 'ALERTE'
+            else:
+                status = 'NORMAL'
+
+            stock['status'] = status
+
+            # Mettre à jour l'UI: min et statut
+            min_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(min_level, show_symbol=False)}")
+            min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.warehouses_table.setItem(row, 3, min_item)
+
+            status_icons = {
+                'NORMAL': '✅ Normal',
+                'FAIBLE': '⚠️ Faible',
+                'RUPTURE': '🔴 Rupture',
+                'EXCES': '📈 Excès'
+            }
+            status_item = QTableWidgetItem(status_icons.get(status, status))
+            status_colors = {
+                'NORMAL': QColor("#E8F5E8"),
+                'FAIBLE': QColor("#FFF3CD"),
+                'RUPTURE': QColor("#F8D7DA"),
+                'EXCES': QColor("#D1ECF1")
+            }
+            if status in status_colors:
+                status_item.setBackground(status_colors[status])
+
+            self.warehouses_table.setItem(row, 4, status_item)
+
+            # Recalculer et mettre à jour le résumé global
+            total_qty = sum(s.get('quantity', 0) for s in self.current_warehouse_stocks)
+            total_reserved = sum(s.get('reserved_quantity', 0) for s in self.current_warehouse_stocks)
+            total_available = sum((s.get('quantity', 0) - s.get('reserved_quantity', 0)) for s in self.current_warehouse_stocks)
+            total_value = sum((s.get('quantity', 0) * s.get('unit_cost', 0)) for s in self.current_warehouse_stocks)
+
+            self.total_qty_label.setText(f"Total: {self.ent_ctrl.format_amount(total_qty, show_symbol=False)}")
+            self.total_reserved_label.setText(f"Réservé: {self.ent_ctrl.format_amount(total_reserved, show_symbol=False)}")
+            self.total_available_label.setText(f"Disponible: {self.ent_ctrl.format_amount(total_available, show_symbol=False)}")
+            self.total_value_label.setText(f"Valeur: {self.ent_ctrl.format_amount(total_value)}")
 
 
 class StockWidget(QWidget):
@@ -257,6 +336,8 @@ class StockWidget(QWidget):
         # Récupérer entreprise_id depuis pos_id
         self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
         self.controller = StockController(pos_id)
+        # Contrôleur entreprise pour formatage des montants
+        self.ent_ctrl = EntrepriseController()
         self.current_stocks = []
         self.current_warehouse_id = None
         
@@ -391,11 +472,6 @@ class StockWidget(QWidget):
         # Barre d'actions en bas
         actions_layout = QHBoxLayout()
         
-        self.configure_levels_btn = QPushButton("⚙️ Configurer Niveaux")
-        self.configure_levels_btn.setToolTip("Configurer les niveaux min/max pour le produit sélectionné")
-        self.configure_levels_btn.setEnabled(False)
-        self.configure_levels_btn.clicked.connect(self.configure_stock_levels)
-        actions_layout.addWidget(self.configure_levels_btn)
         
         self.view_details_btn = QPushButton("🔍 Voir Détails")
         self.view_details_btn.setToolTip("Voir les détails du produit dans tous les entrepôts")
@@ -470,22 +546,22 @@ class StockWidget(QWidget):
             self.stocks_table.setItem(row, 2, warehouse_item)
             
             # Quantité
-            qty_item = QTableWidgetItem(f"{stock['quantity']:.2f}")
+            qty_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stock.get('quantity', 0), show_symbol=False)}")
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 3, qty_item)
             
             # Min
-            min_item = QTableWidgetItem(f"{stock['minimum_stock']:.2f}")
+            min_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stock.get('minimum_stock', 0), show_symbol=False)}")
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 4, min_item)
             
             # Coût unitaire
-            cost_item = QTableWidgetItem(f"{stock['unit_cost']:.2f}")
+            cost_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stock.get('unit_cost', 0))}")
             cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 5, cost_item)
             
             # Valeur
-            value_item = QTableWidgetItem(f"{stock['stock_value']:.2f}")
+            value_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stock.get('stock_value', 0))}")
             value_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.stocks_table.setItem(row, 6, value_item)
             
@@ -546,7 +622,8 @@ class StockWidget(QWidget):
         """Mettre à jour le résumé"""
         self.total_products_label.setText(f"Produits: {summary['total_products']}")
         self.total_warehouses_label.setText(f"Entrepôts: {summary['total_warehouses']}")
-        self.total_value_label.setText(f"Valeur: {summary['total_value']:.2f} €")
+        # Formater la valeur totale avec la devise de l'entreprise
+        self.total_value_label.setText(f"Valeur: {self.ent_ctrl.format_amount(summary.get('total_value', 0))}")
         self.total_items_label.setText(f"Références: {summary['total_items']}")
     
     def filter_by_warehouse(self):
@@ -566,7 +643,6 @@ class StockWidget(QWidget):
         selected_rows = self.stocks_table.selectionModel().selectedRows()
         has_selection = len(selected_rows) > 0
         
-        self.configure_levels_btn.setEnabled(has_selection)
         self.view_details_btn.setEnabled(has_selection)
         
         if has_selection:
@@ -579,52 +655,7 @@ class StockWidget(QWidget):
         else:
             self.selected_info_label.setText("Sélectionnez une ligne pour voir les actions disponibles")
     
-    def configure_stock_levels(self):
-        """Configurer les niveaux de stock pour le produit sélectionné"""
-        selected_rows = self.stocks_table.selectionModel().selectedRows()
-        if not selected_rows:
-            return
-        
-        row = selected_rows[0].row()
-        filtered_stocks = self.filter_stocks(self.current_stocks)
-        if row >= len(filtered_stocks):
-            return
-        
-        stock = filtered_stocks[row]
-        
-        dialog = StockLevelsDialog(
-            self, 
-            warehouse_id=stock['warehouse_id'],
-            product_id=stock['product_id'],
-            current_min=stock['minimum_stock'],
-            current_max=0  # Pas de maximum stock
-        )
-        
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            levels = dialog.get_levels()
-            
-            try:
-                with self.db_manager.get_session() as session:
-                    self.controller.update_stock_levels(
-                        session,
-                        stock['warehouse_id'],
-                        stock['product_id'],
-                        levels['minimum'],
-                        levels['maximum']
-                    )
-                    session.commit()
-                    
-                    QMessageBox.information(
-                        self, "Succès", 
-                        f"Niveaux de stock mis à jour pour {stock['product_name']}"
-                    )
-                    
-                    self.load_stocks()
-                    self.stock_updated.emit()
-                    
-            except Exception as e:
-                QMessageBox.critical(self, "Erreur", f"Erreur lors de la mise à jour:\n{str(e)}")
-    
+  
     def show_product_details(self):
         """Afficher les détails du produit dans tous les entrepôts"""
         selected_rows = self.stocks_table.selectionModel().selectedRows()
@@ -661,15 +692,9 @@ class StockWidget(QWidget):
         details_action.triggered.connect(self.show_product_details)
         menu.addAction(details_action)
         
-        levels_action = QAction("⚙️ Configurer niveaux", self)
-        levels_action.triggered.connect(self.configure_stock_levels)
-        menu.addAction(levels_action)
         
         menu.addSeparator()
         
-        export_action = QAction("📄 Exporter ce produit", self)
-        export_action.triggered.connect(self.export_selected_product)
-        menu.addAction(export_action)
         
         # Afficher le menu
         menu.exec(self.stocks_table.mapToGlobal(position))
@@ -730,7 +755,7 @@ class StockWidget(QWidget):
                     f"• Nombre de lignes: {len(export_data['data'])}\n"
                     f"• Produits uniques: {export_data['summary']['total_products']}\n"
                     f"• Entrepôts: {export_data['summary']['total_warehouses']}\n"
-                    f"• Valeur totale: {export_data['summary']['total_value']:.2f} €\n\n"
+                    f"• Valeur totale: {self.ent_ctrl.format_amount(export_data['summary'].get('total_value', 0))}\n\n"
                     f"Note: Fonctionnalité d'export fichier à implémenter"
                 )
                 

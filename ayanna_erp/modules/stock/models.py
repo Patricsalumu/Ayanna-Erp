@@ -118,10 +118,91 @@ class StockMovement(Base):
     product_warehouse = relationship("StockProduitEntrepot", back_populates="movements")
 
 
+class StockInventaire(Base):
+    """Table des sessions d'inventaire"""
+    __tablename__ = 'stock_inventaire'
+    __table_args__ = {'extend_existing': True}
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    entreprise_id = Column(Integer, nullable=False)  # Référence à l'entreprise
+    reference = Column(String(100), unique=True, nullable=False)  # Référence unique (INV-YYYYMMDDHHMMSS)
+    session_name = Column(String(200), nullable=False)  # Nom de la session
+    warehouse_id = Column(Integer, ForeignKey('stock_warehouses.id'), nullable=False)  # Entrepôt concerné
+    inventory_type = Column(String(50), default='Complet')  # Complet, Partiel, Contrôle, Urgent
+    status = Column(String(20), default='DRAFT')  # DRAFT, IN_PROGRESS, COMPLETED, CANCELLED
+    scheduled_date = Column(DateTime)  # Date prévue
+    started_date = Column(DateTime)  # Date de début réel
+    completed_date = Column(DateTime)  # Date de fin
+    notes = Column(Text)  # Notes générales
+    
+    # Métadonnées
+    total_items = Column(Integer, default=0)  # Nombre total d'articles à compter
+    counted_items = Column(Integer, default=0)  # Nombre d'articles comptés
+    total_discrepancies = Column(Integer, default=0)  # Nombre d'écarts
+    total_variance_value = Column(Numeric(15, 2), default=0.0)  # Valeur totale des écarts
+    
+    # Options
+    include_zero_stock = Column(Boolean, default=True)  # Inclure produits à stock zéro
+    auto_freeze_stock = Column(Boolean, default=False)  # Geler mouvements pendant inventaire
+    send_notifications = Column(Boolean, default=True)  # Envoyer notifications
+    
+    # Traçabilité
+    created_by = Column(Integer)  # Utilisateur créateur
+    created_by_name = Column(String(100))
+    completed_by = Column(Integer)  # Utilisateur finalisateur
+    completed_by_name = Column(String(100))
+    
+    # Dates
+    created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.current_timestamp(), onupdate=func.current_timestamp())
+    
+    # Relations
+    warehouse = relationship("StockWarehouse", backref="inventories")
+    items = relationship("StockInventaireItem", back_populates="inventory", cascade="all, delete-orphan")
+
+
+class StockInventaireItem(Base):
+    """Table des éléments d'inventaire (comptages par produit)"""
+    __tablename__ = 'stock_inventaire_item'
+    __table_args__ = {'extend_existing': True}
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    inventory_id = Column(Integer, ForeignKey('stock_inventaire.id'), nullable=False)  # Session d'inventaire
+    product_id = Column(Integer, nullable=False)  # Référence au produit
+    product_name = Column(String(200))  # Nom du produit (snapshot)
+    product_code = Column(String(50))  # Code du produit (snapshot)
+    
+    # Stocks
+    system_stock = Column(Numeric(15, 3), default=0.0)  # Stock système au moment de l'inventaire
+    counted_stock = Column(Numeric(15, 3), default=0.0)  # Stock compté
+    variance = Column(Numeric(15, 3), default=0.0)  # Écart (counted - system)
+    variance_value = Column(Numeric(15, 2), default=0.0)  # Valeur de l'écart à l'achat (variance * unit_cost)
+    variance_value_sale = Column(Numeric(15, 2), default=0.0)  # Valeur de l'écart à la vente (variance * sale_price)
+    
+    # Informations produit
+    unit_cost = Column(Numeric(15, 2), default=0.0)  # Coût unitaire au moment de l'inventaire
+    location = Column(String(100))  # Emplacement dans l'entrepôt
+    
+    # Métadonnées
+    notes = Column(Text)  # Notes du compteur
+    counted_by = Column(Integer)  # Utilisateur qui a compté
+    counted_by_name = Column(String(100))
+    counted_at = Column(DateTime)  # Date/heure du comptage
+    
+    # Dates
+    created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.current_timestamp(), onupdate=func.current_timestamp())
+    
+    # Relations
+    inventory = relationship("StockInventaire", back_populates="items")
+
+
 # Export des modèles pour faciliter les imports
 __all__ = [
     'StockWarehouse',
     'StockConfig', 
     'StockProduitEntrepot',
-    'StockMovement'
+    'StockMovement',
+    'StockInventaire',
+    'StockInventaireItem'
 ]

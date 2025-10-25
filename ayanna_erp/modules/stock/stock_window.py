@@ -94,7 +94,6 @@ class StockWindow(QMainWindow):
             
             # Connecter les signaux pour la communication
             self.stock_widget.stock_updated.connect(self.on_stock_updated)
-            self.stock_widget.alert_generated.connect(self.on_alert_generated)
             
         except Exception as e:
             # En cas d'erreur, afficher un message d'erreur informatif
@@ -122,20 +121,7 @@ class StockWindow(QMainWindow):
         """Quand le stock est mis à jour"""
         print("📦 Stock mis à jour dans l'application principale")
         # Ici vous pouvez ajouter des actions globales quand le stock change
-        
-    def on_alert_generated(self, alert_type: str, message: str):
-        """Quand une alerte est générée"""
-        print(f"🚨 Alerte générée: {alert_type} - {message}")
-        
-        # Afficher des notifications selon le type d'alerte
-        if alert_type == "CRITICAL":
-            QMessageBox.critical(self, "Alerte Critique", message)
-        elif alert_type == "WARNING":
-            QMessageBox.warning(self, "Attention", message)
-        elif alert_type == "SUCCESS":
-            QMessageBox.information(self, "Succès", message)
-        else:
-            QMessageBox.information(self, "Information", message)
+
     
     def closeEvent(self, event):
         """Gestionnaire de fermeture de la fenêtre"""

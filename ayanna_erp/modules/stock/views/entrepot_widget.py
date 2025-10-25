@@ -18,6 +18,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.entrepot_controller import EntrepotController
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class WarehouseFormDialog(QDialog):
@@ -229,6 +230,8 @@ class EntrepotWidget(QWidget):
         # Récupérer entreprise_id depuis pos_id
         self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
         self.controller = EntrepotController(pos_id)
+        # Contrôleur entreprise pour formatage des montants
+        self.ent_ctrl = EntrepriseController()
         self.current_warehouses = []
         
         self.setup_ui()
@@ -459,19 +462,19 @@ class EntrepotWidget(QWidget):
                 stats = self.controller.get_warehouse_detailed_stats(session, warehouse['id'])
                 
                 # Stock Total Vente
-                sale_value_item = QTableWidgetItem(f"{stats['total_sale_value']:.2f} €")
+                sale_value_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stats.get('total_sale_value', 0))}")
                 sale_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.warehouses_table.setItem(row, 2, sale_value_item)
                 
                 # Stock Total Achat (prix d'achat depuis core_products.cost)
-                cost_value_item = QTableWidgetItem(f"{stats['total_purchase_value']:.2f} €")
+                cost_value_item = QTableWidgetItem(f"{self.ent_ctrl.format_amount(stats.get('total_purchase_value', 0))}")
                 cost_value_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.warehouses_table.setItem(row, 3, cost_value_item)
                 
         except Exception as e:
             # En cas d'erreur, afficher des valeurs par défaut
-            self.warehouses_table.setItem(row, 2, QTableWidgetItem("0.00 €"))
-            self.warehouses_table.setItem(row, 3, QTableWidgetItem("0.00 €"))
+            self.warehouses_table.setItem(row, 2, QTableWidgetItem(self.ent_ctrl.format_amount(0)))
+            self.warehouses_table.setItem(row, 3, QTableWidgetItem(self.ent_ctrl.format_amount(0)))
     
     def on_warehouse_double_clicked(self, row: int, column: int):
         """Gestionnaire de double-clic pour édition"""
@@ -648,8 +651,8 @@ Statistiques détaillées pour: {warehouse['name']}
 • Total des produits référencés: {stats['total_products']}
 • Produits avec stock > 0: {stats['products_with_stock']}
 • Produits en rupture (stock = 0): {stats['out_of_stock']}
-• Quantité totale en stock: {stats['total_quantity']:.2f} unités
-• Valeur totale du stock: {stats['total_value']:.2f} €
+• Quantité totale en stock: {self.ent_ctrl.format_amount(stats.get('total_quantity', 0), show_symbol=False)} unités
+• Valeur totale du stock: {self.ent_ctrl.format_amount(stats.get('total_value', 0))}
 
 📈 UTILISATION:
 • Capacité configurée: {warehouse.capacity_limit if warehouse.capacity_limit else 'Illimitée'}

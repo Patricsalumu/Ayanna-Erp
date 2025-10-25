@@ -590,10 +590,10 @@ class VenteController:
             session.execute(text("""
                         INSERT INTO stock_mouvements(
                             product_id, warehouse_id, movement_type, quantity, unit_cost, total_cost, 
-                            destination_warehouse_id, reference, description, user_id, created_at
+                            destination_warehouse_id, reference, description, user_id, movement_date, created_at
                         )VALUES(
                             :product_id, :warehouse_id, :movement_type, :quantity, :unit_cost, :total_cost,
-                            :destination_warehouse_id, :reference, :description, :user_id, :created_at
+                            :destination_warehouse_id, :reference, :description, :user_id, :movement_date, :created_at
                         )"""), {
                             'product_id': product_id,
                             'warehouse_id': 2,
@@ -605,6 +605,7 @@ class VenteController:
                             'reference':numero_commande,
                             'description':"Vente Commande - " + numero_commande,
                             'user_id':1, # TODO A implemnter
+                            'movement_date':datetime.now(),
                             'created_at': datetime.now()
                             
                         })
