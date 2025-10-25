@@ -173,6 +173,7 @@ class StockController:
                 spe.quantity,
                 spe.unit_cost,
                 spe.total_cost,
+                spe.reserved_quantity,
                 spe.min_stock_level,
                 spe.last_movement_date,
                 p.name as product_name,
@@ -194,25 +195,43 @@ class StockController:
             quantity = float(row[4]) if row[4] else 0
             unit_cost = float(row[5]) if row[5] else 0
             total_cost = float(row[6]) if row[6] else 0
-            
+            reserved = float(row[7]) if row[7] else 0
+            min_stock_level = float(row[8]) if row[8] else 0
+            last_movement = row[9]
+
             # Récupérer les infos produit depuis la première ligne
-            if product_name is None and row[9]:
-                product_name = row[9]
-                product_code = row[10]
-            
+            if product_name is None and row[10]:
+                product_name = row[10]
+                product_code = row[11]
+
             total_quantity += quantity
             total_value += total_cost
-            
+
+            available = quantity - reserved
+
+            # Calculer le statut pour chaque entrepôt
+            if available <= 0:
+                status = 'RUPTURE'
+            elif available <= min_stock_level:
+                status = 'FAIBLE'
+            elif available <= min_stock_level * 1.5:
+                status = 'ALERTE'
+            else:
+                status = 'NORMAL'
+
             warehouses.append({
                 'warehouse_id': row[0],
                 'warehouse_name': row[1],
                 'warehouse_code': row[2],
                 'warehouse_type': row[3],
                 'quantity': quantity,
+                'reserved_quantity': reserved,
+                'available_quantity': available,
                 'unit_cost': unit_cost,
                 'total_cost': total_cost,
-                'min_stock_level': float(row[7]) if row[7] else 0,
-                'last_movement_date': row[8]
+                'min_stock_level': min_stock_level,
+                'last_movement_date': last_movement,
+                'status': status
             })
         
         return {
@@ -228,20 +247,35 @@ class StockController:
     def get_product_stock_by_warehouses(self, session: Session, product_id: int) -> Dict[str, Any]:
         """Méthode alias pour get_product_stock_details - retourne les détails de stock d'un produit par entrepôt"""
         details = self.get_product_stock_details(session, product_id)
-        
         # Reformater pour correspondre au format attendu par le widget
+        # Normaliser les clés : 'warehouse_stocks' et 'totals' avec reserved/available
+        warehouse_stocks = []
+        total_reserved = 0
+        total_available = 0
+        for wh in details.get('warehouses', []):
+            # 'warehouses' devrait déjà contenir reserved_quantity et available_quantity (si get_product_stock_details a été mis à jour)
+            reserved = wh.get('reserved_quantity', 0)
+            available = wh.get('available_quantity', wh.get('quantity', 0) - reserved)
+            total_reserved += reserved
+            total_available += available
+            warehouse_stocks.append(wh)
+
+        totals = {
+            'total_quantity': details.get('total_quantity', 0),
+            'total_reserved': total_reserved,
+            'total_available': total_available,
+            'total_value': details.get('total_value', 0),
+            'average_unit_cost': details.get('average_unit_cost', 0)
+        }
+
         return {
             'product': {
                 'id': details['product_id'],
                 'name': details['product_name'],
                 'code': details['product_code']
             },
-            'warehouses': details['warehouses'],
-            'totals': {
-                'total_quantity': details['total_quantity'],
-                'total_value': details['total_value'],
-                'average_unit_cost': details['average_unit_cost']
-            }
+            'warehouse_stocks': warehouse_stocks,
+            'totals': totals
         }
     
     def update_stock(self, session: Session, product_id: int, warehouse_id: int, 

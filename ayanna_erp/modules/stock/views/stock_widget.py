@@ -146,13 +146,22 @@ class ProductStockDetailDialog(QDialog):
         summary_layout.addStretch()
         layout.addWidget(summary_group)
         
-        # Tableau des entrepôts
+        # Tableau des entrepôts (détails produit)
         self.warehouses_table = QTableWidget()
         self.warehouses_table.setColumnCount(5)
         self.warehouses_table.setHorizontalHeaderLabels([
             "Entrepôt", "Type", "Quantité", "Min", "Statut"
         ])
         self.warehouses_table.setAlternatingRowColors(True)
+        # Désactiver l'édition directe pour le tableau de détails
+        self.warehouses_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        wh_header = self.warehouses_table.horizontalHeader()
+        wh_header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        self.warehouses_table.setColumnWidth(0, 260)
+        self.warehouses_table.setColumnWidth(1, 120)
+        self.warehouses_table.setColumnWidth(2, 100)
+        self.warehouses_table.setColumnWidth(3, 90)
+        self.warehouses_table.setColumnWidth(4, 120)
         layout.addWidget(self.warehouses_table)
     
     def load_product_details(self):
@@ -202,8 +211,9 @@ class ProductStockDetailDialog(QDialog):
             qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 2, qty_item)
             
-            # Min
-            min_item = QTableWidgetItem(f"{stock['minimum_stock']:.2f}")
+            # Min (compatibilité clés)
+            min_val = stock.get('min_stock_level', stock.get('minimum_stock', 0))
+            min_item = QTableWidgetItem(f"{min_val:.2f}")
             min_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.warehouses_table.setItem(row, 3, min_item)
             
@@ -362,11 +372,20 @@ class StockWidget(QWidget):
         self.stocks_table.doubleClicked.connect(self.show_product_details)
         self.stocks_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.stocks_table.customContextMenuRequested.connect(self.show_context_menu)
-        
-        # Ajuster les colonnes
+        # Désactiver l'édition directe et rendre les colonnes statiques
+        self.stocks_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         header = self.stocks_table.horizontalHeader()
-        header.setStretchLastSection(True)
-        
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
+        # définir des largeurs raisonnables pour chaque colonne
+        self.stocks_table.setColumnWidth(0, 220)  # Produit
+        self.stocks_table.setColumnWidth(1, 90)   # Code
+        self.stocks_table.setColumnWidth(2, 180)  # Entrepôt
+        self.stocks_table.setColumnWidth(3, 90)   # Quantité
+        self.stocks_table.setColumnWidth(4, 80)   # Min
+        self.stocks_table.setColumnWidth(5, 100)  # Coût Unit.
+        self.stocks_table.setColumnWidth(6, 100)  # Valeur
+        self.stocks_table.setColumnWidth(7, 110)  # Statut
+
         layout.addWidget(self.stocks_table)
         
         # Barre d'actions en bas

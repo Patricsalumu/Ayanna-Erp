@@ -18,9 +18,8 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.views.entrepot_widget import EntrepotWidget
 from ayanna_erp.modules.stock.views.stock_widget import StockWidget
 from ayanna_erp.modules.stock.views.movement_widget import MovementWidget as TransfertWidget
-from ayanna_erp.modules.stock.views.alerte_widget import AlerteWidget
 from ayanna_erp.modules.stock.views.inventaire_widget import InventaireWidget
-from ayanna_erp.modules.stock.views.rapport_widget import RapportWidget
+
 
 # Import des contrôleurs pour les statistiques globales
 from ayanna_erp.modules.stock.controllers.stock_controller import StockController
@@ -48,9 +47,7 @@ class ModularStockManagementWidget(QWidget):
         self.entrepot_widget = None
         self.stock_widget = None
         self.transfert_widget = None
-        self.alerte_widget = None
         self.inventaire_widget = None
-        self.rapport_widget = None
         # Dashboard supprimé selon la demande utilisateur
         
         self.setup_ui()
@@ -170,19 +167,12 @@ class ModularStockManagementWidget(QWidget):
             
             # Onglet 3: Mouvements (ancien Transferts)
             self.transfert_widget = TransfertWidget(self.entreprise_id, self.current_user)
-            self.tab_widget.addTab(self.transfert_widget, "� Mouvements")
-            
-            # Onglet 4: Alertes
-            self.alerte_widget = AlerteWidget(self.entreprise_id, self.current_user)
-            self.tab_widget.addTab(self.alerte_widget, "🚨 Alertes")
-            
+            self.tab_widget.addTab(self.transfert_widget, "📦 Mouvements")
+
             # Onglet 5: Inventaires
             self.inventaire_widget = InventaireWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.inventaire_widget, "📋 Inventaires")
-            
-            # Onglet 6: Rapports
-            self.rapport_widget = RapportWidget(self.entreprise_id, self.current_user)
-            self.tab_widget.addTab(self.rapport_widget, "📊 Rapports")
+
             
             self.update_status("✅ Tous les modules chargés avec succès")
             
@@ -207,19 +197,10 @@ class ModularStockManagementWidget(QWidget):
                 self.transfert_widget.movement_created.connect(self.on_movement_created)
                 self.transfert_widget.movement_updated.connect(self.on_movement_updated)
             
-            # Signaux des alertes
-            if self.alerte_widget:
-                self.alerte_widget.alert_configured.connect(self.on_alert_configured)
-                self.alerte_widget.stock_action_needed.connect(self.on_stock_action_needed)
-            
             # Signaux des inventaires
             if self.inventaire_widget:
                 self.inventaire_widget.inventory_created.connect(self.on_inventory_created)
                 self.inventaire_widget.inventory_completed.connect(self.on_inventory_completed)
-            
-            # Signaux des rapports
-            if self.rapport_widget:
-                self.rapport_widget.report_generated.connect(self.on_report_generated)
             
         except Exception as e:
             print(f"Erreur lors de la connexion des signaux: {e}")
@@ -254,17 +235,11 @@ class ModularStockManagementWidget(QWidget):
         """Basculer vers l'onglet transferts"""
         self.tab_widget.setCurrentIndex(2)
     
-    def switch_to_alerts(self):
-        """Basculer vers l'onglet alertes"""
-        self.tab_widget.setCurrentIndex(3)
     
     def switch_to_inventory(self):
         """Basculer vers l'onglet inventaires"""
         self.tab_widget.setCurrentIndex(4)
     
-    def switch_to_reports(self):
-        """Basculer vers l'onglet rapports"""
-        self.tab_widget.setCurrentIndex(5)
     
     # Gestionnaires de signaux (dashboard supprimé)
     def on_warehouse_updated(self):
@@ -285,10 +260,7 @@ class ModularStockManagementWidget(QWidget):
     def on_movement_updated(self):
         """Quand un mouvement est mis à jour"""
         self.update_status("🔄 Mouvement mis à jour")
-    
-    def on_alert_configured(self):
-        """Quand une alerte est configurée"""
-        self.update_status("🚨 Configuration d'alerte mise à jour")
+        self.alert_generated.emit("INFO", "Mouvement mis à jour")
     
     def on_stock_action_needed(self, product_id: int, action: str):
         """Quand une action de stock est nécessaire"""
@@ -308,11 +280,6 @@ class ModularStockManagementWidget(QWidget):
         self.update_status("📋 Inventaire terminé - Stock mis à jour")
         self.alert_generated.emit("SUCCESS", "Inventaire terminé avec succès")
     
-    def on_report_generated(self, report_data: dict):
-        """Quand un rapport est généré"""
-        report_type = report_data.get('type', 'Rapport')
-        self.update_status(f"📊 Rapport {report_type} généré")
-        self.alert_generated.emit("INFO", f"Rapport {report_type} généré avec succès")
     
     # Actions globales (dashboard supprimé)
     def sync_all_data(self):
@@ -325,9 +292,7 @@ class ModularStockManagementWidget(QWidget):
                 self.entrepot_widget,
                 self.stock_widget,
                 self.transfert_widget,
-                self.alerte_widget,
-                self.inventaire_widget,
-                self.rapport_widget
+                self.inventaire_widget
             ]
             
             for widget in widgets:
@@ -342,15 +307,6 @@ class ModularStockManagementWidget(QWidget):
             self.update_status(f"❌ Erreur de synchronisation: {str(e)}")
             QMessageBox.critical(self, "Erreur", f"Erreur lors de la synchronisation:\n{str(e)}")
     
-    def export_global_data(self):
-        """Exporter toutes les données de stock"""
-        try:
-            # Basculer vers l'onglet rapports pour l'export
-            self.switch_to_reports()
-            self.update_status("📤 Redirection vers les rapports pour export global")
-            
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export global:\n{str(e)}")
     
     def open_global_settings(self):
         """Ouvrir les paramètres globaux du module stock"""
@@ -389,9 +345,7 @@ class ModularStockManagementWidget(QWidget):
             'entrepots': self.entrepot_widget is not None,
             'stocks': self.stock_widget is not None,
             'transferts': self.transfert_widget is not None,
-            'alertes': self.alerte_widget is not None,
             'inventaires': self.inventaire_widget is not None,
-            'rapports': self.rapport_widget is not None,
             # Dashboard supprimé selon la demande utilisateur
             'database': self.check_database_connection()
         }
