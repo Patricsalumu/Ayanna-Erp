@@ -15,6 +15,7 @@ from datetime import datetime, timedelta
 
 from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models import EtatCommande
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class StatCard(QFrame):
@@ -83,6 +84,12 @@ class DashboardAchatsWidget(QWidget):
     
     def __init__(self, achat_controller: AchatController):
         super().__init__()
+        # Récupérer le symbole de la devise dynamique
+        try:
+            self.entreprise_ctrl = EntrepriseController()
+            self.currency = self.entreprise_ctrl.get_currency_symbol()
+        except Exception:
+            self.currency = "FC"
         self.achat_controller = achat_controller
         
         self.setup_ui()
@@ -131,9 +138,9 @@ class DashboardAchatsWidget(QWidget):
         self.commandes_encours_card = StatCard("En Cours", "0", "⏳", "#F39C12")
         self.commandes_validees_card = StatCard("Validées", "0", "✅", "#27AE60")
         # Remplacer 'Montant Total' par 'Total Payés' (somme des AchatDepense)
-        self.total_payes_card = StatCard("Total Payés", "0 €", "💰", "#9B59B6")
+        self.total_payes_card = StatCard("Total Payés", self.entreprise_ctrl.format_amount(0), "💰", "#9B59B6")
         # Nouvelle carte: Montant non payé (somme des commandes non annulées - total payé)
-        self.total_non_payes_card = StatCard("Montant non payé", "0 €", "❗", "#E74C3C")
+        self.total_non_payes_card = StatCard("Montant non payé", self.entreprise_ctrl.format_amount(0), "❗", "#E74C3C")
         # Nouvelle carte: nombre de commandes non payées (count)
         self.commandes_non_payees_card = StatCard("Commandes non payées", "0", "🧾", "#8E44AD")
 
@@ -254,8 +261,8 @@ class DashboardAchatsWidget(QWidget):
         self.total_commandes_card.update_value(total_commandes)
         self.commandes_encours_card.update_value(commandes_encours)
         self.commandes_validees_card.update_value(commandes_validees)
-        self.total_payes_card.update_value(f"{Decimal(total_payes):.2f} €")
-        self.total_non_payes_card.update_value(f"{Decimal(total_non_payes):.2f} €")
+        self.total_payes_card.update_value(self.entreprise_ctrl.format_amount(total_payes))
+        self.total_non_payes_card.update_value(self.entreprise_ctrl.format_amount(total_non_payes))
         self.commandes_non_payees_card.update_value(str(commandes_non_payees_count))
     
     def update_recent_orders(self, commandes):
@@ -275,8 +282,7 @@ class DashboardAchatsWidget(QWidget):
             self.recent_table.setItem(row, 2, QTableWidgetItem(date_str))
             
             # Montant
-            montant_str = f"{commande.montant_total:.2f} €"
-            montant_item = QTableWidgetItem(montant_str)
+            montant_item = QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(commande, 'montant_total', 0)))
             montant_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.recent_table.setItem(row, 3, montant_item)
             
@@ -329,7 +335,7 @@ class DashboardAchatsWidget(QWidget):
                 self.suppliers_table.setItem(row, 1, nb_item)
                 
                 # Montant total
-                montant_item = QTableWidgetItem(f"{stats['montant']:.2f} €")
+                montant_item = QTableWidgetItem(self.entreprise_ctrl.format_amount(stats['montant']))
                 montant_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 self.suppliers_table.setItem(row, 2, montant_item)
         

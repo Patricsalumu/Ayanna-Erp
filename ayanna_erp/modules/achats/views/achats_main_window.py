@@ -36,7 +36,7 @@ class AchatsMainWindow(QMainWindow):
         self.achat_controller = AchatController(pos_id=pos_id)
         
         self.setWindowTitle("Ayanna ERP - Module Achats")
-        self.setMinimumSize(1200, 800)
+        self.setMinimumSize(1200, 700)
         
         self.setup_ui()
         self.connect_signals()

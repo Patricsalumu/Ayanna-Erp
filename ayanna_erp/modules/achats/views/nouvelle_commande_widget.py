@@ -17,6 +17,7 @@ from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models import CoreFournisseur, EtatCommande
 from ayanna_erp.modules.core.models import CoreProduct
 from ayanna_erp.modules.stock.models import StockWarehouse
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ProductSelectionDialog(QDialog):
@@ -26,6 +27,11 @@ class ProductSelectionDialog(QDialog):
         super().__init__(parent)
         self.achat_controller = achat_controller
         self.selected_products = []
+        try:
+            self.entreprise_ctrl = EntrepriseController()
+            self.currency = self.entreprise_ctrl.get_currency_symbol()
+        except Exception:
+            self.currency = "FC"
         
         self.setWindowTitle("Sélectionner des produits")
         self.setModal(True)
@@ -88,7 +94,7 @@ class ProductSelectionDialog(QDialog):
             self.products_table.setItem(row, 1, QTableWidgetItem(product.name))
             
             # Prix
-            prix_str = f"{product.price_unit:.2f} €" if product.price_unit else "0.00 €"
+            prix_str = self.entreprise_ctrl.format_amount(product.price_unit) if product.price_unit else self.entreprise_ctrl.format_amount(0)
             self.products_table.setItem(row, 2, QTableWidgetItem(prix_str))
             
             # Checkbox pour sélection
@@ -131,6 +137,12 @@ class NouvelleCommandeWidget(QWidget):
     def __init__(self, achat_controller: AchatController):
         super().__init__()
         self.achat_controller = achat_controller
+        # Récupérer le symbole de la devise dynamique
+        try:
+            self.entreprise_ctrl = EntrepriseController()
+            self.currency = self.entreprise_ctrl.get_currency_symbol()
+        except Exception:
+            self.currency = "FC"
         self.current_lines = []
         
         self.setup_ui()
@@ -174,7 +186,7 @@ class NouvelleCommandeWidget(QWidget):
         self.remise_spinbox = QDoubleSpinBox()
         self.remise_spinbox.setRange(0, 999999)
         self.remise_spinbox.setDecimals(2)
-        self.remise_spinbox.setSuffix(" €")
+        self.remise_spinbox.setSuffix(f" {self.entreprise_ctrl.get_currency_symbol()}")
         self.remise_spinbox.valueChanged.connect(self.calculate_total)
         info_layout.addRow("Remise globale:", self.remise_spinbox)
         
@@ -242,14 +254,14 @@ class NouvelleCommandeWidget(QWidget):
         totals_group = QGroupBox("Totaux")
         totals_layout = QFormLayout(totals_group)
         
-        self.subtotal_label = QLabel("0.00 €")
+        self.subtotal_label = QLabel(self.entreprise_ctrl.format_amount(0))
         self.subtotal_label.setStyleSheet("font-weight: bold;")
         totals_layout.addRow("Sous-total:", self.subtotal_label)
         
-        self.remise_label = QLabel("0.00 €")
+        self.remise_label = QLabel(self.entreprise_ctrl.format_amount(0))
         totals_layout.addRow("Remise globale:", self.remise_label)
         
-        self.total_label = QLabel("0.00 €")
+        self.total_label = QLabel(self.entreprise_ctrl.format_amount(0))
         self.total_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2C3E50;")
         totals_layout.addRow("Total:", self.total_label)
         
@@ -401,7 +413,7 @@ class NouvelleCommandeWidget(QWidget):
             self.lines_table.setCellWidget(row, 3, discount_spinbox)
             
             # Total ligne
-            total_item = QTableWidgetItem(f"{line['total_ligne']:.2f} €")
+            total_item = QTableWidgetItem(self.entreprise_ctrl.format_amount(line['total_ligne']))
             total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.lines_table.setItem(row, 4, total_item)
             
@@ -445,7 +457,7 @@ class NouvelleCommandeWidget(QWidget):
             line['total_ligne'] = (line['quantite'] * line['prix_unitaire']) - line['remise_ligne']
             
             # Mettre à jour l'affichage
-            total_item = QTableWidgetItem(f"{line['total_ligne']:.2f} €")
+            total_item = QTableWidgetItem(self.entreprise_ctrl.format_amount(line['total_ligne']))
             total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.lines_table.setItem(row, 4, total_item)
     
@@ -474,9 +486,9 @@ class NouvelleCommandeWidget(QWidget):
         remise_globale = Decimal(str(self.remise_spinbox.value()))
         total = subtotal - remise_globale
         
-        self.subtotal_label.setText(f"{subtotal:.2f} €")
-        self.remise_label.setText(f"{remise_globale:.2f} €")
-        self.total_label.setText(f"{total:.2f} €")
+        self.subtotal_label.setText(self.entreprise_ctrl.format_amount(subtotal))
+        self.remise_label.setText(self.entreprise_ctrl.format_amount(remise_globale))
+        self.total_label.setText(self.entreprise_ctrl.format_amount(total))
     
     def validate_form(self):
         """Valide le formulaire"""

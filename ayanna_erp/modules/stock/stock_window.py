@@ -22,7 +22,7 @@ class StockWindow(QMainWindow):
         self.db_manager = DatabaseManager()
         
         self.setWindowTitle("Ayanna ERP - Gestion de Stock (Architecture Modulaire)")
-        self.setMinimumSize(1400, 900)  # Taille augmentée pour le dashboard
+        self.setMinimumSize(1200, 700)  # Taille augmentée pour le dashboard
         
         self.setup_ui()
     

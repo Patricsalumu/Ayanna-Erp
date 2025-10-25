@@ -286,13 +286,22 @@ class EntrepriseController(QObject):
             str: Montant formaté
         """
         try:
+            # Assurer un float
+            val = float(amount) if amount is not None else 0.0
+            # Format avec séparateur de milliers (virgule par défaut), puis remplacer la virgule par un espace
+            formatted = format(val, ",.2f").replace(',', ' ')
             if show_symbol:
                 symbol = self.get_currency_symbol(enterprise_id)
-                return f"{amount:.2f} {symbol}"
+                return f"{formatted} {symbol}"
             else:
+                return formatted
+        except Exception:
+            try:
+                # Fallback simple
+                val = float(amount)
+                return f"{val:.2f} {self.get_currency_symbol(enterprise_id)}"
+            except Exception:
                 return f"{amount:.2f}"
-        except:
-            return f"{amount:.2f} €"  # Fallback
     
     def get_all_enterprises(self):
         """

@@ -15,6 +15,7 @@ from datetime import datetime
 from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models.achats_models import AchatCommande, EtatCommande
 from ayanna_erp.core.config import Config
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class PaiementDialog(QDialog):
@@ -24,6 +25,12 @@ class PaiementDialog(QDialog):
         super().__init__(parent)
         self.commande = commande
         self.montant_restant = montant_restant
+        # Récupérer le symbole de la devise dynamique
+        try:
+            self.entreprise_ctrl = EntrepriseController()
+            self.currency = self.entreprise_ctrl.get_currency_symbol()
+        except Exception:
+            self.currency = "FC"
         self.setWindowTitle(f"Paiement - Commande {commande.numero}")
         self.setFixedSize(420, 320)
         self.setup_ui()
@@ -35,8 +42,8 @@ class PaiementDialog(QDialog):
         form = QFormLayout(info)
         form.addRow("N°:", QLabel(self.commande.numero))
         form.addRow("Fournisseur:", QLabel(self.commande.fournisseur.nom if self.commande.fournisseur else "N/A"))
-        form.addRow("Montant total:", QLabel(f"{self.commande.montant_total:.2f} €"))
-        form.addRow("Montant restant:", QLabel(f"{self.montant_restant:.2f} €"))
+        form.addRow("Montant total:", QLabel(self.entreprise_ctrl.format_amount(self.commande.montant_total)))
+        form.addRow("Montant restant:", QLabel(self.entreprise_ctrl.format_amount(self.montant_restant)))
         layout.addWidget(info)
 
         pay_group = QGroupBox("Nouveau paiement")
@@ -45,7 +52,8 @@ class PaiementDialog(QDialog):
         self.montant_spinbox.setRange(0.01, float(self.montant_restant))
         self.montant_spinbox.setDecimals(2)
         self.montant_spinbox.setValue(float(self.montant_restant))
-        self.montant_spinbox.setSuffix(" €")
+        # Spinbox suffix: afficher le symbole (sans le montant formaté)
+        self.montant_spinbox.setSuffix(f" {self.entreprise_ctrl.get_currency_symbol()}")
         pay_form.addRow("Montant*:", self.montant_spinbox)
 
         self.mode_combo = QComboBox()
@@ -86,6 +94,12 @@ class CommandesWidget(QWidget):
     def __init__(self, achat_controller: AchatController):
         super().__init__()
         self.achat_controller = achat_controller
+        # Récupérer le symbole de la devise dynamique pour affichage
+        try:
+            self.entreprise_ctrl = EntrepriseController()
+            self.currency = self.entreprise_ctrl.get_currency_symbol()
+        except Exception:
+            self.currency = "FC"
         self.current_commandes = []
         self.setup_ui()
         self.refresh_data()
@@ -240,7 +254,7 @@ class CommandesWidget(QWidget):
             self.table.setItem(row, 2, QTableWidgetItem(commande.fournisseur.nom if commande.fournisseur else "Aucun"))
             date_str = commande.date_commande.strftime("%d/%m/%Y %H:%M") if commande.date_commande else ""
             self.table.setItem(row, 3, QTableWidgetItem(date_str))
-            montant = QTableWidgetItem(f"{commande.montant_total:.2f} €")
+            montant = QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(commande, 'montant_total', 0)))
             montant.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 4, montant)
 
@@ -252,7 +266,7 @@ class CommandesWidget(QWidget):
                     total_paye = sum(d.montant for d in commande.depenses) if commande.depenses else 0
                 except Exception:
                     total_paye = 0
-            paye_item = QTableWidgetItem(f"{total_paye:.2f} €")
+            paye_item = QTableWidgetItem(self.entreprise_ctrl.format_amount(total_paye))
             paye_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.table.setItem(row, 5, paye_item)
 
@@ -329,7 +343,7 @@ class CommandesWidget(QWidget):
             self.detail_fournisseur.setText(cmd.fournisseur.nom if cmd.fournisseur else "Aucun")
             self.detail_entrepot.setText(str(cmd.entrepot_id or "Non spécifié"))
             self.detail_date.setText(cmd.date_commande.strftime("%d/%m/%Y %H:%M"))
-            self.detail_montant.setText(f"{cmd.montant_total:.2f} €")
+            self.detail_montant.setText(self.entreprise_ctrl.format_amount(getattr(cmd, 'montant_total', 0)))
             # calculs paiements
             try:
                 total_paye = cmd.total_paye if hasattr(cmd, 'total_paye') else (sum(d.montant for d in cmd.depenses) if cmd.depenses else Decimal('0'))
@@ -349,7 +363,7 @@ class CommandesWidget(QWidget):
                 else:
                     statut = "partiel"
 
-            self.detail_total_paye.setText(f"{Decimal(total_paye):.2f} €")
+            self.detail_total_paye.setText(self.entreprise_ctrl.format_amount(total_paye))
             self.detail_statut_paiement.setText(str(statut).replace('_', ' ').title())
             self.detail_etat.setText(cmd.etat.value.title())
 
@@ -362,16 +376,16 @@ class CommandesWidget(QWidget):
                     prod_name = f"Produit {ligne.produit_id}"
                 self.lignes_table.setItem(r, 0, QTableWidgetItem(prod_name))
                 self.lignes_table.setItem(r, 1, QTableWidgetItem(str(ligne.quantite)))
-                self.lignes_table.setItem(r, 2, QTableWidgetItem(f"{ligne.prix_unitaire:.2f} €"))
-                self.lignes_table.setItem(r, 3, QTableWidgetItem(f"{ligne.remise_ligne:.2f} €"))
-                self.lignes_table.setItem(r, 4, QTableWidgetItem(f"{ligne.total_ligne:.2f} €"))
+                self.lignes_table.setItem(r, 2, QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(ligne, 'prix_unitaire', 0))))
+                self.lignes_table.setItem(r, 3, QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(ligne, 'remise_ligne', 0))))
+                self.lignes_table.setItem(r, 4, QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(ligne, 'total_ligne', 0))))
 
             # paiements
             try:
                 self.paiements_table.setRowCount(len(cmd.depenses))
                 for r, d in enumerate(cmd.depenses):
                     self.paiements_table.setItem(r, 0, QTableWidgetItem(d.date_paiement.strftime("%d/%m/%Y")))
-                    self.paiements_table.setItem(r, 1, QTableWidgetItem(f"{d.montant:.2f} €"))
+                    self.paiements_table.setItem(r, 1, QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(d, 'montant', 0))))
                     self.paiements_table.setItem(r, 2, QTableWidgetItem(d.mode_paiement or "N/A"))
                     self.paiements_table.setItem(r, 3, QTableWidgetItem(d.reference or "N/A"))
             except Exception:
@@ -425,7 +439,7 @@ class CommandesWidget(QWidget):
                 try:
                     success = self.achat_controller.process_paiement_commande(session, commande_id, montant, mode, ref)
                     if success:
-                        QMessageBox.information(self, "Succès", f"Paiement de {montant:.2f} enregistré")
+                        QMessageBox.information(self, "Succès", f"Paiement de {self.entreprise_ctrl.format_amount(montant)} enregistré")
                         self.refresh_data()
                 except Exception as e:
                     QMessageBox.critical(self, "Erreur", f"Erreur paiement: {e}")
@@ -570,7 +584,7 @@ class CommandesWidget(QWidget):
                 ['Date', commande.date_commande.strftime('%d/%m/%Y %H:%M')],
                 ['État', commande.etat.value.title()],
                 ['Statut paiement', str(statut).replace('_',' ').title()],
-                ['Montant payé', f"{Decimal(total_paye):.2f} {ent_ctrl.get_currency_symbol()}"]
+                ['Montant payé', ent_ctrl.format_amount(total_paye)]
             ]
             meta_table = Table(meta_data, colWidths=[80*mm, None])
             meta_table.setStyle(TableStyle([
@@ -589,7 +603,7 @@ class CommandesWidget(QWidget):
                     pname = l.product.name if l.product else f"Produit {l.produit_id}"
                 except Exception:
                     pname = f"Produit {l.produit_id}"
-                items.append([pname, str(l.quantite), f"{l.prix_unitaire:.2f}", f"{getattr(l,'remise_ligne',0):.2f}", f"{l.total_ligne:.2f}"])
+                items.append([pname, str(l.quantite), ent_ctrl.format_amount(getattr(l, 'prix_unitaire', 0)), ent_ctrl.format_amount(getattr(l, 'remise_ligne', 0)), ent_ctrl.format_amount(getattr(l, 'total_ligne', 0))])
 
             tbl = Table(items, colWidths=[None, 25*mm, 30*mm, 30*mm, 35*mm])
             tbl.setStyle(TableStyle([
@@ -606,9 +620,9 @@ class CommandesWidget(QWidget):
             # Totals
             remainder = Decimal(commande.montant_total) - Decimal(total_paye)
             totals_paras = []
-            totals_paras.append(Paragraph(f"<b>Total commande: {commande.montant_total:.2f} {ent_ctrl.get_currency_symbol()}</b>", normal))
-            totals_paras.append(Paragraph(f"Montant payé: {Decimal(total_paye):.2f} {ent_ctrl.get_currency_symbol()}", normal))
-            totals_paras.append(Paragraph(f"<b>Reste à payer: {remainder:.2f} {ent_ctrl.get_currency_symbol()}</b>", normal))
+            totals_paras.append(Paragraph(f"<b>Total commande: {ent_ctrl.format_amount(commande.montant_total)}</b>", normal))
+            totals_paras.append(Paragraph(f"Montant payé: {ent_ctrl.format_amount(total_paye)}", normal))
+            totals_paras.append(Paragraph(f"<b>Reste à payer: {ent_ctrl.format_amount(remainder)}</b>", normal))
             for p in totals_paras:
                 flow.append(p)
                 flow.append(Spacer(1,4))

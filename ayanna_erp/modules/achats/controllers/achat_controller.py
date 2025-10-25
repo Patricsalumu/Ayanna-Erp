@@ -12,6 +12,7 @@ from ayanna_erp.modules.achats.models import (
 from ayanna_erp.modules.core.models import CoreProduct
 from ayanna_erp.modules.stock.models import StockWarehouse, StockProduitEntrepot, StockMovement
 from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaEcritures, ComptaJournaux, ComptaConfig
+from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class AchatController:
@@ -386,7 +387,12 @@ class AchatController:
                 libelle=f"Dette fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
             )
             session.add(ecriture_credit_achat)
-            print(f"✅ Journal d'achat créé (ID {journal_commande.id}) - {commande.montant_total}$")
+            try:
+                ent_ctrl = EntrepriseController(entreprise_id=self.entreprise_id)
+                montant_fmt = ent_ctrl.format_amount(commande.montant_total)
+            except Exception:
+                montant_fmt = str(commande.montant_total)
+            print(f"✅ Journal d'achat créé (ID {journal_commande.id}) - {montant_fmt}")
             session.flush()
             print("✅ Toutes les écritures ont été enregistrées avec succès.")
 
@@ -413,7 +419,7 @@ class AchatController:
             if depense and depense.montant and depense.montant > 0:
                 journal_paiement = ComptaJournaux(
                     date_operation=datetime.now(),
-                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}",
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'} - {commande.numero}",
                     montant=depense.montant,
                     type_operation="Sortie",
                     reference=f"PAY-{commande.numero}",
@@ -447,7 +453,12 @@ class AchatController:
                 )
                 session.add(ecriture_credit_paiement)
 
-                print(f"✅ Journal de paiement créé (ID {journal_paiement.id}) - {depense.montant}$")
+                try:
+                    ent_ctrl = EntrepriseController(entreprise_id=self.entreprise_id)
+                    montant_fmt = ent_ctrl.format_amount(depense.montant)
+                except Exception:
+                    montant_fmt = str(depense.montant)
+                print(f"✅ Journal de paiement créé (ID {journal_paiement.id}) - {montant_fmt}")
 
             session.flush()
             print("✅ Toutes les écritures ont été enregistrées avec succès.")

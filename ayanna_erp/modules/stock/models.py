@@ -87,7 +87,7 @@ class StockMovement(Base):
     
     id = Column(Integer, primary_key=True, autoincrement=True)
     product_id = Column(Integer, nullable=False)  # Référence au produit
-    warehouse_id = Column(Integer, ForeignKey('stock_warehouses.id'), nullable=False)  # Entrepôt source
+    warehouse_id = Column(Integer, ForeignKey('stock_warehouses.id'), nullable=True)  # Entrepôt source
     product_warehouse_id = Column(Integer, ForeignKey('stock_produits_entrepot.id'))  # Référence à la liaison produit-entrepôt
     movement_type = Column(String(50), nullable=False)  # ENTREE, SORTIE, TRANSFERT, AJUSTEMENT, INVENTAIRE
     quantity = Column(Numeric(15, 3), nullable=False)  # Quantité (+ ou -)

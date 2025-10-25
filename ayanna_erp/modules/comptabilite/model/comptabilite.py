@@ -113,6 +113,7 @@ class ComptaConfig(Base):
     compte_caisse_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte caisse (classe 5)
     compte_banque_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte banque (classe 5)
     compte_stock_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte stock (classe 3)
+    compte_variation_stock_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True) #compte charger (classe 6)
     compte_client_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte client (classe 4)
     compte_fournisseur_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)  # Compte fournisseur (classe 4)
     compte_vente_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)    # Compte vente (classe 7)
@@ -136,6 +137,7 @@ class ComptaConfig(Base):
     compte_fournisseur = relationship("ComptaComptes", foreign_keys=[compte_fournisseur_id])
     compte_vente = relationship("ComptaComptes", foreign_keys=[compte_vente_id])
     compte_achat = relationship("ComptaComptes", foreign_keys=[compte_achat_id])
+    compte_stock = relationship("ComptaComptes", foreign_keys=[compte_stock_id])
     compte_tva = relationship("ComptaComptes", foreign_keys=[compte_tva_id])
     compte_remise = relationship("ComptaComptes", foreign_keys=[compte_remise_id])
     
