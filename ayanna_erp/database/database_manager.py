@@ -313,9 +313,17 @@ class DatabaseManager:
             
             # Insérer quelques comptes de base essentiels
             comptes_default = [
+                
+                # Classe 4 - Comptes de tiers
+                {"numero": "100", "nom": "Capital social", "libelle": "Capital Social", "classe": "1"},
+                {"numero": "101", "nom": "Apport des assosiés", "libelle": "Apports des associés", "classe": "1"},
+                
                 # Classe 4 - Comptes de tiers
                 {"numero": "411", "nom": "Clients", "libelle": "Clients ordinaires", "classe": "4"},
                 {"numero": "401", "nom": "Fournisseurs", "libelle": "Fournisseurs ordinaires", "classe": "4"},
+                
+                # Classe 3 - Comptes de stocks
+                {"numero": "304", "nom": "Stocks des marchandises", "libelle": "Stocks des marchandises", "classe": "3"},
                 
                 # Classe 5 - Comptes de trésorerie
                 {"numero": "57", "nom": "Caisse", "libelle": "Caisse générale", "classe": "5"},
@@ -323,20 +331,18 @@ class DatabaseManager:
                 
                 # Classe 6 - Comptes de charges
                 {"numero": "601", "nom": "Achats stockés - matières premières", "libelle": "Achats de matières premières", "classe": "6"},
-                {"numero": "604", "nom": "Achats stockés - matières consommables", "libelle": "Achats de matières et fournitures consommables", "classe": "6"},
+                {"numero": "604", "nom": "Achats Marchandises - ", "libelle": "Marchandises consomables", "classe": "6"},
                 {"numero": "622", "nom": "Rémunérations intermédiaires et honoraires", "libelle": "Rémunérations d'intermédiaires et honoraires", "classe": "6"},
                 {"numero": "624", "nom": "Transports", "libelle": "Transports sur achats et ventes", "classe": "6"},
+                {"numero": "680", "nom": "Remises", "libelle": "Compte des remises", "classe": "6"},
                 
                 # Classe 7 - Comptes de produits
-                {"numero": "701", "nom": "Ventes marchandises", "libelle": "Ventes de marchandises dans la région", "classe": "7"},
-                {"numero": "706", "nom": "Services vendus", "libelle": "Services vendus dans la région", "classe": "7"},
-                {"numero": "709", "nom": "Remises accordées", "libelle": "Remises, rabais et ristournes accordés", "classe": "7"},
-                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers de gestion courante", "classe": "7"},
+                {"numero": "701", "nom": "Ventes marchandises", "libelle": "Ventes de marchandises", "classe": "7"},
+                {"numero": "706", "nom": "Services vendus", "libelle": "Services vendus", "classe": "7"},
+                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers vendus", "classe": "7"},
                 
                 # Classe 44 - Comptes de taxes (TVA)
                 {"numero": "4431", "nom": "TVA collectée", "libelle": "TVA collectée sur ventes", "classe": "44"},
-                {"numero": "4432", "nom": "TVA déductible", "libelle": "TVA déductible sur achats", "classe": "44"},
-                {"numero": "4434", "nom": "TVA due", "libelle": "TVA due à l'État", "classe": "44"},
             ]
             
             comptes_created = {}
@@ -379,7 +385,12 @@ class DatabaseManager:
                         compte_client_id=comptes_created.get("411").id if comptes_created.get("411") else None,
                         compte_fournisseur_id=comptes_created.get("401").id if comptes_created.get("401") else None,
                         compte_vente_id=comptes_created.get("701").id if comptes_created.get("701") else None,
-                        compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None
+                        compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None,
+                        compte_stock_id=comptes_created.get("304").id if comptes_created.get("304") else None,
+                        compte_variation_stock_id=comptes_created.get("604").id if comptes_created.get("604") else None,
+                        compte_tva_id=comptes_created.get("4431").id if comptes_created.get("4431") else None,
+                        compte_remise_id =comptes_created.get("680").id if comptes_created.get("680") else None
+                        
                     )
                     session.add(config)
                     print(f"✅ Configuration comptable créée pour POS: {pos.name}")
@@ -515,7 +526,6 @@ class Entreprise(Base):
     
     # Relations
     users = relationship("User", back_populates="enterprise")
-    partners = relationship("Partner", back_populates="enterprise")
     pos_points = relationship("POSPoint", back_populates="enterprise")
 
 
@@ -542,20 +552,6 @@ class User(Base):
         return bcrypt.checkpw(password.encode('utf-8'), self.password.encode('utf-8'))
 
 
-class Partner(Base):
-    __tablename__ = "core_partners"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    enterprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
-    name = Column(String(255), nullable=False)
-    email = Column(String(100))
-    phone = Column(String(50))
-    address = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    
-    # Relations
-    enterprise = relationship("Entreprise", back_populates="partners")
-
 
 class Module(Base):
     __tablename__ = "modules"
@@ -581,19 +577,6 @@ class POSPoint(Base):
     # Relations
     enterprise = relationship("Entreprise", back_populates="pos_points")
     module = relationship("Module", back_populates="pos_points")
-
-
-class PaymentMethod(Base):
-    __tablename__ = "module_payment_methods"
-    
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    module_id = Column(Integer, ForeignKey('modules.id'), nullable=False)
-    pos_id = Column(Integer, ForeignKey('core_pos_points.id'), nullable=False)
-    name = Column(String(100), nullable=False)
-    account_id = Column(Integer, ForeignKey('compta_comptes.id'))
-    is_default = Column(Boolean, default=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 # Instance globale du gestionnaire de base de données

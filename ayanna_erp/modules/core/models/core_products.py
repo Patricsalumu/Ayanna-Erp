@@ -25,9 +25,7 @@ class CoreProduct(Base):
     
     # Prix et coûts
     cost = Column(Numeric(15, 2), default=0.0)  # Coût d'achat
-    cost_price = Column(Numeric(15, 2), default=0.0)  # Prix de revient
     price_unit = Column(Numeric(15, 2), default=0.0)  # Prix de vente unitaire
-    sale_price = Column(Numeric(15, 2), default=0.0)  # Prix de vente au public
     
     # Informations de stock (informatives, le vrai stock est dans stock_produits_entrepot)
     unit = Column(String(50), default='pièce')  # Unité de mesure

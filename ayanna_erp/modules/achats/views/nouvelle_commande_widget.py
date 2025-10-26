@@ -94,7 +94,7 @@ class ProductSelectionDialog(QDialog):
             self.products_table.setItem(row, 1, QTableWidgetItem(product.name))
             
             # Prix
-            prix_str = self.entreprise_ctrl.format_amount(product.price_unit) if product.price_unit else self.entreprise_ctrl.format_amount(0)
+            prix_str = self.entreprise_ctrl.format_amount(product.cost) if product.cost else self.entreprise_ctrl.format_amount(0)
             self.products_table.setItem(row, 2, QTableWidgetItem(prix_str))
             
             # Checkbox pour sélection
@@ -372,9 +372,9 @@ class NouvelleCommandeWidget(QWidget):
         line_data = {
             'product': product,
             'quantite': Decimal('1'),
-            'prix_unitaire': Decimal(str(product.price_unit or 0)),
+            'prix_unitaire': Decimal(str(product.cost or 0)),
             'remise_ligne': Decimal('0'),
-            'total_ligne': Decimal(str(product.price_unit or 0))
+            'total_ligne': Decimal(str(product.cost or 0))
         }
         
         self.current_lines.append(line_data)
