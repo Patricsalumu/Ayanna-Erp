@@ -9,6 +9,7 @@ from ayanna_erp.modules.achats.models import (
     CoreFournisseur, AchatCommande, AchatCommandeLigne, 
     AchatDepense, EtatCommande
 )
+from ayanna_erp.modules.salle_fete.model import EventExpense
 from ayanna_erp.modules.core.models import CoreProduct
 from ayanna_erp.modules.stock.models import StockWarehouse, StockProduitEntrepot, StockMovement
 from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaEcritures, ComptaJournaux, ComptaConfig
@@ -303,6 +304,18 @@ class AchatController:
             )
             session.add(depense)
             session.flush()  # Pour obtenir l'ID
+            
+            # Créer l'enregistrement de dépense dans event_expense
+            event_expense = EventExpense(
+                amount=montant,
+                pos_id = 1, #TODO a implementer
+                expense_type = 'Achat',
+                payment_method=mode_paiement,
+                description =f"Achat Marchandise - commande {commande.numero}",
+                account_id = 1,
+                expense_date=datetime.now()
+            )
+            session.add(event_expense)
             
             # Créer l'écriture comptable
             self.create_ecriture_comptable_achat(session, commande, depense)

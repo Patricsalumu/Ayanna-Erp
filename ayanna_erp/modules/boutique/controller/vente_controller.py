@@ -49,7 +49,7 @@ class VenteController:
 
                 # Générer numéro de commande unique
                 import random
-                numero_commande = f"CMD-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(100, 999)}"
+                numero_commande = f"FAC-{datetime.now().strftime('%Y%m%d%H%M%S')}-{random.randint(100, 999)}"
 
                 # 1. Créer le panier (toujours, même si pas payé)
                 panier_result = session.execute(text("""

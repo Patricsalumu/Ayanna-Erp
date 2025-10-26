@@ -52,7 +52,7 @@ class ProduitController(CoreProductController):
                 FROM shop_paniers_products spp
                 JOIN shop_paniers sp ON spp.panier_id = sp.id
                 WHERE spp.product_id = :product_id
-                AND sp.status = 'completed'
+                AND sp.status != 'Annulle' 
                 AND sp.pos_id = :pos_id
             """)
 
@@ -154,22 +154,22 @@ class ProduitController(CoreProductController):
                 processed_movement_ids.add(movement.id)
                 
                 # Déterminer le type de mouvement basé sur les entrepôts source/destination
-                if movement.warehouse_id is None and movement.destination_warehouse_id == pos_warehouse.id:
+                if movement.warehouse_id ==pos_warehouse.id and movement.destination_warehouse_id == None:
                     # Achat/réception : warehouse_id null, destination_warehouse_id = POS_2
-                    movement_type_display = "ACHAT/RÉCEPTION"
-                    source_display = "Fournisseur/Externe"
+                    movement_type_display = "ACHAT"
+                    source_display = ""
                     quantity_display = f"+{float(movement.quantity):.2f}"
-                elif movement.warehouse_id == pos_warehouse.id and movement.destination_warehouse_id is None:
+                elif movement.warehouse_id == pos_warehouse.id and movement.destination_warehouse_id ==pos_warehouse.id:
                     # Vente : warehouse_id = POS_2, destination_warehouse_id null
                     movement_type_display = "VENTE"
-                    source_display = "Client"
+                    source_display = ""
                     quantity_display = f"{float(movement.quantity):.2f}"
-                elif movement.warehouse_id is not None and movement.destination_warehouse_id is not None:
+                elif movement.movement_type =='TRANSFERT':
                     # Transfert entre entrepôts
                     if movement.warehouse_id == pos_warehouse.id:
                         # Sortie de POS_2 vers un autre entrepôt
                         dest_warehouse = session.query(StockWarehouse).get(movement.destination_warehouse_id)
-                        movement_type_display = "TRANSFERT SORTIE"
+                        movement_type_display = "TRANSFERT"
                         source_display = f"Vers {dest_warehouse.name if dest_warehouse else 'Entrepôt inconnu'}"
                         quantity_display = f"{float(movement.quantity):.2f}"
                     else:
