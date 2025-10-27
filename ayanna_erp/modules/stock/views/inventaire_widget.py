@@ -12,7 +12,8 @@ from PyQt6.QtWidgets import (
     QLineEdit, QComboBox, QTableWidget, QTableWidgetItem, QHeaderView, 
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit, 
     QDoubleSpinBox, QSpinBox, QCheckBox, QTabWidget, QTreeWidget, 
-    QTreeWidgetItem, QSplitter, QProgressBar, QFrame, QDateEdit, QFileDialog
+    QTreeWidgetItem, QSplitter, QProgressBar, QFrame, QDateEdit, QFileDialog,
+    QGridLayout
 )
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, A4
@@ -591,7 +592,9 @@ class CountingDialog(QDialog):
             
             # Récupérer les données de l'inventaire
             with self.controller.db_manager.get_session() as session:
-                inventory = session.query(StockInventaire).filter(StockInventaire.id == self.inventory_id).first()
+                # Charger l'inventaire avec sa relation warehouse
+                from sqlalchemy.orm import joinedload
+                inventory = session.query(StockInventaire).options(joinedload(StockInventaire.warehouse)).filter(StockInventaire.id == self.inventory_id).first()
                 if not inventory:
                     QMessageBox.critical(self, "Erreur", "Inventaire non trouvé")
                     return
@@ -810,6 +813,651 @@ class CountingDialog(QDialog):
         story.append(Paragraph(f"Le {datetime.now().strftime('%d/%m/%Y à %H:%M')}", footer_style))
         
         # Générer le PDF
+        doc.build(story)
+
+
+class InventoryDetailsDialog(QDialog):
+    """Dialog pour afficher les détails complets d'un inventaire"""
+
+    def __init__(self, parent, inventory_id: int, controller: InventaireController):
+        super().__init__(parent)
+        self.inventory_id = inventory_id
+        self.controller = controller
+        self.db_manager = DatabaseManager()
+
+        # Récupérer entreprise_id depuis le parent
+        self.entreprise_id = getattr(parent, 'entreprise_id', 1)
+
+        self.setWindowTitle("Détails de l'Inventaire")
+        self.setModal(True)
+        self.resize(1200, 800)
+
+        self.setup_ui()
+        self.load_inventory_data()
+
+    def setup_ui(self):
+        """Configuration de l'interface"""
+        layout = QVBoxLayout(self)
+
+        # En-tête avec titre
+        header_layout = QHBoxLayout()
+        title_label = QLabel("📊 Détails de l'Inventaire")
+        title_label.setFont(QFont("Arial", 18, QFont.Weight.Bold))
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        # Boutons d'action
+        self.export_pdf_btn = QPushButton("📄 Exporter PDF")
+        self.export_pdf_btn.clicked.connect(self.export_pdf)
+        header_layout.addWidget(self.export_pdf_btn)
+
+        self.export_excel_btn = QPushButton("📊 Exporter Excel")
+        self.export_excel_btn.clicked.connect(self.export_excel)
+        header_layout.addWidget(self.export_excel_btn)
+
+        header_layout.addStretch()
+
+        close_btn = QPushButton("Fermer")
+        close_btn.clicked.connect(self.accept)
+        header_layout.addWidget(close_btn)
+
+        layout.addLayout(header_layout)
+
+        # Informations générales
+        self.setup_general_info(layout)
+
+        # Onglets pour organiser les informations
+        tabs = QTabWidget()
+
+        # Onglet Produits
+        products_tab = self.create_products_tab()
+        tabs.addTab(products_tab, "📦 Produits")
+
+        # Onglet Statistiques
+        stats_tab = self.create_statistics_tab()
+        tabs.addTab(stats_tab, "📈 Statistiques")
+
+        # Onglet Historique
+        history_tab = self.create_history_tab()
+        tabs.addTab(history_tab, "📋 Historique")
+
+        layout.addWidget(tabs)
+
+    def setup_general_info(self, layout):
+        """Configurer la section des informations générales"""
+        info_group = QGroupBox("Informations Générales")
+        info_layout = QFormLayout(info_group)
+
+        # Labels pour afficher les informations
+        self.reference_label = QLabel()
+        self.reference_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        info_layout.addRow("Référence:", self.reference_label)
+
+        self.session_label = QLabel()
+        info_layout.addRow("Session:", self.session_label)
+
+        self.warehouse_label = QLabel()
+        info_layout.addRow("Entrepôt:", self.warehouse_label)
+
+        self.status_label = QLabel()
+        info_layout.addRow("Statut:", self.status_label)
+
+        self.created_date_label = QLabel()
+        info_layout.addRow("Date de création:", self.created_date_label)
+
+        self.progress_label = QLabel()
+        info_layout.addRow("Progression:", self.progress_label)
+
+        layout.addWidget(info_group)
+
+    def create_products_tab(self) -> QWidget:
+        """Créer l'onglet des produits"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Filtres
+        filters_layout = QHBoxLayout()
+
+        filters_layout.addWidget(QLabel("Filtrer:"))
+        self.product_filter = QLineEdit()
+        self.product_filter.setPlaceholderText("Nom du produit...")
+        self.product_filter.textChanged.connect(self.filter_products)
+        filters_layout.addWidget(self.product_filter)
+
+        filters_layout.addWidget(QLabel("Écart:"))
+        self.variance_filter = QComboBox()
+        self.variance_filter.addItems(["Tous", "Avec écart", "Sans écart", "Écart positif", "Écart négatif"])
+        self.variance_filter.currentTextChanged.connect(self.filter_products)
+        filters_layout.addWidget(self.variance_filter)
+
+        filters_layout.addStretch()
+        layout.addLayout(filters_layout)
+
+        # Table des produits
+        self.products_table = QTableWidget()
+        self.products_table.setColumnCount(8)
+        self.products_table.setHorizontalHeaderLabels([
+            "Produit", "Stock Système", "Stock Compté", "Écart", "Écart %",
+            "Valeur Écart Achat", "Valeur Écart Vente", "Statut"
+        ])
+        self.products_table.setAlternatingRowColors(True)
+        self.products_table.setSortingEnabled(True)
+        layout.addWidget(self.products_table)
+
+        return widget
+
+    def create_statistics_tab(self) -> QWidget:
+        """Créer l'onglet des statistiques"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Métriques principales
+        metrics_group = QGroupBox("Métriques Principales")
+        metrics_layout = QGridLayout(metrics_group)
+
+        self.total_products_label = QLabel("0")
+        self.total_products_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.total_products_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        metrics_layout.addWidget(QLabel("Total Produits:"), 0, 0)
+        metrics_layout.addWidget(self.total_products_label, 0, 1)
+
+        self.counted_products_label = QLabel("0")
+        self.counted_products_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.counted_products_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        metrics_layout.addWidget(QLabel("Produits Comptés:"), 1, 0)
+        metrics_layout.addWidget(self.counted_products_label, 1, 1)
+
+        self.products_with_variance_label = QLabel("0")
+        self.products_with_variance_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        self.products_with_variance_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        metrics_layout.addWidget(QLabel("Avec Écart:"), 2, 0)
+        metrics_layout.addWidget(self.products_with_variance_label, 2, 1)
+
+        layout.addWidget(metrics_group)
+
+        # Valeurs des écarts
+        values_group = QGroupBox("Valeurs des Écarts")
+        values_layout = QFormLayout(values_group)
+
+        self.total_purchase_variance_label = QLabel("0.00 €")
+        self.total_purchase_variance_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        values_layout.addRow("Écart Total Achat:", self.total_purchase_variance_label)
+
+        self.total_sale_variance_label = QLabel("0.00 €")
+        self.total_sale_variance_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        values_layout.addRow("Écart Total Vente:", self.total_sale_variance_label)
+
+        layout.addWidget(values_group)
+
+        # Graphiques (placeholder pour l'instant)
+        chart_group = QGroupBox("Analyse Visuelle")
+        chart_layout = QVBoxLayout(chart_group)
+
+        chart_placeholder = QLabel("📊 Graphiques d'analyse à implémenter")
+        chart_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        chart_placeholder.setStyleSheet("border: 2px dashed #ccc; padding: 40px; color: #666;")
+        chart_layout.addWidget(chart_placeholder)
+
+        layout.addWidget(chart_group)
+
+        return widget
+
+    def create_history_tab(self) -> QWidget:
+        """Créer l'onglet historique"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+
+        # Table de l'historique des modifications
+        self.history_table = QTableWidget()
+        self.history_table.setColumnCount(5)
+        self.history_table.setHorizontalHeaderLabels([
+            "Date/Heure", "Action", "Produit", "Utilisateur", "Détails"
+        ])
+        self.history_table.setAlternatingRowColors(True)
+        layout.addWidget(self.history_table)
+
+        # Message si pas d'historique
+        no_history_label = QLabel("📝 Historique des modifications à implémenter")
+        no_history_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        no_history_label.setStyleSheet("color: #666; padding: 20px;")
+        layout.addWidget(no_history_label)
+
+        return widget
+
+    def load_inventory_data(self):
+        """Charger toutes les données de l'inventaire"""
+        try:
+            with self.db_manager.get_session() as session:
+                # Charger l'inventaire avec ses relations
+                from sqlalchemy.orm import joinedload
+                inventory = session.query(StockInventaire).options(
+                    joinedload(StockInventaire.warehouse)
+                ).filter(StockInventaire.id == self.inventory_id).first()
+
+                if not inventory:
+                    QMessageBox.critical(self, "Erreur", "Inventaire introuvable")
+                    return
+
+                # Afficher les informations générales
+                self.display_general_info(inventory)
+
+                # Charger les produits
+                self.load_products_data(session, inventory)
+
+                # Calculer et afficher les statistiques
+                self.calculate_statistics()
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des données:\n{str(e)}")
+
+    def display_general_info(self, inventory):
+        """Afficher les informations générales"""
+        self.reference_label.setText(inventory.reference or "N/A")
+        self.session_label.setText(inventory.session_name or "N/A")
+
+        # Entrepôt
+        if inventory.warehouse:
+            self.warehouse_label.setText(f"{inventory.warehouse.name} ({inventory.warehouse.code})")
+        else:
+            self.warehouse_label.setText("N/A")
+
+        # Statut avec couleur
+        status_map = {
+            'DRAFT': ('📝 Brouillon', QColor("#fff3cd")),
+            'IN_PROGRESS': ('🔄 En Cours', QColor("#d1ecf1")),
+            'COMPLETED': ('✅ Terminé', QColor("#d4edda")),
+            'CANCELLED': ('❌ Annulé', QColor("#f8d7da"))
+        }
+        status_text, status_color = status_map.get(inventory.status, (inventory.status, QColor("#ffffff")))
+        self.status_label.setText(status_text)
+        self.status_label.setStyleSheet(f"background-color: {status_color.name()}; padding: 2px 5px; border-radius: 3px;")
+
+        # Date de création
+        if inventory.created_at:
+            self.created_date_label.setText(inventory.created_at.strftime('%d/%m/%Y %H:%M'))
+        else:
+            self.created_date_label.setText("N/A")
+
+        # Progression
+        progress = f"{inventory.counted_items or 0}/{inventory.total_items or 0}"
+        if inventory.total_items and inventory.total_items > 0:
+            percentage = (inventory.counted_items or 0) / inventory.total_items * 100
+            progress += f" ({percentage:.1f}%)"
+        self.progress_label.setText(progress)
+
+    def load_products_data(self, session, inventory):
+        """Charger les données des produits"""
+        products = self.controller.get_inventory_products(session, self.inventory_id)
+
+        self.products_table.setRowCount(len(products))
+        self.all_products_data = products  # Garder une référence pour le filtrage
+
+        for row, product in enumerate(products):
+            # Produit
+            product_name = product.get('product_name', '')
+            self.products_table.setItem(row, 0, QTableWidgetItem(product_name))
+
+            # Stock système
+            system_stock = product.get('system_stock', 0)
+            self.products_table.setItem(row, 1, QTableWidgetItem(f"{system_stock:.2f}"))
+
+            # Stock compté
+            counted_stock = product.get('counted_stock', 0)
+            self.products_table.setItem(row, 2, QTableWidgetItem(f"{counted_stock:.2f}"))
+
+            # Écart
+            variance = product.get('variance', 0)
+            variance_item = QTableWidgetItem(f"{variance:.2f}")
+            if variance != 0:
+                variance_item.setBackground(QColor("#fff3cd"))
+            self.products_table.setItem(row, 3, variance_item)
+
+            # Écart en pourcentage
+            variance_pct = 0
+            if system_stock != 0:
+                variance_pct = (variance / system_stock) * 100
+            variance_pct_item = QTableWidgetItem(f"{variance_pct:.2f}%")
+            if abs(variance_pct) > 5:  # Écart > 5%
+                variance_pct_item.setBackground(QColor("#f8d7da"))
+            self.products_table.setItem(row, 4, variance_pct_item)
+
+            # Valeur écart achat
+            purchase_variance = product.get('variance_value_purchase', 0)
+            self.products_table.setItem(row, 5, QTableWidgetItem(f"{purchase_variance:,.2f} €"))
+
+            # Valeur écart vente
+            sale_variance = product.get('variance_value_sale', 0)
+            self.products_table.setItem(row, 6, QTableWidgetItem(f"{sale_variance:,.2f} €"))
+
+            # Statut
+            if counted_stock == 0 and system_stock == 0:
+                status = "Non inventorié"
+                status_color = QColor("#6c757d")
+            elif variance == 0:
+                status = "Conforme"
+                status_color = QColor("#d4edda")
+            else:
+                status = "Écart détecté"
+                status_color = QColor("#fff3cd")
+
+            status_item = QTableWidgetItem(status)
+            status_item.setBackground(status_color)
+            self.products_table.setItem(row, 7, status_item)
+
+        self.products_table.resizeColumnsToContents()
+
+    def calculate_statistics(self):
+        """Calculer et afficher les statistiques"""
+        if not hasattr(self, 'all_products_data'):
+            return
+
+        products = self.all_products_data
+        total_products = len(products)
+        counted_products = sum(1 for p in products if p.get('counted_stock', 0) > 0)
+        products_with_variance = sum(1 for p in products if p.get('variance', 0) != 0)
+
+        total_purchase_variance = sum(p.get('variance_value_purchase', 0) for p in products)
+        total_sale_variance = sum(p.get('variance_value_sale', 0) for p in products)
+
+        # Mettre à jour les labels
+        self.total_products_label.setText(str(total_products))
+        self.counted_products_label.setText(str(counted_products))
+        self.products_with_variance_label.setText(str(products_with_variance))
+        self.total_purchase_variance_label.setText(f"{total_purchase_variance:,.2f} €")
+        self.total_sale_variance_label.setText(f"{total_sale_variance:,.2f} €")
+
+    def filter_products(self):
+        """Filtrer les produits selon les critères"""
+        if not hasattr(self, 'all_products_data'):
+            return
+
+        filter_text = self.product_filter.text().lower()
+        variance_filter = self.variance_filter.currentText()
+
+        filtered_products = []
+        for product in self.all_products_data:
+            # Filtre par nom
+            name_match = filter_text in product.get('product_name', '').lower()
+
+            # Filtre par écart
+            variance = product.get('variance', 0)
+            if variance_filter == "Tous":
+                variance_match = True
+            elif variance_filter == "Avec écart":
+                variance_match = variance != 0
+            elif variance_filter == "Sans écart":
+                variance_match = variance == 0
+            elif variance_filter == "Écart positif":
+                variance_match = variance > 0
+            elif variance_filter == "Écart négatif":
+                variance_match = variance < 0
+            else:
+                variance_match = True
+
+            if name_match and variance_match:
+                filtered_products.append(product)
+
+        # Mettre à jour la table
+        self.products_table.setRowCount(len(filtered_products))
+        for row, product in enumerate(filtered_products):
+            # Réutiliser la logique de load_products_data pour chaque ligne
+            self.products_table.setItem(row, 0, QTableWidgetItem(product.get('product_name', '')))
+
+            system_stock = product.get('system_stock', 0)
+            self.products_table.setItem(row, 1, QTableWidgetItem(f"{system_stock:.2f}"))
+
+            counted_stock = product.get('counted_stock', 0)
+            self.products_table.setItem(row, 2, QTableWidgetItem(f"{counted_stock:.2f}"))
+
+            variance = product.get('variance', 0)
+            variance_item = QTableWidgetItem(f"{variance:.2f}")
+            if variance != 0:
+                variance_item.setBackground(QColor("#fff3cd"))
+            self.products_table.setItem(row, 3, variance_item)
+
+            variance_pct = (variance / system_stock * 100) if system_stock != 0 else 0
+            variance_pct_item = QTableWidgetItem(f"{variance_pct:.2f}%")
+            if abs(variance_pct) > 5:
+                variance_pct_item.setBackground(QColor("#f8d7da"))
+            self.products_table.setItem(row, 4, variance_pct_item)
+
+            purchase_variance = product.get('variance_value_purchase', 0)
+            self.products_table.setItem(row, 5, QTableWidgetItem(f"{purchase_variance:,.2f} €"))
+
+            sale_variance = product.get('variance_value_sale', 0)
+            self.products_table.setItem(row, 6, QTableWidgetItem(f"{sale_variance:,.2f} €"))
+
+            if counted_stock == 0 and system_stock == 0:
+                status, status_color = "Non inventorié", QColor("#6c757d")
+            elif variance == 0:
+                status, status_color = "Conforme", QColor("#d4edda")
+            else:
+                status, status_color = "Écart détecté", QColor("#fff3cd")
+
+            status_item = QTableWidgetItem(status)
+            status_item.setBackground(status_color)
+            self.products_table.setItem(row, 7, status_item)
+
+        self.products_table.resizeColumnsToContents()
+
+    def export_pdf(self):
+        """Exporter les détails en PDF"""
+        try:
+            from PyQt6.QtWidgets import QFileDialog
+            file_path, _ = QFileDialog.getSaveFileName(
+                self, "Exporter PDF", "", "Fichiers PDF (*.pdf)"
+            )
+
+            if not file_path:
+                return
+
+            # Utiliser la même logique que InventoryReportDialog
+            with self.db_manager.get_session() as session:
+                from sqlalchemy.orm import joinedload
+                inventory = session.query(StockInventaire).options(joinedload(StockInventaire.warehouse)).filter(StockInventaire.id == self.inventory_id).first()
+                if not inventory:
+                    QMessageBox.critical(self, "Erreur", "Inventaire introuvable")
+                    return
+
+                products = self.controller.get_inventory_products(session, self.inventory_id)
+
+            enterprise_info = self.get_enterprise_info()
+            self.generate_inventory_pdf(file_path, inventory, products, enterprise_info)
+
+            QMessageBox.information(self, "Succès", f"PDF exporté avec succès:\n{file_path}")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export PDF:\n{str(e)}")
+
+    def export_excel(self):
+        """Exporter les détails en Excel"""
+        QMessageBox.information(self, "Export Excel", "Fonctionnalité d'export Excel à implémenter.")
+
+    def get_enterprise_info(self) -> Dict[str, Any]:
+        """Récupérer les informations de l'entreprise"""
+        try:
+            with self.controller.db_manager.get_session() as session:
+                result = session.execute(text("""
+                    SELECT name, address, phone, email, rccm, id_nat, logo, slogan, currency
+                    FROM core_enterprises
+                    WHERE id = :enterprise_id
+                """), {"enterprise_id": self.entreprise_id})
+
+                row = result.fetchone()
+                if row:
+                    return {
+                        'name': row[0] or "Entreprise",
+                        'address': row[1] or "",
+                        'phone': row[2] or "",
+                        'email': row[3] or "",
+                        'rccm': row[4] or "",
+                        'id_nat': row[5] or "",
+                        'logo': row[6],
+                        'slogan': row[7] or "",
+                        'currency': row[8] or "FC"
+                    }
+                return {
+                    'name': "Entreprise",
+                    'address': "",
+                    'phone': "",
+                    'email': "",
+                    'rccm': "",
+                    'id_nat': "",
+                    'logo': None,
+                    'slogan': "",
+                    'currency': "FC"
+                }
+        except Exception as e:
+            print(f"Erreur récupération entreprise: {e}")
+            return {
+                'name': "Entreprise",
+                'address': "",
+                'phone': "",
+                'email': "",
+                'rccm': "",
+                'id_nat': "",
+                'logo': None,
+                'slogan': "",
+                'currency': "FC"
+            }
+
+    def generate_inventory_pdf(self, file_path: str, inventory: StockInventaire, products: List[Dict], enterprise: Dict):
+        """Générer le PDF de l'inventaire (réutilise la logique existante)"""
+        doc = SimpleDocTemplate(file_path, pagesize=A4)
+        styles = getSampleStyleSheet()
+        story = []
+
+        # Style personnalisé pour l'en-tête
+        header_style = ParagraphStyle(
+            'Header',
+            parent=styles['Heading1'],
+            fontSize=16,
+            spaceAfter=30,
+            alignment=1
+        )
+
+        # Style pour les informations
+        info_style = ParagraphStyle(
+            'Info',
+            parent=styles['Normal'],
+            fontSize=10,
+            spaceAfter=5
+        )
+
+        # Style pour le footer
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.gray,
+            alignment=1
+        )
+
+        # En-tête avec informations entreprise
+        story.append(Paragraph(enterprise['name'], header_style))
+        story.append(Spacer(1, 0.2*cm))
+
+        if enterprise['address']:
+            story.append(Paragraph(f"Adresse: {enterprise['address']}", info_style))
+        if enterprise['phone']:
+            story.append(Paragraph(f"Téléphone: {enterprise['phone']}", info_style))
+        if enterprise['email']:
+            story.append(Paragraph(f"Email: {enterprise['email']}", info_style))
+
+        story.append(Spacer(1, 0.5*cm))
+
+        # Titre du rapport
+        title_style = ParagraphStyle(
+            'Title',
+            parent=styles['Heading2'],
+            fontSize=14,
+            spaceAfter=20,
+            alignment=1
+        )
+        story.append(Paragraph("RAPPORT DÉTAILLÉ D'INVENTAIRE", title_style))
+        story.append(Spacer(1, 0.3*cm))
+
+        # Informations de l'inventaire
+        inventory_info = [
+            ["Référence:", inventory.reference],
+            ["Session:", inventory.session_name],
+            ["Entrepôt:", getattr(inventory.warehouse, 'name', 'N/A')],
+            ["Date de création:", inventory.created_at.strftime('%d/%m/%Y %H:%M') if inventory.created_at else 'N/A'],
+            ["Statut:", inventory.status],
+            ["Progression:", f"{inventory.counted_items}/{inventory.total_items}" if inventory.total_items else "0/0"]
+        ]
+
+        info_table = Table(inventory_info, colWidths=[3*cm, 10*cm])
+        info_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(info_table)
+        story.append(Spacer(1, 0.5*cm))
+
+        # Statistiques
+        total_purchase_variance = sum(p.get('variance_value_purchase', 0) for p in products)
+        total_sale_variance = sum(p.get('variance_value_sale', 0) for p in products)
+        total_discrepancies = sum(1 for p in products if p.get('variance', 0) != 0)
+
+        stats_data = [
+            ["Total produits:", len(products)],
+            ["Écarts détectés:", total_discrepancies],
+            ["Écart total achat:", f"{enterprise['currency']} {total_purchase_variance:,.2f}"],
+            ["Écart total vente:", f"{enterprise['currency']} {total_sale_variance:,.2f}"]
+        ]
+
+        stats_table = Table(stats_data, colWidths=[4*cm, 9*cm])
+        stats_table.setStyle(TableStyle([
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+            ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ]))
+        story.append(stats_table)
+        story.append(Spacer(1, 0.5*cm))
+
+        # Tableau des produits
+        if products:
+            table_data = [["Produit", "Stock Système", "Stock Compté", "Écart", "Écart Achat", "Écart Vente"]]
+
+            for product in products:
+                table_data.append([
+                    product.get('product_name', ''),
+                    f"{product.get('system_stock', 0):.2f}",
+                    f"{product.get('counted_stock', 0):.2f}",
+                    f"{product.get('variance', 0):.2f}",
+                    f"{enterprise['currency']} {product.get('variance_value_purchase', 0):,.2f}",
+                    f"{enterprise['currency']} {product.get('variance_value_sale', 0):,.2f}"
+                ])
+
+            col_widths = [4*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3*cm, 3*cm]
+            product_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+            product_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.black),
+                ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.whitesmoke]),
+            ]))
+
+            story.append(product_table)
+
+        # Footer
+        story.append(Spacer(1, 1*cm))
+        story.append(Paragraph("Généré par Ayanna ERP - Système de Gestion d'Entreprise", footer_style))
+        story.append(Paragraph(f"Le {datetime.now().strftime('%d/%m/%Y à %H:%M')}", footer_style))
+
         doc.build(story)
 
 
@@ -1233,15 +1881,8 @@ class InventaireWidget(QWidget):
     
     def view_inventory_details(self, inventory):
         """Voir les détails d'un inventaire"""
-        # TODO: Créer un dialog détaillé pour l'inventaire
-        QMessageBox.information(
-            self, "Détails de l'Inventaire",
-            f"Référence: {inventory.get('reference')}\n"
-            f"Session: {inventory.get('session_name')}\n"
-            f"Type: {inventory.get('inventory_type')}\n"
-            f"Statut: {inventory.get('status')}\n"
-            f"Progression: {inventory.get('progress_percentage', 0):.1f}%"
-        )
+        dialog = InventoryDetailsDialog(self, inventory.get('id'), self.controller)
+        dialog.exec()
     
     def open_manual_correction(self):
         """Ouvrir la correction manuelle"""
@@ -1271,6 +1912,8 @@ class InventaireWidget(QWidget):
         super().__init__()
         self.pos_id = pos_id
         self.current_user = current_user
+        # Initialiser db_manager avant d'utiliser get_entreprise_id_from_pos
+        self.db_manager = DatabaseManager()
         # Récupérer entreprise_id depuis pos_id
         self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
         self.controller = InventaireController(self.entreprise_id)
@@ -1281,7 +1924,7 @@ class InventaireWidget(QWidget):
     def get_entreprise_id_from_pos(self, pos_id):
         """Récupérer l'entreprise_id depuis le pos_id"""
         try:
-            with self.controller.db_manager.get_session() as session:
+            with self.db_manager.get_session() as session:
                 result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
                 row = result.fetchone()
                 return row[0] if row else 1  # Par défaut entreprise 1
@@ -1576,8 +2219,8 @@ class InventaireWidget(QWidget):
 
     def view_inventory_details(self, inventory_id: int):
         """Voir les détails d'un inventaire"""
-        # TODO: Implémenter la vue détaillée
-        QMessageBox.information(self, "Détails", f"Fonctionnalité de visualisation détaillée à implémenter pour l'inventaire {inventory_id}")
+        dialog = InventoryDetailsDialog(self, inventory_id, self.controller)
+        dialog.exec()
 
     def open_manual_correction(self):
         """Ouvrir la correction manuelle"""

@@ -89,7 +89,7 @@ class InventaireController:
                             p.code as product_code,
                             COALESCE(spe.quantity, 0) as quantity,
                             COALESCE(spe.reserved_quantity, 0) as reserved_quantity,
-                            COALESCE(spe.unit_cost, p.cost_price, 0) as unit_cost,
+                            COALESCE(spe.unit_cost, p.cost, 0) as unit_cost,
                             COALESCE(spe.min_stock_level, 0) as min_stock_level,
                             sw.name as warehouse_name,
                             sw.id as warehouse_id,
