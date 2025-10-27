@@ -627,6 +627,10 @@ class AchatController:
         # Créer mouvements de stock (ajoute les StockMovement et met à jour StockProduitEntrepot)
         self.create_mouvements_stock(session, commande)
 
+        # Mettre à jour les coûts des produits dans CoreProduct
+        for ligne in commande.lignes:
+            self.update_product_cost(session, ligne.produit_id)
+
         # Après création des mouvements, déterminer le statut final :
         # - si la commande est déjà payée à 100% -> VALIDE
         # - sinon -> RECEPTIONNE
@@ -681,18 +685,7 @@ class AchatController:
         if commande.etat != EtatCommande.ENCOURS:
             raise ValueError("Cette commande ne peut plus être modifiée")
         
-        # Vérifier le statut de paiement
-        statut_paiement = getattr(commande, 'statut_paiement', None)
-        if not statut_paiement:
-            # Déterminer dynamiquement
-            total_paye = sum(d.montant for d in commande.depenses) if commande.depenses else Decimal('0')
-            if total_paye > 0:
-                statut_paiement = 'partiel' if total_paye < commande.montant_total else 'paye'
-            else:
-                statut_paiement = 'non_paye'
-        
-        if statut_paiement != 'non_paye':
-            raise ValueError("Cette commande ne peut plus être modifiée car elle a déjà été payée")
+        # Note: On permet la modification même si la commande est payée partiellement ou totalement
         
         # Supprimer toutes les lignes existantes
         session.query(AchatCommandeLigne).filter_by(bon_commande_id=commande_id).delete()
@@ -706,6 +699,10 @@ class AchatController:
         
         # Mettre à jour les écritures comptables : supprimer anciennes et recréer
         self.update_ecriture_comptable_commande(session, commande)
+        
+        # Mettre à jour les coûts des produits modifiés
+        for ligne_data in lignes:
+            self.update_product_cost(session, ligne_data['produit_id'])
         
         session.commit()
         session.refresh(commande)
@@ -728,3 +725,35 @@ class AchatController:
         
         # Recréer les écritures avec les nouveaux montants
         self.create_ecriture_comptable_commande(session, commande)
+    
+    def update_product_cost(self, session: Session, product_id: int):
+        """Met à jour le coût d'un produit dans CoreProduct basé sur le coût moyen pondéré des achats validés"""
+        try:
+            # Récupérer toutes les lignes de commandes validées pour ce produit
+            lignes_validees = session.query(AchatCommandeLigne).join(AchatCommande).filter(
+                AchatCommandeLigne.produit_id == product_id,
+                AchatCommande.etat.in_([EtatCommande.VALIDE, EtatCommande.RECEPTIONNE])
+            ).all()
+
+            if lignes_validees:
+                # Calculer le coût moyen pondéré
+                total_quantity = sum(ligne.quantite for ligne in lignes_validees)
+                total_cost = sum(ligne.quantite * ligne.prix_unitaire for ligne in lignes_validees)
+
+                if total_quantity > 0:
+                    average_cost = total_cost / total_quantity
+
+                    # Mettre à jour le coût dans CoreProduct
+                    product = session.query(CoreProduct).get(product_id)
+                    if product:
+                        product.cost = average_cost
+                        session.commit()
+                        print(f"✅ Coût du produit {product.name} mis à jour (moyenne pondérée): {average_cost}")
+                else:
+                    print(f"⚠️ Quantité totale nulle pour le produit {product_id}")
+            else:
+                print(f"ℹ️ Aucun achat validé trouvé pour le produit {product_id}")
+
+        except Exception as e:
+            print(f"❌ Erreur lors de la mise à jour du coût du produit {product_id}: {e}")
+            session.rollback()
