@@ -671,3 +671,60 @@ class AchatController:
             )
         
         return query.order_by(CoreProduct.name).all()
+    
+    def update_commande(self, session: Session, commande_id: int, lignes: List[Dict]) -> AchatCommande:
+        """Met à jour une commande d'achat (lignes seulement, si en cours)"""
+        commande = session.query(AchatCommande).get(commande_id)
+        if not commande:
+            raise ValueError("Commande introuvable")
+        
+        if commande.etat != EtatCommande.ENCOURS:
+            raise ValueError("Cette commande ne peut plus être modifiée")
+        
+        # Vérifier le statut de paiement
+        statut_paiement = getattr(commande, 'statut_paiement', None)
+        if not statut_paiement:
+            # Déterminer dynamiquement
+            total_paye = sum(d.montant for d in commande.depenses) if commande.depenses else Decimal('0')
+            if total_paye > 0:
+                statut_paiement = 'partiel' if total_paye < commande.montant_total else 'paye'
+            else:
+                statut_paiement = 'non_paye'
+        
+        if statut_paiement != 'non_paye':
+            raise ValueError("Cette commande ne peut plus être modifiée car elle a déjà été payée")
+        
+        # Supprimer toutes les lignes existantes
+        session.query(AchatCommandeLigne).filter_by(bon_commande_id=commande_id).delete()
+        
+        # Ajouter les nouvelles lignes
+        for ligne_data in lignes:
+            self.add_ligne_commande(session, commande_id, **ligne_data)
+        
+        # Recalculer le total
+        self.recalculer_total_commande(session, commande_id)
+        
+        # Mettre à jour les écritures comptables : supprimer anciennes et recréer
+        self.update_ecriture_comptable_commande(session, commande)
+        
+        session.commit()
+        session.refresh(commande)
+        return commande
+    
+    def update_ecriture_comptable_commande(self, session: Session, commande: AchatCommande):
+        """Met à jour les écritures comptables pour une commande modifiée"""
+        # Supprimer les anciennes écritures
+        journaux = session.query(ComptaJournaux).filter_by(
+            reference=commande.numero,
+            type_operation="Commande",
+            enterprise_id=self.entreprise_id
+        ).all()
+        
+        for journal in journaux:
+            # Supprimer les écritures associées
+            session.query(ComptaEcritures).filter_by(journal_id=journal.id).delete()
+            # Supprimer le journal
+            session.delete(journal)
+        
+        # Recréer les écritures avec les nouveaux montants
+        self.create_ecriture_comptable_commande(session, commande)

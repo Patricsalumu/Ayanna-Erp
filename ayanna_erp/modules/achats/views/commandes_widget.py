@@ -207,6 +207,9 @@ class CommandesWidget(QWidget):
 
         # Actions
         actions = QHBoxLayout()
+        self.edit_btn = QPushButton("✏️ Modifier")
+        self.edit_btn.clicked.connect(self.edit_selected_commande)
+        self.edit_btn.setEnabled(False)
         self.reception_btn = QPushButton("📦 Réceptionner")
         self.reception_btn.clicked.connect(self.reception_selected_commande)
         self.reception_btn.setEnabled(False)
@@ -220,6 +223,7 @@ class CommandesWidget(QWidget):
         self.print_btn.clicked.connect(self.export_pdf_selected_commande)
         self.print_btn.setEnabled(False)
 
+        actions.addWidget(self.edit_btn)
         actions.addWidget(self.reception_btn)
         actions.addWidget(self.pay_btn)
         actions.addWidget(self.cancel_btn)
@@ -303,6 +307,21 @@ class CommandesWidget(QWidget):
         l = QHBoxLayout(w)
         l.setContentsMargins(2, 2, 2, 2)
         if commande.etat == EtatCommande.ENCOURS:
+            # Vérifier le statut de paiement pour le bouton modifier
+            statut_paiement = getattr(commande, 'statut_paiement', None)
+            if not statut_paiement:
+                total_paye = sum(d.montant for d in commande.depenses) if commande.depenses else 0
+                if total_paye > 0:
+                    statut_paiement = 'partiel' if total_paye < commande.montant_total else 'paye'
+                else:
+                    statut_paiement = 'non_paye'
+            
+            if statut_paiement == 'non_paye':
+                edit_btn = QPushButton("✏️")
+                edit_btn.setToolTip("Modifier")
+                edit_btn.clicked.connect(lambda: self.edit_commande(commande.id))
+                l.addWidget(edit_btn)
+            
             pay_btn = QPushButton("💰")
             pay_btn.setToolTip("Payer")
             pay_btn.clicked.connect(lambda: self.pay_commande(commande.id))
@@ -319,6 +338,21 @@ class CommandesWidget(QWidget):
     def on_selection_changed(self):
         selected = self.table.selectionModel().selectedRows()
         has = len(selected) > 0
+        if has:
+            cmd = self.current_commandes[selected[0].row()]
+            can_edit = cmd.etat == EtatCommande.ENCOURS
+            if can_edit:
+                statut_paiement = getattr(cmd, 'statut_paiement', None)
+                if not statut_paiement:
+                    total_paye = sum(d.montant for d in cmd.depenses) if cmd.depenses else 0
+                    if total_paye > 0:
+                        statut_paiement = 'partiel' if total_paye < cmd.montant_total else 'paye'
+                    else:
+                        statut_paiement = 'non_paye'
+                can_edit = statut_paiement == 'non_paye'
+            self.edit_btn.setEnabled(can_edit)
+        else:
+            self.edit_btn.setEnabled(False)
         self.reception_btn.setEnabled(has)
         self.pay_btn.setEnabled(has)
         self.cancel_btn.setEnabled(has)
@@ -696,4 +730,199 @@ class CommandesWidget(QWidget):
             session.close()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur réception: {e}")
-    
+
+    class EditCommandeDialog(QDialog):
+        """Dialog pour modifier une commande d'achat"""
+
+        def __init__(self, parent=None, achat_controller=None, commande=None):
+            super().__init__(parent)
+            self.achat_controller = achat_controller
+            self.commande = commande
+            self.produits = []
+            try:
+                self.entreprise_ctrl = EntrepriseController()
+                self.currency = self.entreprise_ctrl.get_currency_symbol()
+            except Exception:
+                self.currency = "FC"
+            self.setWindowTitle(f"Modifier Commande {commande.numero}")
+            self.setFixedSize(800, 600)
+            self.setup_ui()
+            self.load_data()
+
+        def setup_ui(self):
+            layout = QVBoxLayout(self)
+
+            # Infos commande
+            info_group = QGroupBox("Informations commande")
+            info_form = QFormLayout(info_group)
+            info_form.addRow("Numéro:", QLabel(self.commande.numero))
+            info_form.addRow("Fournisseur:", QLabel(self.commande.fournisseur.nom if self.commande.fournisseur else "Aucun"))
+            info_form.addRow("Entrepôt:", QLabel(str(self.commande.entrepot_id)))
+            layout.addWidget(info_group)
+
+            # Lignes
+            lignes_group = QGroupBox("Lignes de commande")
+            lignes_layout = QVBoxLayout(lignes_group)
+            
+            # Table des lignes
+            self.lignes_table = QTableWidget()
+            self.lignes_table.setColumnCount(6)
+            self.lignes_table.setHorizontalHeaderLabels(["Produit", "Quantité", "Prix Unitaire", "Remise", "Total", "Actions"])
+            lignes_layout.addWidget(self.lignes_table)
+            
+            # Boutons
+            btn_layout = QHBoxLayout()
+            self.add_line_btn = QPushButton("➕ Ajouter ligne")
+            self.add_line_btn.clicked.connect(self.add_ligne)
+            btn_layout.addWidget(self.add_line_btn)
+            btn_layout.addStretch()
+            lignes_layout.addLayout(btn_layout)
+            
+            layout.addWidget(lignes_group)
+
+            # Boutons OK/Cancel
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+            buttons.accepted.connect(self.accept)
+            buttons.rejected.connect(self.reject)
+            layout.addWidget(buttons)
+
+        def load_data(self):
+            # Charger produits
+            session = self.achat_controller.db_manager.get_session()
+            try:
+                self.produits = self.achat_controller.get_produits_disponibles(session)
+                # Charger lignes existantes
+                self.lignes_table.setRowCount(len(self.commande.lignes))
+                for row, ligne in enumerate(self.commande.lignes):
+                    self.populate_ligne_row(row, ligne)
+            finally:
+                session.close()
+
+        def populate_ligne_row(self, row, ligne=None):
+            # Produit combo
+            produit_combo = QComboBox()
+            for prod in self.produits:
+                produit_combo.addItem(f"{prod.name} ({prod.code})", prod.id)
+            if ligne:
+                index = produit_combo.findData(ligne.produit_id)
+                if index >= 0:
+                    produit_combo.setCurrentIndex(index)
+            self.lignes_table.setCellWidget(row, 0, produit_combo)
+            
+            # Quantité
+            quantite_spin = QDoubleSpinBox()
+            quantite_spin.setRange(0.01, 999999)
+            quantite_spin.setDecimals(2)
+            quantite_spin.setValue(float(ligne.quantite) if ligne else 1.0)
+            self.lignes_table.setCellWidget(row, 1, quantite_spin)
+            
+            # Prix unitaire
+            prix_spin = QDoubleSpinBox()
+            prix_spin.setRange(0, 999999999)
+            prix_spin.setDecimals(2)
+            prix_spin.setSuffix(f" {self.currency}")
+            prix_spin.setValue(float(ligne.prix_unitaire) if ligne else 0.0)
+            self.lignes_table.setCellWidget(row, 2, prix_spin)
+            
+            # Remise
+            remise_spin = QDoubleSpinBox()
+            remise_spin.setRange(0, 999999999)
+            remise_spin.setDecimals(2)
+            remise_spin.setSuffix(f" {self.currency}")
+            remise_spin.setValue(float(ligne.remise_ligne) if ligne else 0.0)
+            self.lignes_table.setCellWidget(row, 3, remise_spin)
+            
+            # Total (calculé)
+            total_label = QLabel()
+            self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label)
+            quantite_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
+            prix_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
+            remise_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
+            self.lignes_table.setCellWidget(row, 4, total_label)
+            
+            # Actions
+            delete_btn = QPushButton("🗑️")
+            delete_btn.clicked.connect(lambda: self.delete_ligne(row))
+            self.lignes_table.setCellWidget(row, 5, delete_btn)
+
+        def update_total_label(self, row, quantite_spin, prix_spin, remise_spin, total_label):
+            quantite = Decimal(str(quantite_spin.value()))
+            prix = Decimal(str(prix_spin.value()))
+            remise = Decimal(str(remise_spin.value()))
+            total = (quantite * prix) - remise
+            total_label.setText(self.entreprise_ctrl.format_amount(total))
+
+        def add_ligne(self):
+            row = self.lignes_table.rowCount()
+            self.lignes_table.insertRow(row)
+            self.populate_ligne_row(row)
+
+        def delete_ligne(self, row):
+            self.lignes_table.removeRow(row)
+
+        def get_lignes_data(self):
+            lignes = []
+            for row in range(self.lignes_table.rowCount()):
+                produit_combo = self.lignes_table.cellWidget(row, 0)
+                quantite_spin = self.lignes_table.cellWidget(row, 1)
+                prix_spin = self.lignes_table.cellWidget(row, 2)
+                remise_spin = self.lignes_table.cellWidget(row, 3)
+                
+                if produit_combo and quantite_spin and prix_spin and remise_spin:
+                    lignes.append({
+                        'produit_id': produit_combo.currentData(),
+                        'quantite': Decimal(str(quantite_spin.value())),
+                        'prix_unitaire': Decimal(str(prix_spin.value())),
+                        'remise_ligne': Decimal(str(remise_spin.value()))
+                    })
+            return lignes
+
+    def edit_selected_commande(self):
+        sel = self.table.selectionModel().selectedRows()
+        if not sel:
+            QMessageBox.warning(self, "Attention", "Sélectionnez une commande à modifier")
+            return
+        cmd = self.current_commandes[sel[0].row()]
+        if cmd.etat != EtatCommande.ENCOURS:
+            QMessageBox.warning(self, "Attention", "Seules les commandes en cours peuvent être modifiées")
+            return
+        
+        # Vérifier le statut de paiement
+        statut_paiement = getattr(cmd, 'statut_paiement', None)
+        if not statut_paiement:
+            total_paye = sum(d.montant for d in cmd.depenses) if cmd.depenses else 0
+            if total_paye > 0:
+                statut_paiement = 'partiel' if total_paye < cmd.montant_total else 'paye'
+            else:
+                statut_paiement = 'non_paye'
+        
+        if statut_paiement != 'non_paye':
+            QMessageBox.warning(self, "Attention", "Cette commande ne peut plus être modifiée car elle a déjà été payée")
+            return
+        
+        self.edit_commande(cmd.id)
+
+    def edit_commande(self, commande_id):
+        try:
+            session = self.achat_controller.db_manager.get_session()
+            cmd = session.query(AchatCommande).filter_by(id=commande_id).first()
+            if not cmd:
+                QMessageBox.critical(self, "Erreur", "Commande introuvable")
+                return
+            if cmd.etat != EtatCommande.ENCOURS:
+                QMessageBox.warning(self, "Attention", "Cette commande ne peut plus être modifiée")
+                return
+            
+            dialog = CommandesWidget.EditCommandeDialog(self, self.achat_controller, cmd)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                lignes_data = dialog.get_lignes_data()
+                if not lignes_data:
+                    QMessageBox.warning(self, "Attention", "Au moins une ligne est requise")
+                    return
+                self.achat_controller.update_commande(session, commande_id, lignes_data)
+                QMessageBox.information(self, "Succès", "Commande modifiée avec succès")
+                self.refresh_data()
+                self.select_commande(commande_id)
+            session.close()
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur modification: {e}")
