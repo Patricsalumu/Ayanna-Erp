@@ -150,13 +150,21 @@ class NouvelleCommandeWidget(QWidget):
     
     def setup_ui(self):
         """Configuration de l'interface"""
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 10, 10, 10)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(10, 10, 10, 10)
         
         # Titre
         title_label = QLabel("➕ Nouvelle Commande d'Achat")
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #2C3E50; margin-bottom: 10px;")
-        layout.addWidget(title_label)
+        main_layout.addWidget(title_label)
+        
+        # Section principale : Informations générales à gauche, lignes à droite
+        main_section = QHBoxLayout()
+        
+        # ===== COLONNE GAUCHE : Informations générales =====
+        left_column = QWidget()
+        left_layout = QVBoxLayout(left_column)
+        left_layout.setContentsMargins(0, 0, 0, 0)
         
         # Informations générales
         info_group = QGroupBox("Informations générales")
@@ -190,7 +198,13 @@ class NouvelleCommandeWidget(QWidget):
         self.remise_spinbox.valueChanged.connect(self.calculate_total)
         info_layout.addRow("Remise globale:", self.remise_spinbox)
         
-        layout.addWidget(info_group)
+        left_layout.addWidget(info_group)
+        left_layout.addStretch()  # Pour pousser vers le haut
+        
+        # ===== COLONNE DROITE : Lignes de commande =====
+        right_column = QWidget()
+        right_layout = QVBoxLayout(right_column)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         
         # Lignes de commande
         lines_group = QGroupBox("Lignes de commande")
@@ -225,7 +239,7 @@ class NouvelleCommandeWidget(QWidget):
         
         lines_layout.addLayout(lines_buttons_layout)
         
-        # Table des lignes
+        # Table des lignes (plus grande maintenant)
         self.lines_table = QTableWidget()
         self.lines_table.setColumnCount(6)
         self.lines_table.setHorizontalHeaderLabels([
@@ -244,11 +258,20 @@ class NouvelleCommandeWidget(QWidget):
         self.lines_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.lines_table.selectionModel().selectionChanged.connect(self.on_line_selection_changed)
         
-        lines_layout.addWidget(self.lines_table)
-        layout.addWidget(lines_group)
+        # Définir une hauteur minimale pour la table
+        self.lines_table.setMinimumHeight(300)
         
-        # Totaux et actions
-        bottom_layout = QHBoxLayout()
+        lines_layout.addWidget(self.lines_table)
+        right_layout.addWidget(lines_group)
+        
+        # Ajouter les colonnes au layout principal
+        main_section.addWidget(left_column, 1)  # Colonne gauche : 1 part
+        main_section.addWidget(right_column, 2)  # Colonne droite : 2 parts (plus large)
+        
+        main_layout.addLayout(main_section)
+        
+        # ===== SECTION INFÉRIEURE : Totaux et actions =====
+        bottom_section = QHBoxLayout()
         
         # Totaux
         totals_group = QGroupBox("Totaux")
@@ -266,7 +289,8 @@ class NouvelleCommandeWidget(QWidget):
         totals_layout.addRow("Total:", self.total_label)
         
         # Boutons d'action
-        actions_layout = QVBoxLayout()
+        actions_group = QGroupBox("Actions")
+        actions_layout = QVBoxLayout(actions_group)
         
         self.save_draft_btn = QPushButton("💾 Enregistrer en brouillon")
         self.save_draft_btn.clicked.connect(self.save_as_draft)
@@ -296,10 +320,10 @@ class NouvelleCommandeWidget(QWidget):
         actions_layout.addWidget(self.clear_btn)
         actions_layout.addStretch()
         
-        bottom_layout.addWidget(totals_group)
-        bottom_layout.addLayout(actions_layout)
+        bottom_section.addWidget(totals_group, 1)
+        bottom_section.addWidget(actions_group, 1)
         
-        layout.addLayout(bottom_layout)
+        main_layout.addLayout(bottom_section)
     
     def load_data(self):
         """Charge les données nécessaires"""
