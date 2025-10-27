@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFont, QColor
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProductCategory
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class CategorieIndex(QWidget):
@@ -28,6 +29,17 @@ class CategorieIndex(QWidget):
         from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
         self.categorie_controller = CategorieController(pos_id)
         self.current_user = current_user
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
+        # Méthode pour obtenir le symbole de devise
+        def get_currency_symbol(self):
+            try:
+                return self.entreprise_controller.get_currency_symbol()
+            except Exception:
+                return "FC"  # Fallback
+
         self.db_manager = DatabaseManager()
 
         self.setup_ui()
@@ -313,7 +325,7 @@ class CategorieIndex(QWidget):
                 products_list = []
                 for product in products:
                     status = "Actif" if product.is_active else "Inactif"
-                    products_list.append(f"• {product.name} - {product.price_unit:.2f}€ ({status})")
+                    products_list.append(f"• {product.name} - {product.price_unit:.2f}{self.get_currency_symbol()} ({status})")
                 products_text = "\n".join(products_list)
                 QMessageBox.information(
                     self, f"Produits - {category.name}",

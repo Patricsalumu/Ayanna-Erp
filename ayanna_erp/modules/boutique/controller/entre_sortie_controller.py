@@ -12,6 +12,7 @@ from datetime import datetime, date
 # Import du modèle shop_expenses
 from ayanna_erp.modules.boutique.model.models import ShopExpense
 from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class EntreSortieController(QObject):
@@ -28,6 +29,14 @@ class EntreSortieController(QObject):
         super().__init__()
         self.pos_id = pos_id
         self.db_manager = DatabaseManager()
+        self.entreprise_controller = EntrepriseController()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except Exception:
+            return "FC"  # Fallback
         
     def set_pos_id(self, pos_id):
         """Définir l'ID de l'entreprise"""
@@ -61,7 +70,7 @@ class EntreSortieController(QObject):
                 session.commit()
                 session.refresh(expense)
                 
-                print(f"✅ Dépense créée: {expense.description} - {expense.amount} FC")
+                print(f"✅ Dépense créée: {expense.description} - {expense.amount} {self.get_currency_symbol()}")
                 self.expense_added.emit(expense)
                 return expense
                 

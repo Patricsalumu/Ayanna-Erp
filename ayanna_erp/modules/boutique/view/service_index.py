@@ -39,6 +39,13 @@ class ServiceIndex(QWidget):
         # Initialiser le contrôleur entreprise pour les devises
         self.entreprise_controller = EntrepriseController()
         
+        # Méthode pour obtenir le symbole de devise
+        def get_currency_symbol(self):
+            try:
+                return self.entreprise_controller.get_currency_symbol()
+            except Exception:
+                return "FC"  # Fallback
+        
         # Connecter les signaux du contrôleur
         self.service_controller.services_loaded.connect(self.on_services_loaded)
         self.service_controller.service_added.connect(self.on_service_added)
@@ -208,7 +215,7 @@ class ServiceIndex(QWidget):
         """)
         stats_layout.addWidget(self.active_services_label, 0, 1)
 
-        self.avg_price_label = QLabel("Prix moyen: 0 FC")
+        self.avg_price_label = QLabel(f"Prix moyen: 0 {self.get_currency_symbol()}")
         self.avg_price_label.setFont(QFont("Arial", 9))
         self.avg_price_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.avg_price_label.setStyleSheet("""
@@ -285,7 +292,7 @@ class ServiceIndex(QWidget):
             
             # Format d'affichage
             status_icon = "✅" if active else "❌"
-            item_text = f"{status_icon} {name} - {price} FC"
+            item_text = f"{status_icon} {name} - {price} {self.get_currency_symbol()}"
             
             item = QTableWidgetItem(item_text)
             item.setData(Qt.ItemDataRole.UserRole, service)
@@ -318,7 +325,7 @@ class ServiceIndex(QWidget):
         
         self.total_services_label.setText(f"Total: {total_services} services")
         self.active_services_label.setText(f"Actifs: {active_count}")
-        self.avg_price_label.setText(f"Prix moyen: {avg_price:.0f} FC")
+        self.avg_price_label.setText(f"Prix moyen: {avg_price:.0f} {self.get_currency_symbol()}")
 
     def on_service_selected(self, item):
         """Gestionnaire de sélection de service"""
@@ -352,7 +359,7 @@ class ServiceIndex(QWidget):
         
         details = f"""
         <h3 style='color: #2C3E50;'>{name}</h3>
-        <p><b>Prix:</b> {price} FC</p>
+        <p><b>Prix:</b> {price} {self.get_currency_symbol()}</p>
         <p><b>Catégorie:</b> {category}</p>
         <p><b>Statut:</b> {'Actif' if active else 'Inactif'}</p>
         <p><b>Description:</b></p>

@@ -204,8 +204,8 @@ class ProduitIndex(QWidget):
             # Affichage des détails textuels
             details = f"<b>Nom :</b> {product.name}<br>"
             details += f"<b>Catégorie :</b> {product.category_id}<br>"
-            details += f"<b>Prix :</b> {product.price_unit} €<br>"
-            details += f"<b>Coût :</b> {product.cost} €<br>"
+            details += f"<b>Prix :</b> {product.price_unit} {self.get_currency_symbol()}<br>"
+            details += f"<b>Coût :</b> {product.cost} {self.get_currency_symbol()}<br>"
             # Récupérer le stock depuis le module stock
             stock_info = self._get_product_stock_info(product.id)
             details += f"<b>Stock :</b> {stock_info['total_stock']}<br>"
@@ -260,8 +260,8 @@ class ProduitIndex(QWidget):
                     details += f"<b>Dernière vente :</b> {last_sale.strftime('%d/%m/%Y %H:%M')}<br>"
             else:
                 details += f"<b>Dernière vente :</b> Jamais vendu<br>"
-            details += f"<b>Chiffre d'affaires :</b> {sales_stats['total_revenue']:.2f} €<br>"
-            details += f"<b>Bénéfice :</b> {sales_stats['total_profit']:.2f} €<br>"
+            details += f"<b>Chiffre d'affaires :</b> {sales_stats['total_revenue']:.2f} {self.get_currency_symbol()}<br>"
+            details += f"<b>Bénéfice :</b> {sales_stats['total_profit']:.2f} {self.get_currency_symbol()}<br>"
             
             # Ajouter les détails de stock
             stock_details = self.produit_controller.get_product_stock_details(session, product_id)
@@ -876,7 +876,7 @@ class ProductFormDialog(QDialog):
         self.prix_input = QDoubleSpinBox()
         self.prix_input.setRange(0.01, 999999.99)
         self.prix_input.setDecimals(2)
-        self.prix_input.setSuffix(" €")
+        self.prix_input.setSuffix(f" {self.get_currency_symbol()}")
         self.prix_input.setValue(1.00)
         self.prix_input.setStyleSheet(input_style)
         price_layout.addRow(prix_label, self.prix_input)
@@ -887,7 +887,7 @@ class ProductFormDialog(QDialog):
         self.cost_input = QDoubleSpinBox()
         self.cost_input.setRange(0.00, 999999.99)
         self.cost_input.setDecimals(2)
-        self.cost_input.setSuffix(" €")
+        self.cost_input.setSuffix(f" {self.get_currency_symbol()}")
         self.cost_input.setValue(0.00)
         self.cost_input.setStyleSheet(input_style)
         price_layout.addRow(cost_label, self.cost_input)

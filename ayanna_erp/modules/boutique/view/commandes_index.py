@@ -761,7 +761,7 @@ Panier moyen: 0 {self.get_currency_symbol()}
             montant_restant = total_final - montant_paye
             
             if amount > montant_restant:
-                QMessageBox.warning(self, "Erreur", f"Le montant saisi ({amount:.0f} FC) dépasse le restant dû ({montant_restant:.0f} FC).")
+                QMessageBox.warning(self, "Erreur", f"Le montant saisi ({amount:.0f} {self.get_currency_symbol()}) dépasse le restant dû ({montant_restant:.0f} {self.get_currency_symbol()}).")
                 return
             
             # Utiliser le contrôleur pour traiter le paiement avec logique comptable
@@ -900,7 +900,7 @@ Panier moyen: 0 {self.get_currency_symbol()}
             preview_text = f"""
 N° Commande: {invoice_data['reference']}
 Client: {invoice_data['client_nom']}
-Total: {invoice_data['total_ttc']:.0f} FC
+Total: {invoice_data['total_ttc']:.0f} {self.get_currency_symbol()}
 Paiement: {invoice_data['payments'][0]['payment_method']}
 Notes: {notes_preview}
             """.strip()
@@ -1271,8 +1271,8 @@ Notes: {notes_preview}
             stats = self.commande_controller.get_commandes_statistics(commandes)
             stats_data = [
                 ['Statistiques générales', ''],
-                ['Total CA:', f"{stats['total_ca']:.0f} FC"],
-                ['Créances:', f"{stats['total_creances']:.0f} FC"],
+                ['Total CA:', f"{stats['total_ca']:.0f} {self.get_currency_symbol()}"],
+                ['Créances:', f"{stats['total_creances']:.0f} {self.get_currency_symbol()}"],
                 ['Commandes payées:', f"{stats['commandes_payees']}"],
                 ['Commandes non payées:', f"{stats['commandes_non_payees']}"]
             ]
@@ -1318,10 +1318,10 @@ Notes: {notes_preview}
                     date_str,
                     str(commande.get('client_name', '')),
                     produits_formatted,
-                    f"{commande.get('subtotal', 0):.0f} FC",
-                    f"{commande.get('remise_amount', 0):.0f} FC",
-                    f"{commande.get('total_final', 0):.0f} FC",
-                    f"{commande.get('montant_paye', 0):.0f} FC"
+                    f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}",
+                    f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}",
+                    f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}",
+                    f"{commande.get('montant_paye', 0):.0f} {self.get_currency_symbol()}"
                 ]
                 table_data.append(row)
             

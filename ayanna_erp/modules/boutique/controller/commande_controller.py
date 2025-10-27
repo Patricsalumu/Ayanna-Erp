@@ -9,6 +9,7 @@ from decimal import Decimal
 from typing import List, Dict, Any, Optional, Union
 from sqlalchemy import text
 from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class CommandeController:
@@ -16,6 +17,14 @@ class CommandeController:
 
     def __init__(self):
         self.db_manager = DatabaseManager()
+        self.entreprise_controller = EntrepriseController()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.entreprise_controller.get_currency_symbol()
+        except Exception:
+            return "FC"  # Fallback
 
     def get_commandes(self, date_debut=None, date_fin=None, search_term=None,
                      payment_filter=None, limit=100) -> List[Dict[str, Any]]:
@@ -237,20 +246,20 @@ class CommandeController:
             Texte formaté des statistiques
         """
         if not stats or stats['nb_commandes'] == 0:
-            return """
+            return f"""
 Période: Derniers 30 jours
 Commandes: 0
-Chiffre d'affaires: 0 FC
-Créances: 0 FC
-Panier moyen: 0 FC
+Chiffre d'affaires: 0 {self.get_currency_symbol()}
+Créances: 0 {self.get_currency_symbol()}
+Panier moyen: 0 {self.get_currency_symbol()}
             """
 
         return f"""
 Période: {date_debut.toString('dd/MM/yyyy')} - {date_fin.toString('dd/MM/yyyy')}
 Commandes: {stats['nb_commandes']}
-Chiffre d'affaires: {stats['total_ca']:.0f} FC
-Créances: {stats['total_creances']:.0f} FC
-Panier moyen: {stats['panier_moyen']:.0f} FC
+Chiffre d'affaires: {stats['total_ca']:.0f} {self.get_currency_symbol()}
+Créances: {stats['total_creances']:.0f} {self.get_currency_symbol()}
+Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
         """
 
     def export_commandes(self, commandes: List[Dict[str, Any]], format_type: str = 'csv') -> str:
@@ -369,13 +378,13 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
                 for product in products:
                     product_dict = dict(product._asdict())
                     produits_detail.append(
-                        f"• {product_dict.get('product_name', 'Produit inconnu')} - {product_dict.get('quantity', 0)} x {product_dict.get('unit_price', 0):.0f} FC = {product_dict.get('total_price', 0):.0f} FC"
+                        f"• {product_dict.get('product_name', 'Produit inconnu')} - {product_dict.get('quantity', 0)} x {product_dict.get('unit_price', 0):.0f} {self.get_currency_symbol()} = {product_dict.get('total_price', 0):.0f} {self.get_currency_symbol()}"
                     )
 
                 for service in services:
                     service_dict = dict(service._asdict())
                     produits_detail.append(
-                        f"• {service_dict.get('service_name', 'Service inconnu')} - {service_dict.get('quantity', 0)} x {service_dict.get('unit_price', 0):.0f} FC = {service_dict.get('total_price', 0):.0f} FC"
+                        f"• {service_dict.get('service_name', 'Service inconnu')} - {service_dict.get('quantity', 0)} x {service_dict.get('unit_price', 0):.0f} {self.get_currency_symbol()} = {service_dict.get('total_price', 0):.0f} {self.get_currency_symbol()}"
                     )
 
                 commande_dict['produits_detail'] = '\n'.join(produits_detail) if produits_detail else 'Aucun produit/service'
@@ -422,7 +431,7 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
                 
                 # Vérifier que le montant ne dépasse pas le restant dû
                 if amount > montant_restant:
-                    return False, f"Le montant saisi ({amount:.0f} FC) dépasse le restant dû ({montant_restant:.0f} FC)."
+                    return False, f"Le montant saisi ({amount:.0f} {self.get_currency_symbol()}) dépasse le restant dû ({montant_restant:.0f} {self.get_currency_symbol()})."
                 
                 # Insérer le paiement
                 insert_payment = text("""
@@ -508,7 +517,7 @@ Panier moyen: {stats['panier_moyen']:.0f} FC
                         })
                 
                 session.commit()
-                return True, f"Paiement de {amount:.0f} FC enregistré avec succès."
+                return True, f"Paiement de {amount:.0f} {self.get_currency_symbol()} enregistré avec succès."
                 
         except Exception as e:
             print(f"❌ Erreur process_commande_payment: {e}")

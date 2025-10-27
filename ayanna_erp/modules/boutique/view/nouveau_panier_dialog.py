@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QColor, QPixmap
 from ayanna_erp.modules.boutique.controller.panier_coontroller import PanierController
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 
 class NouveauPanierDialog(QDialog):
@@ -46,6 +47,16 @@ class NouveauPanierDialog(QDialog):
         self.current_user = current_user
         self.panier_controller = PanierController()
         self.panier = self.panier_controller.create_empty_panier(pos_id=1, client_id=None)
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
+        # Méthode pour obtenir le symbole de devise
+        def get_currency_symbol(self):
+            try:
+                return self.entreprise_controller.get_currency_symbol()
+            except Exception:
+                return "FC"  # Fallback
 
         layout = QVBoxLayout(self)
         main_layout = QHBoxLayout()
@@ -235,7 +246,7 @@ class NouveauPanierDialog(QDialog):
                 price = getattr(item, "price_unit", None)
                 if price is None:
                     price = getattr(item, "price", 0)
-                price_lbl = QLabel(f"{price:.2f} €")
+                price_lbl = QLabel(f"{price:.2f} {self.get_currency_symbol()}")
                 price_lbl.setFont(QFont("Arial", 11))
                 price_lbl.setStyleSheet("color: #27AE60; font-weight: bold;")
                 price_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -262,7 +273,7 @@ class NouveauPanierDialog(QDialog):
                 price = getattr(item, "price_unit", None)
                 if price is None:
                     price = getattr(item, "price", 0)
-                price_item = QTableWidgetItem(f"{price:.2f} €")
+                price_item = QTableWidgetItem(f"{price:.2f} {self.get_currency_symbol()}")
                 price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 table.setItem(row, 2, price_item)
                 add_btn = QPushButton("➕ Ajouter")

@@ -598,7 +598,7 @@ class ModernSupermarketWidget(QWidget):
         subtotal_layout.setContentsMargins(0, 0, 0, 0)
         subtotal_label_title = QLabel("Sous-total:")
         subtotal_label_title.setStyleSheet("font-weight: bold; color: #666;")
-        self.subtotal_label = QLabel("0.00 FC")
+        self.subtotal_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.subtotal_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
         subtotal_layout.addWidget(subtotal_label_title)
         subtotal_layout.addWidget(self.subtotal_label)
@@ -612,7 +612,7 @@ class ModernSupermarketWidget(QWidget):
         discount_label_title.setStyleSheet("font-weight: bold; color: #666;")
         self.discount_spin = QDoubleSpinBox()
         self.discount_spin.setRange(0, 999999)
-        self.discount_spin.setSuffix(" FC")
+        self.discount_spin.setSuffix(f" {self.get_currency_symbol()}")
         self.discount_spin.setFixedWidth(100)
         self.discount_spin.valueChanged.connect(self.apply_discount_auto)
         discount_layout.addWidget(discount_label_title)
@@ -625,7 +625,7 @@ class ModernSupermarketWidget(QWidget):
         net_layout.setContentsMargins(0, 0, 0, 0)
         net_label_title = QLabel("Net à payer:")
         net_label_title.setStyleSheet("font-weight: bold; color: #666;")
-        self.net_total_label = QLabel("0.00 FC")
+        self.net_total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.net_total_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2196F3;")
         net_layout.addWidget(net_label_title)
         net_layout.addWidget(self.net_total_label)
@@ -647,7 +647,7 @@ class ModernSupermarketWidget(QWidget):
 
         total_label_title = QLabel("TOTAL À PAYER:")
         total_label_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
-        self.total_label = QLabel("0.00 FC")
+        self.total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.total_label.setStyleSheet("""
             QLabel {
                 font-size: 18px;
@@ -819,7 +819,7 @@ class ModernSupermarketWidget(QWidget):
         
         # Prix avec meilleure mise en forme
         price = getattr(product, 'price_unit', getattr(product, 'sale_price', 0))
-        price_label = QLabel(f"{price:.0f} FC")
+        price_label = QLabel(f"{price:.0f} {self.get_currency_symbol()}")
         price_label.setStyleSheet("""
             QLabel {
                 font-size: 13px;
@@ -1595,9 +1595,9 @@ class ModernSupermarketWidget(QWidget):
         total = subtotal - discount_amount
 
         # Mettre à jour les labels
-        self.subtotal_label.setText(f"{subtotal:.0f} FC")
-        self.net_total_label.setText(f"{total:.0f} FC")
-        self.total_label.setText(f"{total:.0f} FC")
+        self.subtotal_label.setText(f"{subtotal:.0f} {self.get_currency_symbol()}")
+        self.net_total_label.setText(f"{total:.0f} {self.get_currency_symbol()}")
+        self.total_label.setText(f"{total:.0f} {self.get_currency_symbol()}")
     
     def apply_discount_auto(self):
         """Applique automatiquement la remise lors du changement de valeur"""
@@ -1758,7 +1758,7 @@ class ModernSupermarketWidget(QWidget):
         preview_text = f"""
 N° Commande: {order_number}
 Client: {invoice_data['client_nom']}
-Total: {sale_data['total_amount']:.0f} FC
+Total: {sale_data['total_amount']:.0f} {self.get_currency_symbol()}
 Paiement: {payment_data['method']}
         """.strip()
 
@@ -2061,6 +2061,13 @@ class PaymentDialog(QDialog):
         
         self.init_ui()
     
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.parent().get_currency_symbol()
+        except Exception:
+            return "FC"  # Fallback
+    
     def init_ui(self):
         """Initialise l'interface du dialogue de paiement"""
         self.setWindowTitle("💳 Paiement")
@@ -2076,7 +2083,7 @@ class PaymentDialog(QDialog):
 
         # Sous-total
         subtotal = sum(item['unit_price'] * item['quantity'] for item in self.cart_items)
-        subtotal_label = QLabel(f"{subtotal:.0f} FC")
+        subtotal_label = QLabel(f"{subtotal:.0f} {self.get_currency_symbol()}")
         subtotal_label.setStyleSheet("color: #333; font-weight: bold;")
         summary_layout.addRow("Sous-total:", subtotal_label)
 
@@ -2092,12 +2099,12 @@ class PaymentDialog(QDialog):
 
         # Remise (montant fixe)
         disc_val = getattr(self, 'discount_amount', float(self.discount) if self.discount else 0.0)
-        disc_label = QLabel(f"-{disc_val:.0f} FC")
+        disc_label = QLabel(f"-{disc_val:.0f} {self.get_currency_symbol()}")
         disc_label.setStyleSheet("color: #e53935; font-weight: bold;")
         summary_layout.addRow("Remise:", disc_label)
 
         # Total final mis en valeur
-        total_label = QLabel(f"{self.total_amount:.0f} FC")
+        total_label = QLabel(f"{self.total_amount:.0f} {self.get_currency_symbol()}")
         total_label.setStyleSheet("font-weight: bold; color: #4CAF50; font-size: 18px;")
         summary_layout.addRow("TOTAL À PAYER:", total_label)
 
@@ -2120,7 +2127,7 @@ class PaymentDialog(QDialog):
         self.amount_received = QDoubleSpinBox()
         self.amount_received.setRange(0, 999999)
         self.amount_received.setValue(float(self.total_amount))
-        self.amount_received.setSuffix(" FC")
+        self.amount_received.setSuffix(f" {self.get_currency_symbol()}")
         payment_layout.addRow("Montant reçu:", self.amount_received)
         
         layout.addWidget(payment_group)

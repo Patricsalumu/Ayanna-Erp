@@ -158,7 +158,7 @@ class ClientIndex(QWidget):
         stats_grid.addWidget(self.total_commandes_label, 1, 1)
         
         # Ligne 2
-        self.total_depense_label = QLabel("0.00 €")
+        self.total_depense_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.total_depense_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         self.total_depense_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.total_depense_label.setStyleSheet("""
@@ -191,7 +191,7 @@ class ClientIndex(QWidget):
         stats_grid.addWidget(self.paniers_non_regles_label, 3, 1)
         
         # Ligne 3 - Montant non payé
-        self.montant_non_paye_label = QLabel("0.00 €")
+        self.montant_non_paye_label = QLabel(f"0.00 {self.get_currency_symbol()}")
         self.montant_non_paye_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
         self.montant_non_paye_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.montant_non_paye_label.setStyleSheet("""
@@ -293,8 +293,8 @@ class ClientIndex(QWidget):
                 details += f"<b>Adresse :</b> {client.adresse or 'Non renseignée'}<br>"
                 details += f"<b>Ville :</b> {client.ville or 'Non renseignée'}<br>"
                 details += f"<b>Type :</b> {client.type_client or 'Particulier'}<br>"
-                details += f"<b>Limite crédit :</b> {client.credit_limit or 0} €<br>"
-                details += f"<b>Solde compte :</b> {client.balance or 0} €<br>"
+                details += f"<b>Limite crédit :</b> {client.credit_limit or 0} {self.get_currency_symbol()}<br>"
+                details += f"<b>Solde compte :</b> {client.balance or 0} {self.get_currency_symbol()}<br>"
                 details += f"<b>Statut :</b> {'Actif' if client.is_active else 'Inactif'}<br>"
                 if client.created_at:
                     details += f"<b>Créé le :</b> {client.created_at.strftime('%d/%m/%Y')}<br>"
@@ -304,16 +304,16 @@ class ClientIndex(QWidget):
                 # Statistiques financières
                 details += f"<h3>💰 Statistiques financières</h3>"
                 details += f"<b>🛒 Total commandes :</b> {total_commandes}<br>"
-                details += f"<b>💵 Total dépensé :</b> {total_depense:.2f} €<br>"
+                details += f"<b>💵 Total dépensé :</b> {total_depense:.2f} {self.get_currency_symbol()}<br>"
                 details += f"<b>⚠️ Commandes non réglées :</b> {commandes_non_reglees}<br>"
-                details += f"<b>💳 Montant dû :</b> {montant_non_regle:.2f} €<br>"
+                details += f"<b>💳 Montant dû :</b> {montant_non_regle:.2f} {self.get_currency_symbol()}<br>"
                 
                 # Dernière commande
                 if derniere_commande:
                     details += f"<h3>🕒 Dernière commande</h3>"
                     details += f"<b>Référence :</b> {derniere_commande.numero_commande or 'N/A'}<br>"
                     details += f"<b>Date :</b> {derniere_commande.created_at.strftime('%d/%m/%Y %H:%M')}<br>"
-                    details += f"<b>Montant :</b> {derniere_commande.total_final:.2f} €<br>"
+                    details += f"<b>Montant :</b> {derniere_commande.total_final:.2f} {self.get_currency_symbol()}<br>"
                     details += f"<b>Statut :</b> {derniere_commande.status}<br>"
                 
                 # 5 dernières commandes
@@ -322,7 +322,7 @@ class ClientIndex(QWidget):
                     for i, cmd in enumerate(dernieres_commandes, 1):
                         details += f"<b>{i}. {cmd.numero_commande or 'N/A'}</b> - "
                         details += f"{cmd.created_at.strftime('%d/%m/%Y')} - "
-                        details += f"{cmd.total_final:.2f} € - {cmd.status}<br>"
+                        details += f"{cmd.total_final:.2f} {self.get_currency_symbol()} - {cmd.status}<br>"
                 
                 self.detail_text.setHtml(details)
                 
@@ -484,9 +484,9 @@ class ClientIndex(QWidget):
             # Valeurs par défaut en cas d'erreur
             self.total_clients_label.setText("0")
             self.total_commandes_label.setText("0")
-            self.total_depense_label.setText("0.00 €")
+            self.total_depense_label.setText(f"0.00 {self.get_currency_symbol()}")
             self.paniers_non_regles_label.setText("0")
-            self.montant_non_paye_label.setText("0.00 €")
+            self.montant_non_paye_label.setText(f"0.00 {self.get_currency_symbol()}")
         
         # Gestion du message de détails
         if len(clients) == 0:

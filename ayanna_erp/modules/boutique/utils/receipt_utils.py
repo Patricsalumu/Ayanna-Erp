@@ -49,16 +49,16 @@ def show_sale_receipt(parent, sale_data, payment_data, enterprise_controller, cu
     # RÉCAPITULATIF (format 53 mm thermique)
     receipt_lines.append("")
     receipt_lines.append("===== RÉCAPITULATIF =====")
-    receipt_lines.append(f"Sous-total: {sale_data.get('subtotal',0):.2f} FC")
-    receipt_lines.append(f"Remise: -{sale_data.get('discount_amount',0):.2f} FC")
-    receipt_lines.append(f"NET À PAYER: {sale_data.get('total_amount',0):.2f} FC")
+    receipt_lines.append(f"Sous-total: {enterprise_controller.format_amount(sale_data.get('subtotal',0))}")
+    receipt_lines.append(f"Remise: -{enterprise_controller.format_amount(sale_data.get('discount_amount',0))}")
+    receipt_lines.append(f"NET À PAYER: {enterprise_controller.format_amount(sale_data.get('total_amount',0))}")
     # Paiement details
-    receipt_lines.append(f"PAYÉ: {payment_data.get('amount_received',0):.2f} FC")
+    receipt_lines.append(f"PAYÉ: {enterprise_controller.format_amount(payment_data.get('amount_received',0))}")
     # Change/remaining
     received = float(payment_data.get('amount_received', 0) or 0)
     total = float(sale_data.get('total_amount', 0) or 0)
     reste = max(0.0, total - received)
-    receipt_lines.append(f"RESTE: {reste:.2f} FC")
+    receipt_lines.append(f"RESTE: {enterprise_controller.format_amount(reste)}")
 
     # Notes should appear AFTER the recapitulatif
     if sale_data.get('notes'):
