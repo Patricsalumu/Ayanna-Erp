@@ -243,7 +243,7 @@ class VenteController:
 
             # Récupérer la configuration comptable (incluant compte stock et compte charge pour inventaire permanent)
             config_result = session.execute(text("""
-                SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id
+                SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id
                 FROM compta_config
                 WHERE pos_id = :pos_id
                 LIMIT 1
@@ -259,6 +259,7 @@ class VenteController:
             compte_remise_id = config_row[3]
             compte_stock_id = config_row[4]
             compte_variation_stock_id = config_row[5]
+            compte_achat_id = config_row[6]
 
             # Validation : si remise et pas de compte remise configuré, refuser
             if discount_amount > 0 and not compte_remise_id:
@@ -420,28 +421,32 @@ class VenteController:
                     product_id = item.get('id')
                     qty = item.get('quantity', 0)
 
-                    # Récupérer le prix d'achat (cost) du produit
+                    # Récupérer le prix d'achat (cost) et le compte charge du produit
                     cost_result = session.execute(text("""
-                        SELECT cost, name FROM core_products
+                        SELECT cost, name, compte_charge_id FROM core_products
                         WHERE id = :product_id
                     """), {'product_id': product_id})
                     cost_row = cost_result.fetchone()
                     unit_cost = float(cost_row[0]) if cost_row and cost_row[0] is not None else 0.0
                     product_name = cost_row[1] if cost_row and len(cost_row) > 1 else item.get('name', f'Produit {product_id}')
+                    product_compte_charge_id = cost_row[2] if cost_row and len(cost_row) > 2 and cost_row[2] is not None else None
+
+                    # Déterminer le compte charge à utiliser (hiérarchie: compte_charge_id produit > compte_achat_id config > compte_variation_stock_id)
+                    compte_charge_id = product_compte_charge_id or compte_achat_id or compte_variation_stock_id
 
                     cogs_amount = unit_cost * qty
                     if cogs_amount <= 0:
                         # Si pas de coût renseigné on saute (ne doit pas arrêter la vente)
                         continue
 
-                    # Débit : Compte charge (COGS)
+                    # Débit : Compte charge (COGS) - utiliser le compte déterminé selon la hiérarchie
                     session.execute(text("""
                         INSERT INTO compta_ecritures
                         (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
                         VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
                     """), {
                         'journal_id': journal_stock_id,
-                        'compte_id': compte_variation_stock_id,
+                        'compte_id': compte_charge_id,
                         'debit': cogs_amount,
                         'credit': 0,
                         'ordre': ordre_stock,
