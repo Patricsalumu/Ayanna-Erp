@@ -15,6 +15,7 @@ from PyQt6.QtGui import QFont
 from ayanna_erp.database.database_manager import DatabaseManager
 from sqlalchemy import func
 from ..model.models import ShopClient, ShopPanier, ShopPayment
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 class ClientIndex(QWidget):
     """Widget de gestion des clients"""
@@ -27,9 +28,14 @@ class ClientIndex(QWidget):
         self.boutique_controller = boutique_controller
         self.current_user = current_user
         self.db_manager = DatabaseManager()
+        self.enterprise_controller = EntrepriseController()
         
         self.setup_ui()
         self.load_clients()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        return self.enterprise_controller.get_currency_symbol()
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -469,9 +475,9 @@ class ClientIndex(QWidget):
                             montant_non_paye += montant_du
                 
                 # Mettre à jour les labels
-                self.total_depense_label.setText(f"{total_depense:.2f} €")
+                self.total_depense_label.setText(f"{total_depense:.2f} {self.get_currency_symbol()}")
                 self.paniers_non_regles_label.setText(str(paniers_non_regles))
-                self.montant_non_paye_label.setText(f"{montant_non_paye:.2f} €")
+                self.montant_non_paye_label.setText(f"{montant_non_paye:.2f} {self.get_currency_symbol()}")
                 
         except Exception as e:
             print(f"Erreur lors du calcul des statistiques: {e}")

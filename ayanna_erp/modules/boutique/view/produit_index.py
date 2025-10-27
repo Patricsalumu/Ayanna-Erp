@@ -17,6 +17,7 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
 from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 import os
 import shutil
 from datetime import datetime
@@ -34,6 +35,7 @@ class ProduitIndex(QWidget):
         self.produit_controller = ProduitController(pos_id)
         self.current_user = current_user
         self.db_manager = DatabaseManager()
+        self.enterprise_controller = EntrepriseController()
 
         # Variables d'état
         self.selected_category_id = None
@@ -43,6 +45,10 @@ class ProduitIndex(QWidget):
 
         self.setup_ui()
         self.load_initial_data()
+    
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        return self.enterprise_controller.get_currency_symbol()
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -469,7 +475,7 @@ class ProduitIndex(QWidget):
             self.products_table.setItem(row, 2, QTableWidgetItem(category_name))
 
             # Prix
-            price_item = QTableWidgetItem(f"{product.price_unit:.2f} €")
+            price_item = QTableWidgetItem(f"{product.price_unit:.2f} {self.get_currency_symbol()}")
             price_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             self.products_table.setItem(row, 3, price_item)
 

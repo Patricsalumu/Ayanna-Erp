@@ -13,7 +13,9 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 import os
 from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
+from ayanna_erp.modules.boutique.controller.vente_controller import VenteController
 from ayanna_erp.modules.boutique.view.modern_supermarket_widget import PaymentDialog
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
 class CommandesIndexWidget(QWidget):
     """Widget principal pour l'affichage et gestion des commandes"""
@@ -30,8 +32,18 @@ class CommandesIndexWidget(QWidget):
         # Initialiser le contrôleur des commandes
         self.commande_controller = CommandeController()
         
+        # Initialiser le contrôleur de vente pour les annulations
+        self.vente_controller = VenteController(self.boutique_controller.pos_id, self.current_user)
+        
+        # Initialiser le contrôleur entreprise pour les devises
+        self.entreprise_controller = EntrepriseController()
+        
         self.init_ui()
         self.load_commandes()
+        
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        return self.entreprise_controller.get_currency_symbol()
         
     def init_ui(self):
         """Initialisation de l'interface utilisateur"""
@@ -348,6 +360,30 @@ class CommandesIndexWidget(QWidget):
         self.print_button.setEnabled(False)
         actions_layout.addWidget(self.print_button)
         
+        # Bouton d'annulation
+        self.cancel_button = QPushButton("❌ Annuler")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #F44336;
+                color: white;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 12px;
+                border: none;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #D32F2F;
+            }
+            QPushButton:disabled {
+                background-color: #BDBDBD;
+                color: #757575;
+            }
+        """)
+        self.cancel_button.clicked.connect(self.on_cancel_commande)
+        self.cancel_button.setEnabled(False)
+        actions_layout.addWidget(self.cancel_button)
+        
         scroll_layout.addWidget(actions_group)
         
         # Espacement
@@ -419,20 +455,20 @@ class CommandesIndexWidget(QWidget):
             self.commandes_table.setItem(row, 3, QTableWidgetItem(items_text))
 
             # Sous-total
-            self.commandes_table.setItem(row, 4, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} FC"))
+            self.commandes_table.setItem(row, 4, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}"))
 
             # Remise
-            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} FC"))
+            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}"))
 
             # Total
-            total_item = QTableWidgetItem(f"{commande.get('total_final', 0):.0f} FC")
+            total_item = QTableWidgetItem(f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}")
             if commande.get('payment_method') == 'Crédit':
                 total_item.setBackground(QColor("#ffecb3"))
             self.commandes_table.setItem(row, 6, total_item)
 
             # Payé (montant déjà payé)
             montant_paye = commande.get('montant_paye', 0)
-            paye_item = QTableWidgetItem(f"{montant_paye:.0f} FC")
+            paye_item = QTableWidgetItem(f"{montant_paye:.0f} {self.get_currency_symbol()}")
             if montant_paye >= commande.get('total_final', 0):
                 paye_item.setBackground(QColor("#c8e6c9"))  # Vert pour soldé
             elif montant_paye > 0:
@@ -456,20 +492,20 @@ class CommandesIndexWidget(QWidget):
         # Mise à jour des widgets de stats
         if hasattr(self, 'stat_widgets'):
             self.stat_widgets.get('commandes_aujourd\'hui', QLabel()).setText(str(stats['commandes_aujourd_hui']))
-            self.stat_widgets.get('total_ca', QLabel()).setText(f"{stats['total_ca']:.0f} FC")
-            self.stat_widgets.get('créances', QLabel()).setText(f"{stats['total_creances']:.0f} FC")
+            self.stat_widgets.get('total_ca', QLabel()).setText(f"{stats['total_ca']:.0f} {self.get_currency_symbol()}")
+            self.stat_widgets.get('créances', QLabel()).setText(f"{stats['total_creances']:.0f} {self.get_currency_symbol()}")
             
         self.update_period_stats(commandes)
         
     def update_period_stats(self, commandes=None):
         """Mettre à jour les statistiques de période"""
         if not commandes:
-            stats_text = """
+            stats_text = f"""
 Période: Derniers 30 jours
 Commandes: 0
-Chiffre d'affaires: 0 FC
-Créances: 0 FC
-Panier moyen: 0 FC
+Chiffre d'affaires: 0 {self.get_currency_symbol()}
+Créances: 0 {self.get_currency_symbol()}
+Panier moyen: 0 {self.get_currency_symbol()}
             """
         else:
             # Utiliser le contrôleur pour formater les statistiques
@@ -548,16 +584,16 @@ Panier moyen: 0 FC
         self.detail_date.setText(date_str)
         
         self.detail_client.setText(str(commande.get('client_name', '-')))
-        self.detail_sous_total.setText(f"{commande.get('subtotal', 0):.0f} FC")
-        self.detail_remise.setText(f"{commande.get('remise_amount', 0):.0f} FC")
-        self.detail_total.setText(f"{commande.get('total_final', 0):.0f} FC")
+        self.detail_sous_total.setText(f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}")
+        self.detail_remise.setText(f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}")
+        self.detail_total.setText(f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}")
         
         montant_paye = commande.get('montant_paye', 0)
         total_final = commande.get('total_final', 0)
         restant = total_final - montant_paye
         
-        self.detail_paye.setText(f"{montant_paye:.0f} FC")
-        self.detail_restant.setText(f"{restant:.0f} FC")
+        self.detail_paye.setText(f"{montant_paye:.0f} {self.get_currency_symbol()}")
+        self.detail_restant.setText(f"{restant:.0f} {self.get_currency_symbol()}")
         
         # Statut de paiement
         if montant_paye >= total_final:
@@ -613,6 +649,18 @@ Panier moyen: 0 FC
         
         # Activer les boutons
         self.print_button.setEnabled(True)
+        
+        # Gérer le bouton d'annulation selon le statut
+        status = commande.get('status', '')
+        if status == 'cancelled':
+            self.cancel_button.setEnabled(False)
+            self.cancel_button.setText("❌ Déjà annulée")
+            # Désactiver aussi les autres boutons pour une commande annulée
+            self.pay_button.setEnabled(False)
+            self.pay_button.setText("💳 Annulée")
+        else:
+            self.cancel_button.setEnabled(True)
+            self.cancel_button.setText("❌ Annuler")
         
         # Stocker l'ID de la commande pour les actions
         self.selected_commande_id = commande.get('id')
@@ -918,6 +966,56 @@ Notes: {notes_preview}
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'impression: {e}")
             print(f"❌ Erreur on_print_commande: {e}")
+    
+    def on_cancel_commande(self):
+        """Annuler une commande avec confirmation"""
+        if not hasattr(self, 'selected_commande_id') or not self.selected_commande_id:
+            QMessageBox.warning(self, "Sélection requise", "Veuillez d'abord sélectionner une commande.")
+            return
+        
+        try:
+            # Récupérer les détails de la commande
+            commande_details = self.commande_controller.get_commande_details(self.selected_commande_id)
+            if not commande_details:
+                QMessageBox.critical(self, "Erreur", "Impossible de récupérer les détails de la commande.")
+                return
+            
+            # Vérifier si la commande peut être annulée
+            status = commande_details.get('status', '')
+            if status == 'cancelled':
+                QMessageBox.information(self, "Déjà annulée", "Cette commande est déjà annulée.")
+                return
+            
+            # Demander confirmation
+            numero_commande = commande_details.get('numero_commande', f"CMD-{self.selected_commande_id}")
+            montant_total = commande_details.get('total_final', 0)
+            
+            reply = QMessageBox.question(
+                self, 
+                "Confirmation d'annulation",
+                f"Êtes-vous sûr de vouloir annuler la commande {numero_commande} ?\n\n"
+                f"Montant: {montant_total:.0f} {self.get_currency_symbol()}\n\n"
+                f"Cette action est irréversible et annulera toutes les écritures comptables associées.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                # Appeler la méthode d'annulation du contrôleur de vente
+                success, message = self.vente_controller.cancel_sale(self.selected_commande_id)
+                
+                if success:
+                    QMessageBox.information(self, "Succès", message)
+                    # Recharger les données
+                    self.load_commandes()
+                    # Vider les détails
+                    self.clear_details()
+                else:
+                    QMessageBox.critical(self, "Erreur", f"Échec de l'annulation: {message}")
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'annulation: {e}")
+            print(f"❌ Erreur on_cancel_commande: {e}")
     
     def _print_commande_invoice(self, invoice_data, dialog):
         """Imprimer la facture/reçu de commande en utilisant InvoicePrintManager"""

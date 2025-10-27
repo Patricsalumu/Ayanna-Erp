@@ -58,6 +58,10 @@ class ModernSupermarketWidget(QWidget):
         self.apply_modern_style()
         self.load_initial_data()
     
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        return self.enterprise_controller.get_currency_symbol()
+    
     def init_ui(self):
         """Initialise l'interface utilisateur moderne"""
         main_layout = QVBoxLayout(self)
@@ -296,7 +300,7 @@ class ModernSupermarketWidget(QWidget):
 
         # Prix
         price_val = getattr(service, 'price', None) or getattr(service, 'prix', 0.0)
-        price_label = QLabel(f"{float(price_val):.0f} FC")
+        price_label = QLabel(f"{float(price_val):.0f} {self.get_currency_symbol()}")
         price_label.setStyleSheet("font-size:14px; font-weight:bold; color:#4CAF50;")
         card_layout.addWidget(price_label)
 
@@ -343,7 +347,7 @@ class ModernSupermarketWidget(QWidget):
 
         # Prix
         price_val = getattr(service, 'price', None) or getattr(service, 'prix', 0.0)
-        price_label = QLabel(f"{float(price_val):.0f} FC")
+        price_label = QLabel(f"{float(price_val):.0f} {self.get_currency_symbol()}")
         price_label.setStyleSheet("font-weight: bold; color: #4CAF50;")
         layout.addWidget(price_label, 1, Qt.AlignmentFlag.AlignRight)
 

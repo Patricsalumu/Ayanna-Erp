@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ..model.models import ShopClient, ShopPanier, ShopService
 
 
@@ -20,6 +21,15 @@ class VenteController:
         self.pos_id = pos_id
         self.current_user = current_user
         self.db_manager = DatabaseManager()
+        self.entreprise_controller = EntrepriseController()
+
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        return self.entreprise_controller.get_currency_symbol()
+
+    def format_amount(self, amount):
+        """Formate un montant avec la devise de l'entreprise"""
+        return self.entreprise_controller.format_amount(amount)
 
     def process_sale(self, sale_data: Dict) -> Tuple[bool, str, Optional[int]]:
         """
@@ -178,11 +188,11 @@ class VenteController:
 
                 # Message de succès
                 if amount_received == 0:
-                    message = f"✅ Commande #{numero_commande} enregistrée (non payée) - {total_amount:.0f} FC"
+                    message = f"✅ Commande #{numero_commande} enregistrée (non payée) - {total_amount:.0f} {self.get_currency_symbol()}"
                 elif amount_received >= total_amount:
-                    message = f"✅ Vente #{numero_commande} complétée - {total_amount:.0f} FC"
+                    message = f"✅ Vente #{numero_commande} complétée - {total_amount:.0f} {self.get_currency_symbol()}"
                 else:
-                    message = f"✅ Vente #{numero_commande} partiellement payée - {amount_received:.0f}/{total_amount:.0f} FC"
+                    message = f"✅ Vente #{numero_commande} partiellement payée - {amount_received:.0f}/{total_amount:.0f} {self.get_currency_symbol()}"
 
                 return True, message, panier_id
 
@@ -665,3 +675,445 @@ class VenteController:
 
         except Exception as e:
             return False, f"Erreur lors de la validation du stock: {str(e)}"
+
+    def cancel_sale(self, panier_id: int) -> Tuple[bool, str]:
+        """
+        Annule une vente avec logique comptable d'annulation
+
+        Args:
+            panier_id (int): ID du panier à annuler
+
+        Returns:
+            Tuple[bool, str]: (succès, message)
+        """
+        try:
+            with self.db_manager.get_session() as session:
+                # 1. Récupérer les informations du panier
+                panier_result = session.execute(text("""
+                    SELECT id, numero_commande, status, total_final, client_id
+                    FROM shop_paniers
+                    WHERE id = :panier_id
+                """), {'panier_id': panier_id})
+
+                panier_row = panier_result.fetchone()
+                if not panier_row:
+                    return False, "Panier introuvable"
+
+                numero_commande = panier_row[1]
+                current_status = panier_row[2]
+                total_amount = float(panier_row[3])
+                client_id = panier_row[4]
+
+                if current_status == 'cancelled':
+                    return False, "Cette commande est déjà annulée"
+
+                # 2. Vérifier s'il y a eu un paiement
+                payment_result = session.execute(text("""
+                    SELECT amount, payment_method FROM shop_payments
+                    WHERE panier_id = :panier_id
+                """), {'panier_id': panier_id})
+
+                payment_row = payment_result.fetchone()
+                amount_paid = float(payment_row[0]) if payment_row else 0.0
+                payment_method = payment_row[1] if payment_row else None
+
+                # 3. Récupérer la configuration comptable
+                config_result = session.execute(text("""
+                    SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id
+                    FROM compta_config
+                    WHERE pos_id = :pos_id
+                    LIMIT 1
+                """), {'pos_id': self.pos_id})
+
+                config_row = config_result.fetchone()
+                if not config_row:
+                    return False, "Configuration comptable introuvable"
+
+                compte_vente_id = config_row[0]
+                compte_caisse_id = config_row[1]
+                compte_client_id = config_row[2]
+                compte_remise_id = config_row[3]
+                compte_stock_id = config_row[4]
+                compte_variation_stock_id = config_row[5]
+                compte_achat_id = config_row[6]
+
+                # 4. Créer le journal d'annulation
+                journal_cancel_result = session.execute(text("""
+                    INSERT INTO compta_journaux
+                    (date_operation, libelle, montant, type_operation, reference, description,
+                     enterprise_id, user_id, date_creation, date_modification)
+                    VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
+                            :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                """), {
+                    'date_operation': datetime.now(),
+                    'libelle': f"Annulation vente -{numero_commande}",
+                    'montant': total_amount,
+                    'type_operation': 'annulation',
+                    'reference': f"ANN-{numero_commande}",
+                    'description': f"Annulation vente boutique - {numero_commande}",
+                    'enterprise_id': 1,
+                    'user_id': getattr(self.current_user, 'id', 1),
+                    'date_creation': datetime.now(),
+                    'date_modification': datetime.now()
+                })
+
+                session.flush()
+                journal_cancel_id_result = session.execute(text("SELECT last_insert_rowid()"))
+                journal_cancel_id = journal_cancel_id_result.fetchone()[0]
+
+                ordre = 1
+
+                # 5. Récupérer les articles du panier pour créer les écritures d'annulation
+                cart_items = []
+                # Produits
+                products_result = session.execute(text("""
+                    SELECT sp.product_id, sp.quantity, sp.price_unit, sp.total_price, cp.name, cp.compte_charge_id
+                    FROM shop_paniers_products sp
+                    JOIN core_products cp ON sp.product_id = cp.id
+                    WHERE sp.panier_id = :panier_id
+                """), {'panier_id': panier_id})
+
+                for row in products_result:
+                    cart_items.append({
+                        'type': 'product',
+                        'id': row[0],
+                        'quantity': row[1],
+                        'unit_price': float(row[2]),
+                        'total_price': float(row[3]),
+                        'name': row[4],
+                        'compte_charge_id': row[5]
+                    })
+
+                # Services
+                services_result = session.execute(text("""
+                    SELECT ss.service_id, ss.quantity, ss.price_unit, ss.total_price, s.name, s.id as service_source_id
+                    FROM shop_paniers_services ss
+                    JOIN shop_services s ON ss.service_id = s.id
+                    WHERE ss.panier_id = :panier_id
+                """), {'panier_id': panier_id})
+
+                for row in services_result:
+                    cart_items.append({
+                        'type': 'service',
+                        'id': row[0],
+                        'quantity': row[1],
+                        'unit_price': float(row[2]),
+                        'total_price': float(row[3]),
+                        'name': row[4],
+                        'source': 'shop'
+                    })
+
+                # 6. Créer les écritures d'annulation (INVERSE des écritures de vente)
+
+                # Écritures d'annulation vente : débiter les comptes produits/services et créditer le client
+                for item in cart_items:
+                    item_total = item['unit_price'] * item['quantity']
+
+                    # Par défaut, utiliser le compte de vente général
+                    compte_item_id = compte_vente_id
+
+                    # Si c'est un produit et qu'un compte spécifique est configuré
+                    if item.get('type') == 'product':
+                        product_result = session.execute(text("""
+                            SELECT compte_produit_id FROM core_products
+                            WHERE id = :product_id
+                        """), {'product_id': item['id']})
+                        product_row = product_result.fetchone()
+                        if product_row and product_row[0]:
+                            compte_item_id = product_row[0]
+
+                    # Si c'est un service
+                    elif item.get('type') == 'service':
+                        if item.get('source') == 'shop':
+                            service_result = session.execute(text("""
+                                SELECT compte_produit_id FROM shop_services
+                                WHERE id = :service_id
+                            """), {'service_id': item['id']})
+                            service_row = service_result.fetchone()
+                            if service_row and service_row[0]:
+                                compte_item_id = service_row[0]
+
+                    # Écriture d'annulation : DÉBITER le compte produit/service (inverse de la vente)
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_cancel_id,
+                        'compte_id': compte_item_id,
+                        'debit': item_total,
+                        'credit': 0,
+                        'ordre': ordre,
+                        'libelle': f"Annulation vente {item.get('name', 'Article')} (x{item['quantity']})",
+                        'date_creation': datetime.now()
+                    })
+                    ordre += 1
+
+                # Écriture d'annulation : CRÉDITER le compte client (inverse de la vente)
+                if compte_client_id:
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_cancel_id,
+                        'compte_id': compte_client_id,
+                        'debit': 0,
+                        'credit': total_amount,
+                        'ordre': ordre,
+                        'libelle': f"Annulation client - Vente {numero_commande}",
+                        'date_creation': datetime.now()
+                    })
+                    ordre += 1
+
+                # 7. Si c'était un inventaire permanent, annuler les écritures de sortie stock
+                if cart_items and any(item.get('type') == 'product' for item in cart_items):
+                    journal_stock_cancel_result = session.execute(text("""
+                        INSERT INTO compta_journaux
+                        (date_operation, libelle, montant, type_operation, reference, description,
+                         enterprise_id, user_id, date_creation, date_modification)
+                        VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
+                                :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                    """), {
+                        'date_operation': datetime.now(),
+                        'libelle': f"Annulation sortie stock -{numero_commande}",
+                        'montant': sum(item['unit_price'] * item['quantity'] for item in cart_items if item.get('type') == 'product'),
+                        'type_operation': 'stock',
+                        'reference': f"ANN-STOCK-{numero_commande}",
+                        'description': f"Annulation sortie stock (COGS) - {numero_commande}",
+                        'enterprise_id': 1,
+                        'user_id': getattr(self.current_user, 'id', 1),
+                        'date_creation': datetime.now(),
+                        'date_modification': datetime.now()
+                    })
+
+                    session.flush()
+                    journal_stock_cancel_id_result = session.execute(text("SELECT last_insert_rowid()"))
+                    journal_stock_cancel_id = journal_stock_cancel_id_result.fetchone()[0]
+
+                    ordre_stock = 1
+
+                    # Pour chaque produit, annuler la sortie stock (inverse de la vente)
+                    for item in cart_items:
+                        if item.get('type') != 'product':
+                            continue
+
+                        product_id = item.get('id')
+                        qty = item.get('quantity', 0)
+
+                        # Récupérer le coût du produit
+                        cost_result = session.execute(text("""
+                            SELECT cost FROM core_products
+                            WHERE id = :product_id
+                        """), {'product_id': product_id})
+                        cost_row = cost_result.fetchone()
+                        unit_cost = float(cost_row[0]) if cost_row and cost_row[0] is not None else 0.0
+
+                        # Déterminer le compte charge utilisé lors de la vente
+                        compte_charge_id = item.get('compte_charge_id') or compte_achat_id or compte_variation_stock_id
+
+                        cogs_amount = unit_cost * qty
+                        if cogs_amount <= 0:
+                            continue
+
+                        # Écritures d'annulation stock : CRÉDITER le compte charge (inverse) et DÉBITER le compte stock (inverse)
+                        session.execute(text("""
+                            INSERT INTO compta_ecritures
+                            (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                            VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                        """), {
+                            'journal_id': journal_stock_cancel_id,
+                            'compte_id': compte_charge_id,
+                            'debit': 0,
+                            'credit': cogs_amount,
+                            'ordre': ordre_stock,
+                            'libelle': f"Annulation COGS {item.get('name', f'Produit {product_id}')} (x{qty})",
+                            'date_creation': datetime.now()
+                        })
+                        ordre_stock += 1
+
+                        session.execute(text("""
+                            INSERT INTO compta_ecritures
+                            (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                            VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                        """), {
+                            'journal_id': journal_stock_cancel_id,
+                            'compte_id': compte_stock_id,
+                            'debit': cogs_amount,
+                            'credit': 0,
+                            'ordre': ordre_stock,
+                            'libelle': f"Annulation sortie stock {item.get('name', f'Produit {product_id}')} (x{qty})",
+                            'date_creation': datetime.now()
+                        })
+                        ordre_stock += 1
+
+                # 8. Si il y avait un paiement, créer les écritures d'annulation de paiement
+                if amount_paid > 0 and payment_method and compte_caisse_id:
+                    journal_payment_cancel_result = session.execute(text("""
+                        INSERT INTO compta_journaux
+                        (date_operation, libelle, montant, type_operation, reference, description,
+                         enterprise_id, user_id, date_creation, date_modification)
+                        VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
+                                :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                    """), {
+                        'date_operation': datetime.now(),
+                        'libelle': f"Annulation paiement {numero_commande}",
+                        'montant': amount_paid,
+                        'type_operation': 'paiement',
+                        'reference': f"ANN-PAI-{numero_commande}",
+                        'description': f"Annulation paiement vente - {payment_method}",
+                        'enterprise_id': 1,
+                        'user_id': getattr(self.current_user, 'id', 1),
+                        'date_creation': datetime.now(),
+                        'date_modification': datetime.now()
+                    })
+
+                    session.flush()
+                    journal_payment_cancel_id_result = session.execute(text("SELECT last_insert_rowid()"))
+                    journal_payment_cancel_id = journal_payment_cancel_id_result.fetchone()[0]
+
+                    # Écritures d'annulation paiement : DÉBITER le client et CRÉDITER la caisse (inverse du paiement)
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_payment_cancel_id,
+                        'compte_id': compte_client_id,
+                        'debit': amount_paid,
+                        'credit': 0,
+                        'ordre': 1,
+                        'libelle': f"Annulation règlement client - {numero_commande}",
+                        'date_creation': datetime.now()
+                    })
+
+                    session.execute(text("""
+                        INSERT INTO compta_ecritures
+                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """), {
+                        'journal_id': journal_payment_cancel_id,
+                        'compte_id': compte_caisse_id,
+                        'debit': 0,
+                        'credit': amount_paid,
+                        'ordre': 2,
+                        'libelle': f"Annulation encaissement {payment_method} - {numero_commande}",
+                        'date_creation': datetime.now()
+                    })
+
+                # 9. Mettre à jour le statut du panier
+                session.execute(text("""
+                    UPDATE shop_paniers
+                    SET status = 'cancelled', updated_at = :updated_at
+                    WHERE id = :panier_id
+                """), {
+                    'panier_id': panier_id,
+                    'updated_at': datetime.now()
+                })
+
+                # 10. Remettre le paiement à 0 (logique métier)
+                if amount_paid > 0:
+                    session.execute(text("""
+                        UPDATE shop_payments
+                        SET amount = 0
+                        WHERE panier_id = :panier_id
+                    """), {
+                        'panier_id': panier_id
+                    })
+
+                # 11. Remettre le stock (logique inverse de la vente)
+                for item in cart_items:
+                    if item.get('type') == 'product':
+                        self._update_pos_stock_cancel(session, item['id'], item['quantity'], numero_commande)
+
+                # Valider la transaction
+                session.commit()
+
+                return True, f"✅ Commande {numero_commande} annulée avec succès"
+
+        except Exception as e:
+            return False, f"Erreur lors de l'annulation: {str(e)}"
+
+    def _update_pos_stock_cancel(self, session: Session, product_id: int, quantity_returned: int, numero_commande: str):
+        """Remet le stock lors d'une annulation (inverse de _update_pos_stock)"""
+        try:
+            # Chercher l'entrepôt POS_2
+            warehouse_result = session.execute(text("""
+                SELECT id FROM stock_warehouses
+                WHERE code = 'POS_2' AND is_active = 1
+                LIMIT 1
+            """))
+
+            warehouse_row = warehouse_result.fetchone()
+            if not warehouse_row:
+                print(f"⚠️ Entrepôt POS_2 non trouvé pour l'annulation du produit {product_id}")
+                return
+
+            warehouse_id = warehouse_row[0]
+
+            # Récupérer le stock actuel
+            stock_result = session.execute(text("""
+                SELECT quantity FROM stock_produits_entrepot
+                WHERE product_id = :product_id AND warehouse_id = :warehouse_id
+                LIMIT 1
+            """), {'product_id': product_id, 'warehouse_id': warehouse_id})
+
+            stock_row = stock_result.fetchone()
+            current_stock = stock_row[0] if stock_row else 0
+
+            # Remettre le stock (ajouter la quantité)
+            new_stock = current_stock + quantity_returned
+
+            # Mettre à jour ou insérer le stock
+            if stock_row:
+                session.execute(text("""
+                    UPDATE stock_produits_entrepot
+                    SET quantity = :new_quantity, updated_at = :updated_at
+                    WHERE product_id = :product_id AND warehouse_id = :warehouse_id
+                """), {
+                    'product_id': product_id,
+                    'new_quantity': new_stock,
+                    'warehouse_id': warehouse_id,
+                    'updated_at': datetime.now()
+                })
+            else:
+                session.execute(text("""
+                    INSERT INTO stock_produits_entrepot
+                    (product_id, warehouse_id, quantity, created_at, updated_at)
+                    VALUES (:product_id, :warehouse_id, :quantity, :created_at, :updated_at)
+                """), {
+                    'product_id': product_id,
+                    'warehouse_id': warehouse_id,
+                    'quantity': new_stock,
+                    'created_at': datetime.now(),
+                    'updated_at': datetime.now()
+                })
+
+            # Mouvement de stock pour annulation
+            session.execute(text("""
+                        INSERT INTO stock_mouvements(
+                            product_id, warehouse_id, movement_type, quantity, unit_cost, total_cost,
+                            destination_warehouse_id, reference, description, user_id, movement_date, created_at
+                        )VALUES(
+                            :product_id, :warehouse_id, :movement_type, :quantity, :unit_cost, :total_cost,
+                            :destination_warehouse_id, :reference, :description, :user_id, :movement_date, :created_at
+                        )"""), {
+                            'product_id': product_id,
+                            'warehouse_id': warehouse_id,
+                            'movement_type': 'ENTREE',
+                            'quantity': quantity_returned,
+                            'unit_cost': 0,  # Pas de coût pour l'annulation
+                            'total_cost': 0,
+                            'destination_warehouse_id': warehouse_id,
+                            'reference': numero_commande,
+                            'description': "Annulation vente - " + numero_commande,
+                            'user_id': 1,
+                            'movement_date': datetime.now(),
+                            'created_at': datetime.now()
+
+                        })
+
+            print(f"📦 Stock remis - Produit {product_id}: {current_stock} → {new_stock}")
+
+        except Exception as e:
+            print(f"❌ Erreur remise stock annulation: {e}")
