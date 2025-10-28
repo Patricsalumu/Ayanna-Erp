@@ -32,20 +32,13 @@ class InvoicePrintManager:
         self.entreprise_controller = EntrepriseController() if EntrepriseController else None
         self.enterprise_id = enterprise_id  # Stocker l'ID de l'entreprise
 
-        # Récupérer les informations de l'entreprise depuis la BDD
-        if self.entreprise_controller:
+
+        try:
             self.company_info = self.entreprise_controller.get_company_info_for_pdf(enterprise_id)
-        else:
-            # Fallback aux données statiques
-            self.company_info = {
-                'name': 'AYANNA ERP',
-                'address': '123 Avenue de la République',
-                'city': 'Kinshasa, RDC',
-                'phone': '+243 123 456 789',
-                'email': 'contact@ayanna-erp.com',
-                'rccm': 'CD/KIN/RCCM/23-B-1234',
-                'logo': None  # BLOB au lieu de logo_path
-            }
+        except Exception as e:
+            print(f"Erreur récupération informations entreprise: {e}")
+
+
 
         # Styles pour les documents
         self.styles = getSampleStyleSheet()
@@ -64,8 +57,12 @@ class InvoicePrintManager:
         self.enterprise_id = enterprise_id
 
         # Recharger les informations de l'entreprise
-        if self.entreprise_controller:
+        
+        try:
             self.company_info = self.entreprise_controller.get_company_info_for_pdf(enterprise_id)
+        except Exception as e:
+            print(f"Erreur récupération informations entreprise: {e}")
+
 
         # Nettoyer l'ancien logo temporaire
         self._cleanup_temp_logo()
@@ -417,19 +414,78 @@ class InvoicePrintManager:
         return filename
 
     def print_receipt_53mm(self, invoice_data, payments_list, user_name, filename):
+        print('DEBUGG : Je suis appele debug print_receipt_53mm')
         """Imprimer un reçu de paiement sur format 53mm avec détail de tous les paiements"""
         # Taille du ticket 53mm de large (format imprimante thermique)
         TICKET_WIDTH = 53 * mm
-        # Estimer la hauteur nécessaire
-        base_height = 80  # En-tête et pied de page
-        payment_height = len(payments_list) * 30 if payments_list else 20  # 30mm par paiement
-        TICKET_HEIGHT = (base_height + payment_height) * mm
 
-        # Créer le document PDF
+        # Calculer dynamiquement la hauteur nécessaire en estimant les lignes
+        from reportlab.pdfbase import pdfmetrics
+
+        usable_width = TICKET_WIDTH - (6 * mm)  # marges gauche/droite
+
+        # Estimer hauteur des différentes sections (en mm)
+        header_height = 18 * mm if self.company_info.get('logo') else 8 * mm
+        company_lines_height = 8 * mm
+        title_height = 8 * mm
+
+        # Articles: estimer par article (nom + detail)
+        articles_height = 0
+        if invoice_data.get('items'):
+            for item in invoice_data['items']:
+                name = str(item.get('name', ''))
+                # calculer le nombre de lignes nécessaires pour le nom
+                name_width = pdfmetrics.stringWidth(name, 'Helvetica', 6)
+                name_lines = max(1, int((name_width // usable_width) + 1))
+                # détail (quantité x prix) sur une ligne en général
+                detail_lines = 1
+                articles_height += (name_lines * 3 * mm) + (detail_lines * 3 * mm)
+
+        # Paiements: estimer environ 6mm par paiement (séparateurs inclus)
+        payments_height = (len(payments_list) * 6 * mm) if payments_list else 6 * mm
+
+        # Récapitulatif/financier
+        recap_height = 20 * mm
+
+        # Notes: estimer en fonction de la largeur
+        notes = (invoice_data.get('notes') or '').strip()
+        notes_height = 0
+        if notes:
+            # Estimer lignes pour les notes
+            words = notes.split()
+            cur_line = ''
+            lines = 0
+            for word in words:
+                test = (cur_line + ' ' + word).strip() if cur_line else word
+                if pdfmetrics.stringWidth(test, 'Helvetica', 5) < usable_width:
+                    cur_line = test
+                else:
+                    lines += 1
+                    cur_line = word
+            if cur_line:
+                lines += 1
+            notes_height = max(6 * mm, lines * 3 * mm)
+
+        # Réserver de l'espace pour la signature
+        signature_height = 20 * mm
+
+        # Petit espace final
+        footer_extra = 6 * mm
+
+        total_height = header_height + company_lines_height + title_height + articles_height + payments_height + recap_height + notes_height + signature_height + footer_extra
+
+        # Minimum raisonnable (en mm)
+        min_height = 80 * mm
+        if total_height < min_height:
+            total_height = min_height
+
+        TICKET_HEIGHT = total_height
+
+        # Créer le document PDF avec la hauteur calculée
         c = canvas.Canvas(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT))
 
-        y_position = TICKET_HEIGHT - 5*mm  # Commencer en haut
-        line_height = 4*mm  # Espacement entre les lignes
+        y_position = TICKET_HEIGHT - 5 * mm  # point de départ en haut
+        line_height = 3.5 * mm  # espacement moyen entre lignes
 
         # Logo et en-tête entreprise (taille réduite pour 53mm)
         logo_path = self._create_temp_logo_file()
@@ -523,9 +579,8 @@ class InvoicePrintManager:
                 quantity = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
                 total_line = quantity * unit_price
-                currency_symbol = self.get_currency_symbol()
-
-                item_detail = f"{quantity:.0f} x {unit_price:.0f} = {total_line:.0f} {currency_symbol}"
+                # Utiliser format_amount pour un affichage uniforme
+                item_detail = f"{int(quantity)} x {self.format_amount(unit_price)} = {self.format_amount(total_line)}"
                 c.drawString(5*mm, y_position, item_detail)
                 y_position -= 2.5*mm
 
@@ -549,12 +604,11 @@ class InvoicePrintManager:
                 c.drawString(2*mm, y_position, payment_num_text)
                 y_position -= 2*mm
 
-                # Montant
+                # Montant (formaté)
                 c.setFont('Helvetica', 6)
                 amount = payment.get('amount', 0)
                 total_paid += amount
-                currency_symbol = self.get_currency_symbol()
-                amount_text = f"{amount:.2f} {currency_symbol}"
+                amount_text = self.format_amount(amount)
                 c.drawString(3*mm, y_position, amount_text)
                 y_position -= 2*mm
 
@@ -592,9 +646,51 @@ class InvoicePrintManager:
         c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
         y_position -= 3*mm
 
+        c.setFont('Helvetica-Bold', 6)
+        c.drawString(2*mm, y_position, "RECAPITULATIF:")
+        y_position -= 3*mm
+
+        c.setFont('Helvetica', 6)
+        # Utiliser le net à payer (après remise)
+        net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', 0))
+        sous_total_val = invoice_data.get('subtotal_ht', 0)
+        remise_val = invoice_data.get('discount_amount', 0)
+        balance = net_a_payer - total_paid
+
+        # Sous total (avant remise)
+        sous_total_text = f"Sous total: {self.format_amount(sous_total_val)}"
+        c.drawString(2*mm, y_position, sous_total_text)
+        y_position -= 3.5*mm
+
+        # Remise
+        remise_text = f"Remise: {self.format_amount(remise_val)}"
+        c.drawString(2*mm, y_position, remise_text)
+        y_position -= 3.5*mm
+
+        # Net à payer (après remise)
+        total_text = f"Net à payer: {self.format_amount(net_a_payer)}"
+        c.drawString(2*mm, y_position, total_text)
+        y_position -= 3.5*mm
+
+        # Total payé
+        paid_text = f"Paye: {self.format_amount(total_paid)}"
+        c.drawString(2*mm, y_position, paid_text)
+        y_position -= 3.5*mm
+
+        # Reste à payer
+        c.setFont('Helvetica-Bold', 7)
+        balance_text = f"Reste: {self.format_amount(balance)}"
+        c.drawString(2*mm, y_position, balance_text)
+        y_position -= 3*mm
+
+        # Ligne de séparation finale
+        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        y_position -= 3*mm
+        
         # Section Notes (si présentes)
-        notes = invoice_data.get('notes', '').strip()
-        if notes and notes != f"Vente effectuée par {user_name} - POS #{invoice_data.get('pos_id', 'N/A')}":
+        # Afficher les notes si présentes (toujours après le récapitulatif)
+        notes = (invoice_data.get('notes') or '').strip()
+        if notes:
             c.setFont('Helvetica-Bold', 6)
             c.drawString(2*mm, y_position, "NOTES:")
             y_position -= 3*mm
@@ -622,35 +718,6 @@ class InvoicePrintManager:
             c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
             y_position -= 3*mm
 
-        c.setFont('Helvetica-Bold', 6)
-        c.drawString(2*mm, y_position, "RECAPITULATIF:")
-        y_position -= 3*mm
-
-        c.setFont('Helvetica', 6)
-        # Utiliser le net à payer (après remise)
-        net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', 0))
-        balance = net_a_payer - total_paid
-        currency_symbol = self.get_currency_symbol()
-
-        # Net à payer (après remise)
-        total_text = f"Net a payer: {net_a_payer:.2f} {currency_symbol}"
-        c.drawString(2*mm, y_position, total_text)
-        y_position -= 3.5*mm
-
-        # Total payé
-        paid_text = f"Paye: {total_paid:.2f} {currency_symbol}"
-        c.drawString(2*mm, y_position, paid_text)
-        y_position -= 3.5*mm
-
-        # Reste à payer
-        c.setFont('Helvetica-Bold', 7)
-        balance_text = f"Reste: {balance:.2f} {currency_symbol}"
-        c.drawString(2*mm, y_position, balance_text)
-        y_position -= 3*mm
-
-        # Ligne de séparation finale
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
-        y_position -= 3*mm
 
         # Filigrane avec nom d'entreprise dynamique
         c.setFont('Helvetica', 5)

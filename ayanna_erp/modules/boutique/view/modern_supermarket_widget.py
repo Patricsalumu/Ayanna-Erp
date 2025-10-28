@@ -42,7 +42,32 @@ class ModernSupermarketWidget(QWidget):
         self.pos_id = pos_id
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
-        self.invoice_printer = InvoicePrintManager(enterprise_id=self.pos_id)
+        # Déterminer enterprise_id en privilégiant le contrôleur d'entreprise
+        try:
+            eid = None
+            # Si le contrôleur propose l'objet entreprise courant
+            if hasattr(self.enterprise_controller, 'get_current_enterprise'):
+                try:
+                    ent = self.enterprise_controller.get_current_enterprise()
+                    if ent and isinstance(ent, dict) and ent.get('id'):
+                        eid = ent.get('id')
+                except Exception:
+                    eid = None
+
+            # Si pas d'id trouvé, tenter get_current_enterprise_id()
+            if not eid and hasattr(self.enterprise_controller, 'get_current_enterprise_id'):
+                try:
+                    eid = self.enterprise_controller.get_current_enterprise_id()
+                except Exception:
+                    eid = None
+
+            # Fallback: pos_id ou 1
+            if not eid:
+                eid = self.pos_id or 1
+        except Exception:
+            eid = self.pos_id or 1
+
+        self.invoice_printer = InvoicePrintManager(enterprise_id=eid)
         self.vente_controller = VenteController(self.pos_id, self.current_user)
         
         # Variables d'état
@@ -1690,7 +1715,7 @@ class ModernSupermarketWidget(QWidget):
                 from sqlalchemy import text
                 notes_result = session.execute(text("""
                     SELECT notes FROM shop_paniers 
-                    WHERE pos_id = :pos_id AND status = 'completed' 
+                    WHERE pos_id = :pos_id 
                     ORDER BY created_at DESC LIMIT 1
                 """), {'pos_id': self.pos_id})
                 notes_row = notes_result.fetchone()
@@ -1714,7 +1739,8 @@ class ModernSupermarketWidget(QWidget):
             'tax_amount': 0.0,  # Pas de TVA pour l'instant
             'total_ttc': sale_data['total_amount'],
             'discount_amount': sale_data['discount_amount'],
-            'total_net': sale_data['total_amount'],
+            'total_net': sale_data['total_amount'],  # Net à payer après remise
+            'net_a_payer': sale_data['total_amount'],  # Alias pour compatibilité
             'notes': panier_notes if panier_notes else f"Vente effectuée par {getattr(self.current_user, 'name', 'Utilisateur')} - POS #{self.pos_id}",
             'payments': [{
                 'payment_date': sale_data['sale_date'],
@@ -1902,6 +1928,81 @@ Paiement: {payment_data['method']}
             )
             import traceback
             traceback.print_exc()
+
+    def _print_invoice_receipt(self, invoice_data, dialog):
+        """Imprime la facture/reçu en utilisant InvoicePrintManager (même système que commandes_index.py)"""
+        try:
+            # Déterminer le format d'impression
+            format_choice = self.print_format_combo.currentText()
+
+            # Générer un nom de fichier
+            from datetime import datetime
+            import tempfile
+            import os
+
+            # Déterminer le répertoire de destination
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+            if "53mm" in format_choice:
+                # Pour les tickets 53mm : dossier temporaire (pour impression directe)
+                temp_dir = tempfile.gettempdir()
+                filename = os.path.join(temp_dir, f"receipt_sale_{timestamp}.pdf")
+                print_type = "ticket 53mm"
+            else:
+                # Pour les factures A4 : dossier factures_export
+                invoices_dir = os.path.join(os.getcwd(), "factures_export")
+                os.makedirs(invoices_dir, exist_ok=True)  # Créer le dossier s'il n'existe pas
+                filename = os.path.join(invoices_dir, f"facture_vente_{invoice_data.get('reference', 'UNKNOWN')}_{timestamp}.pdf")
+                print_type = "facture A4"
+
+            # Générer le document
+            if "53mm" in format_choice:
+                # Impression ticket 53mm
+                payments_list = invoice_data.get('payments', [])
+                user_name = invoice_data.get('payments', [{}])[0].get('user_name', 'Utilisateur') if invoice_data.get('payments') else 'Utilisateur'
+
+                result = self.invoice_printer.print_receipt_53mm(invoice_data, payments_list, user_name, filename)
+            else:
+                # Impression A4
+                result = self.invoice_printer.print_invoice_a4(invoice_data, filename)
+
+            if result and os.path.exists(result):
+                if "53mm" in format_choice:
+                    # Pour les tickets 53mm : ouvrir directement dans le lecteur par défaut
+                    try:
+                        import subprocess
+                        subprocess.run(['start', '', result], shell=True, check=True)
+                        QMessageBox.information(dialog, "Impression lancée",
+                                              f"Le ticket 53mm a été généré et l'impression a été lancée automatiquement !\n\n"
+                                              f"Fichier: {result}")
+                    except Exception as print_error:
+                        QMessageBox.warning(dialog, "Impression manuelle requise",
+                                          f"Le ticket 53mm a été généré avec succès !\n\n"
+                                          f"Fichier: {result}\n\n"
+                                          f"Erreur d'impression automatique: {print_error}\n"
+                                          "Veuillez imprimer manuellement depuis votre lecteur PDF.")
+                else:
+                    # Pour les factures A4 : ouvrir le dossier factures_export
+                    try:
+                        import subprocess
+                        subprocess.run(['explorer', '/select,', result], shell=True, check=True)
+                        QMessageBox.information(dialog, "Export réussi",
+                                              f"La facture A4 a été exportée avec succès !\n\n"
+                                              f"Fichier: {result}\n\n"
+                                              "Le dossier contenant la facture a été ouvert.")
+                    except Exception as open_error:
+                        QMessageBox.information(dialog, "Export réussi",
+                                              f"La facture A4 a été exportée avec succès !\n\n"
+                                              f"Fichier: {result}\n\n"
+                                              f"Erreur ouverture dossier: {open_error}")
+
+                dialog.accept()
+            else:
+                QMessageBox.warning(dialog, "Erreur", f"Impossible de générer le document {print_type}.")
+
+        except Exception as e:
+            QMessageBox.critical(dialog, "Erreur", f"Erreur lors de l'impression: {e}")
+            print(f"❌ Erreur _print_invoice_receipt: {e}")
 
 class QuantityDialog(QDialog):
     """Dialogue pour saisir la quantité d'un produit"""
