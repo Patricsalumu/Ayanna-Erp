@@ -540,60 +540,185 @@ class AchatController:
                 session.add(stock_entry)
     
     def annuler_commande(self, session: Session, commande_id: int, motif: str = None):
-        """Annule une commande"""
+        """Annule une commande d'achat avec gestion complète des conséquences
+
+        Actions effectuées :
+        1. Si commande réceptionnée : crée mouvements de sortie pour réduire le stock
+        2. Met à zéro toutes les dépenses (AchatDepense) liées à cette commande
+        3. Crée écritures comptables d'annulation
+        """
+        from ayanna_erp.modules.stock.models import StockMovement
+        from ayanna_erp.modules.achats.models.achats_models import AchatDepense
+
         commande = session.query(AchatCommande).get(commande_id)
         if not commande:
             raise ValueError("Commande introuvable")
-        
+
         if commande.etat == EtatCommande.VALIDE:
             raise ValueError("Impossible d'annuler une commande déjà validée")
-        # Passer l'état à annulé
-        commande.etat = EtatCommande.ANNULE
 
-        # Créer écriture comptable d'annulation (inverse de la création de commande)
+        # === 1. SI COMMANDE RÉCEPTIONNÉE : CRÉER MOUVEMENTS DE SORTIE ===
+        if commande.etat == EtatCommande.RECEPTIONNE:
+            # Créer mouvements de sortie pour annuler l'entrée en stock
+            for ligne in commande.lignes:
+                if ligne.quantite > 0:
+                    # Trouver l'entrepôt de destination (entrepôt de la commande)
+                    entrepot_id = commande.entrepot_id
+
+                    mouvement_sortie = StockMovement(
+                        product_id=ligne.produit_id,
+                        warehouse_id=entrepot_id,
+                        movement_type="SORTIE",
+                        quantity=-ligne.quantite,  # Quantité négative pour sortie
+                        unit_cost=ligne.prix_unitaire,
+                        total_cost=-(ligne.prix_unitaire * ligne.quantite),
+                        reference=f"ANN-{commande.numero}",
+                        description=f"Annulation commande d'achat - {commande.numero}",
+                        user_id=getattr(commande, 'utilisateur_id', None),
+                        user_name=getattr(commande, 'utilisateur_nom', 'Système')
+                    )
+                    session.add(mouvement_sortie)
+                    session.flush()  # Pour obtenir l'ID du mouvement
+
+                    # METTRE À JOUR LA QUANTITÉ EN STOCK
+                    produit_entrepot = session.query(StockProduitEntrepot).filter_by(
+                        product_id=ligne.produit_id,
+                        warehouse_id=entrepot_id
+                    ).first()
+
+                    if produit_entrepot:
+                        # Réduire la quantité en stock
+                        produit_entrepot.quantity = (produit_entrepot.quantity or Decimal('0')) - ligne.quantite
+                        # Recalculer le coût total
+                        produit_entrepot.total_cost = produit_entrepot.quantity * (produit_entrepot.unit_cost or Decimal('0'))
+                        produit_entrepot.last_movement_date = datetime.now()
+                        session.add(produit_entrepot)
+                    else:
+                        # Si l'entrée n'existe pas, la créer avec quantité négative (cas exceptionnel)
+                        nouveau_produit_entrepot = StockProduitEntrepot(
+                            product_id=ligne.produit_id,
+                            warehouse_id=entrepot_id,
+                            quantity=-ligne.quantite,
+                            unit_cost=ligne.prix_unitaire,
+                            total_cost=-(ligne.prix_unitaire * ligne.quantite),
+                            last_movement_date=datetime.now()
+                        )
+                        session.add(nouveau_produit_entrepot)
+
+        # === 2. METTRE À ZÉRO TOUTES LES DÉPENSES LIÉES ===
+        depenses = session.query(AchatDepense).filter_by(bon_commande_id=commande_id).all()
+        for depense in depenses:
+            # Sauvegarder l'ancien montant pour les écritures comptables
+            ancien_montant = depense.montant
+            depense.montant = Decimal('0')  # Mettre à zéro
+            depense.description = f"{depense.description or ''} [ANNULÉ - Ancien montant: {ancien_montant}]".strip()
+
+            # Stocker l'ancien montant pour les écritures comptables
+            depense._ancien_montant = ancien_montant
+
+        # === 3. PASSER L'ÉTAT À ANNULÉ ===
+        commande.etat = EtatCommande.ANNULE
+        # Note: Le motif d'annulation pourrait être stocké dans un champ commentaires
+        # si ajouté au modèle AchatCommande à l'avenir
+
+        # === 4. CRÉER ÉCRITURES COMPTABLES D'ANNULATION ===
         try:
             config = session.query(ComptaConfig).filter_by(
                 enterprise_id=self.entreprise_id
             ).first()
 
             if config:
-                journal_annulation = ComptaJournaux(
-                    date_operation=datetime.now(),
-                    libelle=f"Annulation commande - {commande.numero}",
-                    montant=commande.montant_total,
-                    type_operation="Annulation",
-                    reference=f"ANN-{commande.numero}",
-                    description=f"Annulation commande {commande.numero}",
-                    enterprise_id=self.entreprise_id,
-                    user_id=commande.utilisateur_id
-                )
-                session.add(journal_annulation)
-                session.flush()
+                # === ANNULATION DES PAIEMENTS INDIVIDUELS ===
+                for depense in depenses:
+                    ancien_montant = getattr(depense, '_ancien_montant', depense.montant)
+                    if ancien_montant > 0:  # Utiliser l'ancien montant avant mise à zéro
+                        # Créer une écriture d'annulation pour chaque paiement
+                        journal_annulation_paiement = ComptaJournaux(
+                            date_operation=datetime.now(),
+                            libelle=f"Annulation paiement - {depense.description or 'Paiement'} - Cmd {commande.numero}",
+                            montant=ancien_montant,
+                            type_operation="Annulation",
+                            reference=f"ANN-PAY-{commande.numero}-{depense.id}",
+                            description=f"Annulation du paiement de {ancien_montant} pour la commande {commande.numero}",
+                            enterprise_id=self.entreprise_id,
+                            user_id=commande.utilisateur_id
+                        )
+                        session.add(journal_annulation_paiement)
+                        session.flush()
 
-                # Débit : Fournisseur (on recrée la dette inverse)
-                ecriture_debit = ComptaEcritures(
-                    journal_id=journal_annulation.id,
-                    compte_comptable_id=config.compte_fournisseur_id,
-                    debit=commande.montant_total,
-                    credit=Decimal('0'),
-                    ordre=1,
-                    libelle=f"Annulation dette fournisseur - Commande {commande.numero}"
-                )
-                session.add(ecriture_debit)
+                        # Déterminer le compte de règlement selon le mode de paiement
+                        compte_reglement_id = config.compte_caisse_id  # Par défaut caisse
+                        if depense.mode_paiement and 'banque' in depense.mode_paiement.lower():
+                            compte_reglement_id = config.compte_banque_id or config.compte_caisse_id
 
-                # Crédit : Stock/Achat (on annule l'actif créé précédemment)
-                ecriture_credit = ComptaEcritures(
-                    journal_id=journal_annulation.id,
-                    compte_comptable_id=config.compte_stock_id or config.compte_achat_id,
-                    debit=Decimal('0'),
-                    credit=commande.montant_total,
-                    ordre=2,
-                    libelle=f"Annulation achat - Commande {commande.numero}"
-                )
-                session.add(ecriture_credit)
-                session.flush()
+                        # Écriture d'annulation du paiement :
+                        # Lors du paiement original : Débit Fournisseur, Crédit Caisse/Banque
+                        # Lors de l'annulation : Débit Caisse/Banque, Crédit Fournisseur
+
+                        # Débit : Caisse/Banque (on annule le crédit précédent)
+                        ecriture_debit = ComptaEcritures(
+                            journal_id=journal_annulation_paiement.id,
+                            compte_comptable_id=compte_reglement_id,
+                            debit=ancien_montant,
+                            credit=Decimal('0'),
+                            ordre=1,
+                            libelle=f"Annulation règlement - {depense.description or 'Paiement'} - Cmd {commande.numero}"
+                        )
+                        session.add(ecriture_debit)
+
+                        # Crédit : Fournisseur (on annule le débit précédent)
+                        ecriture_credit = ComptaEcritures(
+                            journal_id=journal_annulation_paiement.id,
+                            compte_comptable_id=config.compte_fournisseur_id,
+                            debit=Decimal('0'),
+                            credit=ancien_montant,
+                            ordre=2,
+                            libelle=f"Annulation dette fournisseur - Cmd {commande.numero}"
+                        )
+                        session.add(ecriture_credit)
+                        session.flush()
+
+                # === ANNULATION DE LA COMMANDE ELLE-MÊME ===
+                if commande.montant_total > 0:
+                    journal_commande_annulation = ComptaJournaux(
+                        date_operation=datetime.now(),
+                        libelle=f"Annulation commande - {commande.numero}",
+                        montant=commande.montant_total,
+                        type_operation="Annulation",
+                        reference=f"ANN-CMD-{commande.numero}",
+                        description=f"Annulation commande d'achat {commande.numero}",
+                        enterprise_id=self.entreprise_id,
+                        user_id=commande.utilisateur_id
+                    )
+                    session.add(journal_commande_annulation)
+                    session.flush()
+
+                    # Débit : Fournisseur (on recrée la dette inverse)
+                    ecriture_debit = ComptaEcritures(
+                        journal_id=journal_commande_annulation.id,
+                        compte_comptable_id=config.compte_fournisseur_id,
+                        debit=commande.montant_total,
+                        credit=Decimal('0'),
+                        ordre=1,
+                        libelle=f"Annulation dette fournisseur - Commande {commande.numero}"
+                    )
+                    session.add(ecriture_debit)
+
+                    # Crédit : Stock/Achat (on annule l'actif créé précédemment)
+                    ecriture_credit = ComptaEcritures(
+                        journal_id=journal_commande_annulation.id,
+                        compte_comptable_id=config.compte_stock_id or config.compte_achat_id,
+                        debit=Decimal('0'),
+                        credit=commande.montant_total,
+                        ordre=2,
+                        libelle=f"Annulation achat - Commande {commande.numero}"
+                    )
+                    session.add(ecriture_credit)
+                    session.flush()
+
         except Exception as e:
-            print(f"Erreur lors de la création de l'écriture d'annulation: {e}")
+            print(f"Erreur lors de la création des écritures d'annulation: {e}")
+            # Ne pas échouer pour autant, continuer avec l'annulation
 
         session.commit()
 
