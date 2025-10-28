@@ -498,7 +498,6 @@ class ComptabiliteController:
         """
         # Import remplac� par les nouveaux mod�les
         ecritures = self.session.query(EcritureComptable).filter_by(journal_id=journal_id).order_by(EcritureComptable.ordre.asc()).all()
-        print(f"[DEBUG] get_ecritures_du_journal retourne {len(ecritures)} écritures")
         return ecritures
     """
     Classe centrale pour la logique métier et l'accès aux données comptables.

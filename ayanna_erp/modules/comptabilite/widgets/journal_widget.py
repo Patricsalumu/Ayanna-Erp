@@ -17,6 +17,7 @@ Fonctionnalités :
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLineEdit, QDateEdit, QHeaderView, QAbstractItemView, QMessageBox
 )
+from PyQt6.QtWidgets import QLabel, QComboBox, QFrame
 from PyQt6.QtGui import QStandardItem, QColor
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
 from PyQt6.QtCore import Qt, QDate
@@ -43,30 +44,84 @@ class JournalWidget(QWidget):
             print(f"[DEBUG] JournalWidget: parent sans get_currency_symbol(), devise par défaut")
             self.devise = "€"  # Fallback
 
+        # Layout principal
         self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(12, 12, 12, 12)
 
-        # Filtres
+        # Header visuel (card) pour le module Comptabilité
+        header_frame = QFrame()
+        header_frame.setObjectName('journalHeader')
+        header_frame.setStyleSheet('''
+            QFrame#journalHeader {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 #8E44AD, stop:1 #732d91);
+                border-radius: 8px;
+                padding: 12px;
+            }
+            QLabel#titleLabel { color: white; font-size:16px; font-weight:bold }
+            QLabel#subLabel { color: #E8DAEF; font-size:12px }
+        ''')
+        header_layout = QHBoxLayout(header_frame)
+        title = QLabel("Journal Comptable")
+        title.setObjectName('titleLabel')
+        subtitle = QLabel("Consultation des journaux et écritures")
+        subtitle.setObjectName('subLabel')
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(subtitle)
+        self.layout.addWidget(header_frame)
+
+        # Filtres (recherche, date, type, rafraîchir)
         filtres_layout = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Rechercher par libellé...")
         self.debut_date = QDateEdit()
         self.debut_date.setCalendarPopup(True)
         self.debut_date.setDate(QDate.currentDate().addMonths(-1))
         self.fin_date = QDateEdit()
         self.fin_date.setCalendarPopup(True)
         self.fin_date.setDate(QDate.currentDate())
-        self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Rechercher par libellé...")
+
+        # Filtre par type d'opération
+        self.type_filter = QComboBox()
+        self.type_filter.addItem("Tous")
+
+        # Boutons
         filtre_btn = QPushButton("Filtrer")
+        filtre_btn.setStyleSheet("background-color:#6f2f86; color:white; padding:6px 12px; border-radius:6px;")
         filtre_btn.clicked.connect(self.load_data)
-        self.debut_date.dateChanged.connect(self.load_data)
-        self.fin_date.dateChanged.connect(self.load_data)
-        self.search_input.textChanged.connect(self.load_data)
-        filtres_layout.addWidget(self.debut_date)
-        filtres_layout.addWidget(self.fin_date)
+        refresh_btn = QPushButton("Rafraîchir")
+        refresh_btn.setStyleSheet("background-color:#5e2a73; color:white; padding:6px 12px; border-radius:6px;")
+        refresh_btn.clicked.connect(self.load_data)
+
+        # Connexions des filtres pour rafraîchissement automatique
+        try:
+            self.search_input.textChanged.connect(self.load_data)
+            self.debut_date.dateChanged.connect(self.load_data)
+            self.fin_date.dateChanged.connect(self.load_data)
+            self.type_filter.currentIndexChanged.connect(self.load_data)
+        except Exception:
+            # sécurité : si un widget n'existe pas encore, ignorer
+            pass
+
         filtres_layout.addWidget(self.search_input)
+        filtres_layout.addWidget(QLabel("Du"))
+        filtres_layout.addWidget(self.debut_date)
+        filtres_layout.addWidget(QLabel("Au"))
+        filtres_layout.addWidget(self.fin_date)
+        filtres_layout.addWidget(QLabel("Type"))
+        filtres_layout.addWidget(self.type_filter)
         filtres_layout.addWidget(filtre_btn)
+        filtres_layout.addWidget(refresh_btn)
         self.layout.addLayout(filtres_layout)
 
-        # Table
+        # Table (encadrée dans une card blanche)
+        table_frame = QFrame()
+        table_frame.setStyleSheet('''
+            QFrame { background-color: white; border-radius:8px; padding:8px }
+        ''')
+        table_layout = QVBoxLayout(table_frame)
+
         self.table = QTableView()
         self.model = QStandardItemModel()
         self.table.setModel(self.model)
@@ -76,34 +131,34 @@ class JournalWidget(QWidget):
         # Définir les labels des colonnes
         self.model.setHorizontalHeaderLabels(["Date/Heure", "Libellé", "Montant", "Type"])
 
-        # Colonnes redimensionnables manuellement
+        # Colonnes redimensionnables
         header = self.table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)  # L'utilisateur peut redimensionner
-        header.setStretchLastSection(True)  # La dernière colonne s'étire pour occuper tout l'espace
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
 
-        # Largeurs par défaut pour chaque colonne
-        self.table.setColumnWidth(0, 150)  # Date/Heure
-        self.table.setColumnWidth(1, 460)  # Libellé
-        self.table.setColumnWidth(2, 120)  # Montant
-        self.table.setColumnWidth(3, 40)  # Type
-
-        # Style du header
+        # Style du header et des lignes sélectionnées, thème comptabilité
         self.table.setStyleSheet('''
-            QHeaderView::section {
-                background-color: #FF9800;
-                color: white;
-                font-weight: bold;
-                font-size: 13px;
-                border: none;
-                padding: 8px 4px;
-            }
-            QTableView::item:selected {
-                background-color: #e3f2fd;
-                color: #1976d2;
-            }
+            QHeaderView::section { background-color: #8E44AD; color: white; font-weight: bold; padding:8px }
+            QTableView::item:selected { background-color: #F4ECF7; color: #5D2D6E }
+            QTableView { alternate-background-color: #FBF5FF }
         ''')
 
-        self.layout.addWidget(self.table, 2)
+        # Largeurs par défaut
+        self.table.setColumnWidth(0, 150)
+        self.table.setColumnWidth(1, 460)
+        self.table.setColumnWidth(2, 120)
+        self.table.setColumnWidth(3, 80)
+
+        # Forcer hauteur d'en-tête et hauteur de ligne pour éviter agrandissement
+        try:
+            self.table.horizontalHeader().setFixedHeight(36)
+            # Hauteur par défaut des lignes
+            self.table.verticalHeader().setDefaultSectionSize(28)
+        except Exception:
+            pass
+
+        table_layout.addWidget(self.table)
+        self.layout.addWidget(table_frame, 2)
 
 
         # Actions
@@ -120,6 +175,7 @@ class JournalWidget(QWidget):
 
         self.journaux = []
         self.ecritures_rows = {}  # journal_id: row index of ecritures
+        # remplir les données
         self.load_data()
 
     def load_data(self):
@@ -129,10 +185,37 @@ class JournalWidget(QWidget):
         debut = self.debut_date.date().toPyDate()
         fin = self.fin_date.date().toPyDate()
         search = self.search_input.text().strip().lower()
-        journaux = self.controller.get_journaux_comptables(self.entreprise_id)
-        journaux = [j for j in journaux if debut <= j.date_operation.date() <= fin]
+        # Récupérer tous les journaux disponibles
+        journaux_all = self.controller.get_journaux_comptables(self.entreprise_id)
+        # Filtrer par date
+        journaux = [j for j in journaux_all if debut <= j.date_operation.date() <= fin]
+        # Filtrer par recherche texte
         if search:
             journaux = [j for j in journaux if search in (j.libelle or '').lower()]
+
+        # Mettre à jour la liste des types disponibles dans le filtre
+        try:
+            selected = self.type_filter.currentText() if self.type_filter.count() > 0 else 'Tous'
+        except Exception:
+            selected = 'Tous'
+        types = sorted({(j.type_operation or '').strip() for j in journaux_all if j.type_operation})
+        # Réinitialiser combo en conservant sélection si possible
+        self.type_filter.blockSignals(True)
+        self.type_filter.clear()
+        self.type_filter.addItem('Tous')
+        for t in types:
+            self.type_filter.addItem(t)
+        # Rétablir sélection si toujours disponible
+        if selected and selected in [self.type_filter.itemText(i) for i in range(self.type_filter.count())]:
+            idx = [self.type_filter.itemText(i) for i in range(self.type_filter.count())].index(selected)
+            self.type_filter.setCurrentIndex(idx)
+        self.type_filter.blockSignals(False)
+
+        # Filtrer par type si demandé
+        sel_type = self.type_filter.currentText() if self.type_filter.count() > 0 else 'Tous'
+        if sel_type and sel_type != 'Tous':
+            journaux = [j for j in journaux if (j.type_operation or '').strip() == sel_type]
+
         self.journaux = journaux
         self.refresh_table()
 
@@ -160,6 +243,13 @@ class JournalWidget(QWidget):
                 else:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
 
+            # Taguer la ligne avec l'ID du journal pour retrouver facilement la ligne parente
+            try:
+                row[0].setData(getattr(j, 'id', None), Qt.ItemDataRole.UserRole)
+            except Exception:
+                # sécurité si 'id' manquant
+                pass
+
             self.model.appendRow(row)
 
             # ✅ Définir des largeurs par défaut pour chaque colonne
@@ -170,28 +260,80 @@ class JournalWidget(QWidget):
             
             
     def toggle_ecritures_row(self, index):
-        row = index.row()
+        clicked_row = index.row()
+
+        # Trouver la ligne parente (celle qui a le UserRole) en remontant si nécessaire
+        parent_row = None
+        r = clicked_row
+        while r >= 0:
+            item = self.model.item(r, 0)
+            if item:
+                try:
+                    val = item.data(Qt.ItemDataRole.UserRole)
+                except Exception:
+                    val = None
+                if val is not None:
+                    parent_row = r
+                    break
+            r -= 1
+
+        if parent_row is None:
+            # Rien à faire si on ne retrouve pas la ligne parente
+            return
+
+        row = parent_row
 
         # Vérifier si la ligne suivante est déjà un détail (évite doublons)
         if row + 1 < self.model.rowCount() and self.model.item(row + 1, 0) \
-                and self.model.item(row + 1, 0).text().startswith("Débit"):
+                and (self.model.item(row + 1, 0).text().startswith("Débit") or self.model.item(row + 1, 0).text().startswith("Crédit")):
             # Supprimer toutes les lignes de détail existantes
             while row + 1 < self.model.rowCount() and \
                     self.model.item(row + 1, 0) and \
                     (self.model.item(row + 1, 0).text().startswith("Débit") or
-                    self.model.item(row + 1, 0).text().startswith("Crédit")):
+                     self.model.item(row + 1, 0).text().startswith("Crédit")):
                 self.table.setSpan(row + 1, 0, 1, 1)  # Réinitialiser la fusion
                 self.model.removeRow(row + 1)
             return
 
-        journal = self.journaux[row]
+        # Récupérer l'ID du journal stocké sur la ligne
+        journal_id = None
+        try:
+            journal_id = self.model.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        except Exception:
+            journal_id = None
+
+        # Trouver l'objet journal correspondant dans self.journaux
+        journal = None
+        if journal_id is not None:
+            for j in self.journaux:
+                if getattr(j, 'id', None) == journal_id:
+                    journal = j
+                    break
+
+        if journal is None:
+            # Si non trouvé, essayer de récupérer par position (dégradé)
+            try:
+                journal = self.journaux[row]
+            except Exception:
+                return
         ecritures = self.controller.get_ecritures_du_journal(journal.id)
 
         for idx, e in enumerate(ecritures):
-            sens = "Débit" if e.ordre == 1 else "Crédit"
+            # Déterminer le sens à partir des valeurs debit/credit :
+            # si debit est à 0 ou None => c'est un crédit, sinon c'est un débit
+            debit_val = getattr(e, 'debit', 0) or 0
+            credit_val = getattr(e, 'credit', 0) or 0
+            if float(debit_val) == 0 and float(credit_val) != 0:
+                sens = "Crédit"
+            else:
+                sens = "Débit"
+
             compte = getattr(e.compte_comptable, 'numero', '')
             libelle = getattr(e.compte_comptable, 'libelle', '')
-            montant = e.debit if e.ordre == 1 else e.credit
+
+            # Utiliser la valeur non nulle comme montant affiché
+            montant = credit_val if sens == 'Crédit' else debit_val
+            montant = montant or 0
             montant_str = f"{montant:,.0f} {self.devise}" if self.devise else f"{montant:,.0f}"
 
             # Créer un item pour cette écriture
