@@ -247,19 +247,19 @@ class ClientIndex(QWidget):
                 # Total commandes payées
                 total_commandes = session.query(ShopPanier).filter(
                     ShopPanier.client_id == client.id,
-                    ShopPanier.status.in_(['validé', 'payé', 'completed'])
+                    ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending'])
                 ).count()
                 
                 # Total dépensé (somme des montants des paniers payés)
                 total_depense = session.query(func.sum(ShopPanier.total_final)).filter(
                     ShopPanier.client_id == client.id,
-                    ShopPanier.status.in_(['validé', 'payé', 'completed'])
+                    ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending'])
                 ).scalar() or 0.0
                 
                 # Commandes non réglées
                 paniers_non_regles = session.query(ShopPanier).filter(
                     ShopPanier.client_id == client.id,
-                    ShopPanier.status.not_in(['validé', 'payé', 'completed'])
+                    ShopPanier.status.not_in(['validé', 'payé', 'completed', 'cancelled'])
                 ).all()
                 
                 commandes_non_reglees = len(paniers_non_regles)
@@ -448,7 +448,7 @@ class ClientIndex(QWidget):
                 
                 # Statistiques des paniers/commandes
                 paniers = session.query(ShopPanier).filter(ShopPanier.pos_id == getattr(self.boutique_controller, 'pos_id', 1)).all()
-                total_commandes = len([p for p in paniers if p.status in ['validé', 'payé', 'completed']])
+                total_commandes = len([p for p in paniers if p.status in ['validé', 'payé', 'completed', 'pending']])
                 self.total_commandes_label.setText(str(total_commandes))
                 
                 # Calculer les montants
@@ -460,7 +460,7 @@ class ClientIndex(QWidget):
                     if panier.status in ['validé', 'payé', 'completed']:
                         # Paniers payés - ajouter au total dépensé
                         total_depense += float(panier.total_final or 0)
-                    else:
+                    elif panier.status not in ['cancelled', 'completed', 'payé', 'validé']:
                         # Paniers non réglés
                         paniers_non_regles += 1
                         

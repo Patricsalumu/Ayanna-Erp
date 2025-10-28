@@ -24,6 +24,7 @@ from ..controller.entre_sortie_controller import EntreSortieController
 from ..controller.paiement_controller import PaiementController
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ayanna_erp.modules.boutique.model.models import ShopExpense, ShopPayment, ShopPanier, ShopClient
+from ayanna_erp.modules.achats.models.achats_models import AchatDepense
 
 
 class DepenseDialog(QDialog):
@@ -592,29 +593,28 @@ class EntreeSortieIndex(QWidget):
             except Exception as e:
                 print(f"Erreur lors du chargement des paiements: {e}")
             
-            # Charger les sorties (dépenses) depuis shop_expenses (boutique)
+            # Charger les sorties (dépenses) depuis achat_expenses (boutique)
             try:
                 from ayanna_erp.database.database_manager import DatabaseManager
                 db_manager = DatabaseManager()
                 session = db_manager.get_session()
                 
                 # Récupérer les dépenses de boutique pour la date sélectionnée
-                shop_expenses = session.query(ShopExpense)\
+                achat_expenses = session.query(AchatDepense)\
                     .filter(
-                        ShopExpense.pos_id == pos_id,
-                        ShopExpense.expense_date.between(start_datetime, end_datetime)
+                        AchatDepense.date_paiement.between(start_datetime, end_datetime)
                     )\
                     .all()
                 
-                for expense in shop_expenses:
+                for expense in achat_expenses:
                     entry = {
                         'id': f'SHOP_EXP_{expense.id}',
-                        'datetime': expense.expense_date,
+                        'datetime': expense.date_paiement,
                         'type': 'Sortie',
-                        'libelle': f'[BOUTIQUE] {expense.description}',
-                        'categorie': expense.category or 'Dépense boutique',
+                        'libelle': expense.description,
+                        'categorie': 'Achat',
                         'montant_entree': 0.0,
-                        'montant_sortie': float(expense.amount),
+                        'montant_sortie': float(expense.montant),
                         'utilisateur': 'Système',  # Pas d'info utilisateur pour les dépenses boutique
                         'description': f'Référence: {expense.reference or ""}'
                     }
@@ -654,7 +654,7 @@ class EntreeSortieIndex(QWidget):
                         'id': f'SHOP_PAY_{payment.id}',
                         'datetime': payment.payment_date,
                         'type': 'Entrée',
-                        'libelle': f'[BOUTIQUE] Paiement {payment.reference} - {client_name}',
+                        'libelle': f'[VENTE] Encaissement Facture - {payment.reference} - {client_name}',
                         'categorie': 'VENTE',
                         'montant_entree': float(payment.amount),
                         'montant_sortie': 0.0,

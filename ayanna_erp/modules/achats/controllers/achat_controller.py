@@ -299,23 +299,24 @@ class AchatController:
                 bon_commande_id=commande_id,
                 montant=montant,
                 mode_paiement=mode_paiement,
+                description=f"Achat Marchandise - commande {commande.numero}",
                 reference=reference,
                 date_paiement=datetime.now()
             )
             session.add(depense)
             session.flush()  # Pour obtenir l'ID
             
-            # Créer l'enregistrement de dépense dans event_expense
-            event_expense = EventExpense(
-                amount=montant,
-                pos_id = 1, #TODO a implementer
-                expense_type = 'Achat',
-                payment_method=mode_paiement,
-                description =f"Achat Marchandise - commande {commande.numero}",
-                account_id = 1,
-                expense_date=datetime.now()
-            )
-            session.add(event_expense)
+            # # Créer l'enregistrement de dépense dans event_expense
+            # event_expense = EventExpense(
+            #     amount=montant,
+            #     pos_id = 1, #TODO a implementer
+            #     expense_type = 'Achat',
+            #     payment_method=mode_paiement,
+            #     description =f"Achat Marchandise - commande {commande.numero}",
+            #     account_id = 1,
+            #     expense_date=datetime.now()
+            # )
+            # session.add(event_expense)
             
             # Créer l'écriture comptable
             self.create_ecriture_comptable_achat(session, commande, depense)

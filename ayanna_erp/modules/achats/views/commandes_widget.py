@@ -877,14 +877,14 @@ class CommandesWidget(QWidget):
 
             # Totals
             total_data = [
-                ['Sous-total', ent_ctrl.format_amount(commande.montant_ht)],
-                ['TVA', ent_ctrl.format_amount(commande.montant_tva)],
-                ['Remise', ent_ctrl.format_amount(commande.remise_globale)],
-                ['Total', ent_ctrl.format_amount(commande.montant_total)]
+                ['Sous-total', ent_ctrl.format_amount(commande.montant_total)],
+                ['TVA', ent_ctrl.format_amount(0)], # TODO A implementer
+                ['Remise', ent_ctrl.format_amount(commande.remise_global)],
+                ['Total', ent_ctrl.format_amount(commande.montant_total - commande.remise_global)]
             ]
             total_tbl = Table(total_data, colWidths=[120*mm, 35*mm])
             total_tbl.setStyle(TableStyle([
-                ('BACKGROUND',(0,-1),(-1,-1),colors.HexColor('#e8f4f8')),
+                ('BACKGROUND',(0,-1),(-1,-1),colors.HexColor("#1f282b")),
                 ('TEXTCOLOR',(0,-1),(-1,-1),colors.black),
                 ('GRID',(0,0),(-1,-1),0.5,colors.HexColor('#dddddd')),
                 ('FONTNAME',(0,0),(-1,-1),'Helvetica'),

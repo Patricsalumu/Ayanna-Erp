@@ -133,6 +133,7 @@ class AchatDepense(Base):
     # Détails paiement
     montant = Column(DECIMAL(12, 2), nullable=False)
     mode_paiement = Column(String(50), nullable=True)  # Espèces, Chèque, Virement, etc.
+    description = Column(String(100), nullable=True)
     date_paiement = Column(DateTime, default=func.now())
     reference = Column(String(100), nullable=True)
     

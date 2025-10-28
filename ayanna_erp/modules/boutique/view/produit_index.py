@@ -1055,6 +1055,14 @@ class ProductFormDialog(QDialog):
         buttons_layout.addWidget(save_btn)
         
         layout.addWidget(buttons_widget)
+        
+        
+    def get_currency_symbol(self):
+        """Récupère le symbole de devise depuis l'entreprise"""
+        try:
+            return self.parent().get_currency_symbol()
+        except Exception:
+            return "FC"  # Fallback
     
     def get_enterprise_id(self):
         """Récupérer l'ID de l'entreprise depuis le contrôleur produit"""
