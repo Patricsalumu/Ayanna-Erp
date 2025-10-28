@@ -181,7 +181,7 @@ class EditCommandeDialog(QDialog):
         try:
             self.produits = self.achat_controller.get_produits_disponibles(session)
             # Charger lignes existantes
-            self.lignes_table.setRowCount(len(self.commande.lignes))
+            self.lines_table.setRowCount(len(self.commande.lignes))
             for row, ligne in enumerate(self.commande.lignes):
                 self.populate_ligne_row(row, ligne)
         finally:
@@ -196,14 +196,14 @@ class EditCommandeDialog(QDialog):
             index = produit_combo.findData(ligne.produit_id)
             if index >= 0:
                 produit_combo.setCurrentIndex(index)
-        self.lignes_table.setCellWidget(row, 0, produit_combo)
+        self.lines_table.setCellWidget(row, 0, produit_combo)
 
         # Quantité
         quantite_spin = QDoubleSpinBox()
         quantite_spin.setRange(0.01, 999999)
         quantite_spin.setDecimals(2)
         quantite_spin.setValue(float(ligne.quantite) if ligne else 1.0)
-        self.lignes_table.setCellWidget(row, 1, quantite_spin)
+        self.lines_table.setCellWidget(row, 1, quantite_spin)
 
         # Prix unitaire
         prix_spin = QDoubleSpinBox()
@@ -211,7 +211,7 @@ class EditCommandeDialog(QDialog):
         prix_spin.setDecimals(2)
         prix_spin.setSuffix(f" {self.currency}")
         prix_spin.setValue(float(ligne.prix_unitaire) if ligne else 0.0)
-        self.lignes_table.setCellWidget(row, 2, prix_spin)
+        self.lines_table.setCellWidget(row, 2, prix_spin)
 
         # Remise
         remise_spin = QDoubleSpinBox()
@@ -219,7 +219,7 @@ class EditCommandeDialog(QDialog):
         remise_spin.setDecimals(2)
         remise_spin.setSuffix(f" {self.currency}")
         remise_spin.setValue(float(ligne.remise_ligne) if ligne else 0.0)
-        self.lignes_table.setCellWidget(row, 3, remise_spin)
+        self.lines_table.setCellWidget(row, 3, remise_spin)
 
         # Total (calculé)
         total_label = QLabel()
@@ -227,12 +227,12 @@ class EditCommandeDialog(QDialog):
         quantite_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
         prix_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
         remise_spin.valueChanged.connect(lambda: self.update_total_label(row, quantite_spin, prix_spin, remise_spin, total_label))
-        self.lignes_table.setCellWidget(row, 4, total_label)
+        self.lines_table.setCellWidget(row, 4, total_label)
 
         # Actions
         delete_btn = QPushButton("🗑️")
         delete_btn.clicked.connect(lambda: self.delete_ligne(row))
-        self.lignes_table.setCellWidget(row, 5, delete_btn)
+        self.lines_table.setCellWidget(row, 5, delete_btn)
 
     def update_total_label(self, row, quantite_spin, prix_spin, remise_spin, total_label):
         quantite = Decimal(str(quantite_spin.value()))
@@ -242,20 +242,20 @@ class EditCommandeDialog(QDialog):
         total_label.setText(self.entreprise_ctrl.format_amount(total))
 
     def add_ligne(self):
-        row = self.lignes_table.rowCount()
-        self.lignes_table.insertRow(row)
+        row = self.lines_table.rowCount()
+        self.lines_table.insertRow(row)
         self.populate_ligne_row(row)
 
     def delete_ligne(self, row):
-        self.lignes_table.removeRow(row)
+        self.lines_table.removeRow(row)
 
     def get_lignes_data(self):
         lignes = []
-        for row in range(self.lignes_table.rowCount()):
-            produit_combo = self.lignes_table.cellWidget(row, 0)
-            quantite_spin = self.lignes_table.cellWidget(row, 1)
-            prix_spin = self.lignes_table.cellWidget(row, 2)
-            remise_spin = self.lignes_table.cellWidget(row, 3)
+        for row in range(self.lines_table.rowCount()):
+            produit_combo = self.lines_table.cellWidget(row, 0)
+            quantite_spin = self.lines_table.cellWidget(row, 1)
+            prix_spin = self.lines_table.cellWidget(row, 2)
+            remise_spin = self.lines_table.cellWidget(row, 3)
 
             if produit_combo and quantite_spin and prix_spin and remise_spin:
                 lignes.append({
@@ -630,7 +630,7 @@ class CommandesWidget(QWidget):
                 QMessageBox.warning(self, "Erreur", "Commande introuvable")
                 session.close()
                 return
-            dialog = EditCommandeDialog(self, cmd, session)
+            dialog = EditCommandeDialog(self, self.achat_controller, cmd)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 self.refresh_data()
             session.close()
