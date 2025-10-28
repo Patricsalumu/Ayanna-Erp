@@ -419,39 +419,89 @@ class InvoicePrintManager:
         # Taille du ticket 53mm de large (format imprimante thermique)
         TICKET_WIDTH = 53 * mm
 
-        # Calculer dynamiquement la hauteur nécessaire en estimant les lignes
+        # --- Pré-passage (simulation) pour calculer la hauteur exacte nécessaire ---
         from reportlab.pdfbase import pdfmetrics
 
-        usable_width = TICKET_WIDTH - (6 * mm)  # marges gauche/droite
+        # utiliser une hauteur de départ suffisante pour la simulation
+        simulate_start_height = 300 * mm
+        y_sim = simulate_start_height - 5 * mm
 
-        # Estimer hauteur des différentes sections (en mm)
-        header_height = 18 * mm if self.company_info.get('logo') else 8 * mm
-        company_lines_height = 8 * mm
-        title_height = 8 * mm
+        # Estimer logo
+        logo_path = self._create_temp_logo_file()
+        if logo_path and os.path.exists(logo_path):
+            y_sim -= 18 * mm
 
-        # Articles: estimer par article (nom + detail)
-        articles_height = 0
+        # Coordonnées entreprise (approx. 2.5mm par ligne)
+        for info in [self.company_info.get('phone'), self.company_info.get('email')]:
+            if info:
+                y_sim -= 2.5 * mm
+
+        if self.company_info.get('rccm'):
+            y_sim -= 2.5 * mm
+
+        # séparation
+        y_sim -= 2 * mm
+        y_sim -= 3 * mm
+
+        # titre
+        line_height = 3.5 * mm
+        y_sim -= (line_height + 2 * mm)
+
+        # info commande (ref, client, date)
+        y_sim -= 2.5 * mm  # ref
+        y_sim -= 2.5 * mm  # client
+        y_sim -= 2.5 * mm  # date
+
+        # séparation
+        y_sim -= 2 * mm
+        y_sim -= 3 * mm
+
+        # articles title
+        y_sim -= 3 * mm
+
+        # articles (nom + detail)
         if invoice_data.get('items'):
             for item in invoice_data['items']:
-                name = str(item.get('name', ''))
-                # calculer le nombre de lignes nécessaires pour le nom
-                name_width = pdfmetrics.stringWidth(name, 'Helvetica', 6)
-                name_lines = max(1, int((name_width // usable_width) + 1))
-                # détail (quantité x prix) sur une ligne en général
-                detail_lines = 1
-                articles_height += (name_lines * 3 * mm) + (detail_lines * 3 * mm)
+                # nom (dans le rendu actuel on tronque à 30 chars)
+                y_sim -= 2 * mm
+                # détail quantité x prix
+                y_sim -= 2.5 * mm
 
-        # Paiements: estimer environ 6mm par paiement (séparateurs inclus)
-        payments_height = (len(payments_list) * 6 * mm) if payments_list else 6 * mm
+        # séparation avant paiements
+        y_sim -= 2 * mm
+        y_sim -= 3 * mm
 
-        # Récapitulatif/financier
-        recap_height = 20 * mm
+        # paiements
+        if payments_list:
+            for i, payment in enumerate(payments_list, 1):
+                # #, montant, méthode, date, caissier
+                y_sim -= 2 * mm  # numéro
+                y_sim -= 2 * mm  # montant
+                y_sim -= 2 * mm  # méthode
+                y_sim -= 2 * mm  # date
+                y_sim -= 2 * mm  # caissier
+                if i < len(payments_list):
+                    y_sim -= 3 * mm  # séparation
+        else:
+            y_sim -= 3 * mm
 
-        # Notes: estimer en fonction de la largeur
+        # récapitulatif
+        y_sim -= 2 * mm
+        y_sim -= 3 * mm
+        y_sim -= 3.5 * mm  # sous total
+        y_sim -= 3.5 * mm  # remise
+        y_sim -= 3.5 * mm  # net a payer
+        y_sim -= 3.5 * mm  # total payé
+        y_sim -= 3 * mm    # reste
+
+        # séparation finale
+        y_sim -= 3 * mm
+
+        # notes (simuler wrapping en fonction de la largeur utile)
+        usable_width = TICKET_WIDTH - (6 * mm)
         notes = (invoice_data.get('notes') or '').strip()
-        notes_height = 0
         if notes:
-            # Estimer lignes pour les notes
+            y_sim -= 3 * mm  # titre NOTES
             words = notes.split()
             cur_line = ''
             lines = 0
@@ -464,28 +514,28 @@ class InvoicePrintManager:
                     cur_line = word
             if cur_line:
                 lines += 1
-            notes_height = max(6 * mm, lines * 3 * mm)
+            y_sim -= max(6 * mm, lines * 2.5 * mm)
+            y_sim -= 3 * mm  # séparation après notes
 
-        # Réserver de l'espace pour la signature
+        # réserver un espace pour la signature
         signature_height = 20 * mm
+        y_sim -= signature_height
 
-        # Petit espace final
-        footer_extra = 6 * mm
+        # filigrane
+        y_sim -= 4 * mm
 
-        total_height = header_height + company_lines_height + title_height + articles_height + payments_height + recap_height + notes_height + signature_height + footer_extra
-
-        # Minimum raisonnable (en mm)
+        used_height = simulate_start_height - y_sim
+        # ajouter petite marge
+        TICKET_HEIGHT = used_height + 6 * mm
+        # garantir une hauteur minimale
         min_height = 80 * mm
-        if total_height < min_height:
-            total_height = min_height
-
-        TICKET_HEIGHT = total_height
+        if TICKET_HEIGHT < min_height:
+            TICKET_HEIGHT = min_height
 
         # Créer le document PDF avec la hauteur calculée
         c = canvas.Canvas(filename, pagesize=(TICKET_WIDTH, TICKET_HEIGHT))
 
         y_position = TICKET_HEIGHT - 5 * mm  # point de départ en haut
-        line_height = 3.5 * mm  # espacement moyen entre lignes
 
         # Logo et en-tête entreprise (taille réduite pour 53mm)
         logo_path = self._create_temp_logo_file()
@@ -718,6 +768,22 @@ class InvoicePrintManager:
             c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
             y_position -= 3*mm
 
+        # Signature (zone réservée)
+        try:
+            c.setFont('Helvetica', 6)
+            c.drawString(2*mm, y_position, 'Signature:')
+            y_position -= 6*mm
+            # Ligne de signature
+            c.line(20*mm, y_position, TICKET_WIDTH - 20*mm, y_position)
+            # Consommer le reste de l'espace réservé à la signature si défini
+            try:
+                y_position -= signature_height
+            except Exception:
+                # signature_height peut ne pas exister (sécurité)
+                y_position -= 14*mm
+        except Exception:
+            # Si pour une raison quelconque le dessin de la signature échoue, ignorer
+            pass
 
         # Filigrane avec nom d'entreprise dynamique
         c.setFont('Helvetica', 5)
