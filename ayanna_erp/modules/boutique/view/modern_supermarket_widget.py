@@ -1564,6 +1564,23 @@ class ModernSupermarketWidget(QWidget):
         self.global_discount = Decimal('0.00')
         self.discount_spin.setValue(0)
         self.notes_text.clear()  # Vider aussi le champ notes
+        # Vider la sélection client : QComboBox n'a pas clearSelection()
+        try:
+            # Essayer de désélectionner en positionnant l'index à -1
+            self.client_combo.setCurrentIndex(-1)
+        except Exception:
+            # Si la combo est éditable, tenter de vider le texte
+            try:
+                self.client_combo.setCurrentText("")
+            except Exception:
+                pass
+        self.selected_client = None
+        # Vider le champ de recherche client
+        try:
+            self.client_search.clear()
+        except Exception:
+            # fallback: si client_search n'existe pas ou n'a pas clear(), ignorer
+            pass
         self.update_cart_display()
         self.update_totals()
         self.cart_updated.emit()
