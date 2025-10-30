@@ -88,6 +88,7 @@ class VenteController:
                 panier_id = panier_id_result.fetchone()[0]
 
                 # 2. Créer les lignes de vente et gérer le stock
+                print(f"Debug items du panier {cart_items}")
                 for item in cart_items:
                     if item.get('type') == 'product':
                         product_id = item.get('id')
@@ -112,31 +113,11 @@ class VenteController:
                         self._update_pos_stock(session, product_id, quantity, unit_price, line_total, numero_commande)
 
                     elif item.get('type') == 'service':
+                        service_id = item.get('id')
                         quantity = item.get('quantity')
                         unit_price = item.get('unit_price')
                         line_total = unit_price * quantity
-
-                        # Déterminer l'ID du ShopService
-                        service_id = None
-                        if item.get('source') == 'shop':
-                            service_id = item.get('id')
-                        elif item.get('source') == 'event':
-                            # Chercher ShopService existant par nom
-                            svc = session.query(ShopService).filter(ShopService.name == item.get('name')).first()
-                            if not svc:
-                                svc = ShopService(
-                                    pos_id=self.pos_id,
-                                    name=item.get('name'),
-                                    description='',
-                                    cost=0.0,
-                                    price=unit_price,
-                                    is_active=True
-                                )
-                                session.add(svc)
-                                session.flush()
-                                session.refresh(svc)
-                            service_id = svc.id
-
+                        
                         # Insérer la ligne de service
                         session.execute(text("""
                             INSERT INTO shop_paniers_services
@@ -164,6 +145,7 @@ class VenteController:
                     'cart_items': cart_items
                 }
 
+                
                 success, message = self._create_advanced_sale_accounting_entries(session, accounting_data)
                 if not success:
                     return False, f"Erreur comptable: {message}", None
@@ -342,6 +324,7 @@ class VenteController:
                     evt_row = evt_result.fetchone()
                     if evt_row and evt_row[0]:
                         compte_item_id = evt_row[0]
+                    print(f'Debugg Compte produit service {compte_item_id} pour service {item['id']}')
 
                 # Vérification finale : s'il n'y a toujours pas de compte, erreur
                 if not compte_item_id:

@@ -338,7 +338,10 @@ class ModernSupermarketWidget(QWidget):
         add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px; padding:6px; font-weight:bold;")
         # Capturer l'id et la source; récupérer l'objet en session au moment de l'ajout
         # Passer explicitement l'id du service (plus robuste que l'objet lui-même)
-        add_btn.clicked.connect(lambda svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
+        # Le signal clicked émet un bool (checked). Si la lambda n'a pas de param
+        # positionnel, ce bool écrase le premier param par défaut (svc_id).
+        # Ajouter un param placeholder `_checked` pour absorber cet argument.
+        add_btn.clicked.connect(lambda _checked, svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
         card_layout.addWidget(add_btn)
 
         return card
@@ -387,12 +390,14 @@ class ModernSupermarketWidget(QWidget):
         add_btn.setFixedSize(34, 28)
         add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px;")
         # Transmettre l'id pour garantir la recherche en session
-        add_btn.clicked.connect(lambda svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
+        # Même raison: le signal clicked passe un bool; absorber avec `_checked`.
+        add_btn.clicked.connect(lambda _checked, svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
         layout.addWidget(add_btn, 0, Qt.AlignmentFlag.AlignRight)
 
         return row
 
     def add_service_to_cart_by_id(self, service_or_id, source='shop', service_name=None):
+        print(f"DEBUGG : ADD SERVICE TO CART ID : {service_or_id} - SERVICE NAME {service_name}")
         """Récupère le service en session (shop ou event), résout/crée si nécessaire et ajoute au panier.
 
         Accepts either an integer id, a string id, or an object with attributes (id/name/nom/price).
@@ -406,58 +411,22 @@ class ModernSupermarketWidget(QWidget):
                 svc = None
 
                 # Normaliser l'entrée: extraire id et nom si disponibles
-                incoming_id = None
+                incoming_id = service_or_id
                 incoming_name = service_name
-                try:
-                    # traiter bool séparément (False n'est pas un id valide)
-                    if isinstance(service_or_id, bool):
-                        incoming_id = None
-                    elif isinstance(service_or_id, int):
-                        incoming_id = int(service_or_id)
-                    elif isinstance(service_or_id, str) and service_or_id.isdigit():
-                        incoming_id = int(service_or_id)
-                    else:
-                        incoming_id = getattr(service_or_id, 'id', None) or getattr(service_or_id, 'pk', None)
-                        if incoming_name is None:
-                            incoming_name = getattr(service_or_id, 'name', None) or getattr(service_or_id, 'nom', None)
-                except Exception:
-                    incoming_id = None
 
-                # Si c'est un service venant d'un événement, chercher dans EventService
-                if source == 'event':
-                    ev = None
-                    if incoming_id is not None:
-                        ev = session.query(EventService).filter_by(id=incoming_id).first()
 
-                    if ev is None and incoming_name:
-                        try:
-                            ev = session.query(EventService).filter(EventService.name.ilike(f'%{incoming_name}%')).first()
-                        except Exception:
-                            ev = None
+                # chercher directement  dans EventService
+                
+                ev = session.query(EventService).filter_by(id=incoming_id).first()
 
-                    if ev:
-                        svc = self._resolve_event_service_to_shop_service(session, ev)
-
-                # Sinon, chercher directement dans les services de la boutique
-                else:
-                    if incoming_id is not None:
-                        svc = session.query(ShopService).filter_by(id=incoming_id).first()
-
-                    if svc is None and incoming_name:
-                        try:
-                            svc = session.query(ShopService).filter(ShopService.name.ilike(f'%{incoming_name}%')).first()
-                        except Exception:
-                            svc = None
-
-                if svc is None:
+                print(f"DEBUGG ADD SERVICE TO CART BY ID APRES REQUETE {ev}")
+                if ev is None:
                     # Debug temporaire: afficher l'id et la source reçus
                     # debug logs removed
                     QMessageBox.warning(self, "Service introuvable", "Le service sélectionné est introuvable en base.")
                     return
-
-                # svc est un ShopService ORM (id/name/price disponibles)
                 # Appeler add_to_cart avec l'objet ShopService
-                self.add_to_cart(svc, item_type='service', source='shop')
+                self.add_to_cart(ev, item_type='service', source='event')
 
         except Exception as e:
             print(f"Erreur add_service_to_cart_by_id: {e}")
@@ -1325,6 +1294,7 @@ class ModernSupermarketWidget(QWidget):
         self.load_products()
     
     def add_to_cart(self, product, item_type='product', source=None):
+        print(f"DEBUGG ADD TO CART {product}")
         """Ajoute un produit ou service au panier avec dialogue de quantité.
 
         item_type: 'product' or 'service'
@@ -1380,54 +1350,6 @@ class ModernSupermarketWidget(QWidget):
                     'source': source
                 }
 
-                # Si c'est un service provenant d'un EventService, tenter d'abord de retrouver l'objet en base
-                if new_item['type'] == 'service' and new_item.get('source') == 'event':
-                    try:
-                        with self.db_manager.get_session() as session:
-                            event_obj = None
-                            # Si l'objet en entrée avait un id, l'utiliser
-                            try:
-                                incoming_id = self._get_id(product)
-                            except Exception:
-                                incoming_id = None
-
-                            if incoming_id is not None:
-                                # Chercher par id
-                                try:
-                                    event_obj = session.query(EventService).filter_by(id=incoming_id).first()
-                                except Exception:
-                                    event_obj = None
-
-                            # Sinon, chercher par nom (display name)
-                            if event_obj is None:
-                                try:
-                                    candidate_name = self._get_display_name(product)
-                                    if candidate_name and candidate_name != 'Article':
-                                        event_obj = session.query(EventService).filter(EventService.name.ilike(f'%{candidate_name}%')).first()
-                                except Exception:
-                                    event_obj = None
-
-                            # Si trouvé, résoudre/créer le ShopService correspondant et remplir les infos
-                            if event_obj is not None:
-                                resolved = self._resolve_event_service_to_shop_service(session, event_obj)
-                                if resolved is not None:
-                                    new_item['id'] = getattr(resolved, 'id', None)
-                                    new_item['name'] = self._get_display_name(resolved)
-                                    new_item['unit_price'] = float(self._get_price(resolved))
-                            else:
-                                # fallback : essayer de résoudre directement à partir de l'objet reçu
-                                try:
-                                    resolved = self._resolve_event_service_to_shop_service(session, product)
-                                    if resolved is not None:
-                                        new_item['id'] = getattr(resolved, 'id', None)
-                                        new_item['name'] = self._get_display_name(resolved)
-                                        new_item['unit_price'] = float(self._get_price(resolved))
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-
-                # debug logs removed
 
                 # Vérifier si l'item existe déjà
                 existing_item = None
