@@ -2,7 +2,7 @@
 ComptesWidget - Onglet Comptes Comptables
 CRUD sur les comptes, export PDF.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLabel, QFrame, QLineEdit
 from PyQt6.QtGui import QStandardItemModel
 
 class ComptesWidget(QWidget):
@@ -22,6 +22,35 @@ class ComptesWidget(QWidget):
             print(f"[DEBUG] ComptesWidget: parent sans get_currency_symbol(), devise par défaut")
             self.devise = "€"  # Fallback
         self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(12,12,12,12)
+
+        # Header
+        header = QFrame()
+        header.setStyleSheet('''
+            QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #8E44AD, stop:1 #1565C0); border-radius:8px; padding:6px }
+            QLabel { color: white; font-weight: bold }
+        ''')
+        h_layout = QHBoxLayout(header)
+        title = QLabel("📚 Comptes comptables")
+        title.setStyleSheet('font-size:16px')
+        h_layout.addWidget(title)
+        h_layout.addStretch()
+        self.layout.addWidget(header)
+
+        # Search + actions
+        action_frame = QFrame()
+        a_layout = QHBoxLayout(action_frame)
+        a_layout.setContentsMargins(0,6,0,6)
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Rechercher numéro, nom, libellé...")
+        self.search_input.textChanged.connect(self.load_data)
+        a_layout.addWidget(self.search_input)
+        refresh_btn = QPushButton("🔄")
+        refresh_btn.clicked.connect(self.load_data)
+        a_layout.addWidget(refresh_btn)
+
+        self.layout.addWidget(action_frame)
+
         self.table = QTableView()
         self.model = QStandardItemModel()
         self.table.setModel(self.model)
@@ -33,7 +62,7 @@ class ComptesWidget(QWidget):
         header.setStretchLastSection(True)
         self.table.setStyleSheet('''
             QHeaderView::section {
-                background-color: #FF9800;
+                background-color: #8E44AD;
                 color: white;
                 font-weight: bold;
                 font-size: 13px;
@@ -42,7 +71,7 @@ class ComptesWidget(QWidget):
             }
             QTableView::item:selected {
                 background-color: #e3f2fd;
-                color: #1976d2;
+                color: #8E44AD;
             }
         ''')
         self.layout.addWidget(self.table)
@@ -68,6 +97,13 @@ class ComptesWidget(QWidget):
             return
         self._id_map = []
         data = self.controller.get_comptes(self.entreprise_id)
+        # Filtrage local si une recherche est fournie
+        try:
+            query = self.search_input.text().strip().lower()
+            if query:
+                data = [d for d in data if query in str(d.get('numero','')).lower() or query in str(d.get('nom','')).lower() or query in str(d.get('libelle','')).lower()]
+        except Exception:
+            pass
         headers = ["Numéro", "Nom", "Libellé", "Classe"]
         self.model.clear()
         self.model.setHorizontalHeaderLabels(headers)

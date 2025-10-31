@@ -3,7 +3,7 @@ ClassesWidget - Onglet Classes Comptables
 Lecture seule des classes, export PDF.
 Les classes comptables sont protégées et ne peuvent être modifiées pour maintenir l'harmonie du système comptable OHADA.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLabel
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLabel, QFrame
 from PyQt6.QtGui import QStandardItemModel
 from PyQt6.QtCore import Qt
 
@@ -24,6 +24,20 @@ class ClassesWidget(QWidget):
             print(f"[DEBUG] ClassesWidget: parent sans get_currency_symbol(), devise par défaut")
             self.devise = "€"  # Fallback
         self.layout = QVBoxLayout(self)
+        self.layout.setContentsMargins(12,12,12,12)
+
+        header = QFrame()
+        header.setStyleSheet('''
+            QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #8E44AD, stop:1 #8E44AD); border-radius:8px; padding:6px }
+            QLabel { color: white; font-weight: bold }
+        ''')
+        h_layout = QHBoxLayout(header)
+        title = QLabel("🏷️ Classes comptables")
+        title.setStyleSheet('font-size:15px')
+        h_layout.addWidget(title)
+        h_layout.addStretch()
+        self.layout.addWidget(header)
+
         self.table = QTableView()
         self.model = QStandardItemModel()
         self.table.setModel(self.model)
@@ -35,7 +49,7 @@ class ClassesWidget(QWidget):
         header.setStretchLastSection(True)
         self.table.setStyleSheet('''
             QHeaderView::section {
-                background-color: #FF9800;
+                background-color: #8E44AD;
                 color: white;
                 font-weight: bold;
                 font-size: 13px;
@@ -44,7 +58,7 @@ class ClassesWidget(QWidget):
             }
             QTableView::item:selected {
                 background-color: #e3f2fd;
-                color: #1976d2;
+                color: #8E44AD;
             }
         ''')
         self.layout.addWidget(self.table)
@@ -54,10 +68,10 @@ class ClassesWidget(QWidget):
         info_label.setStyleSheet("""
             QLabel {
                 background-color: #e3f2fd;
-                color: #1976d2;
+                color: #8E44AD;
                 padding: 8px;
                 border-radius: 4px;
-                border-left: 4px solid #1976d2;
+                border-left: 4px solid #8E44AD;
                 font-weight: bold;
                 margin: 4px 0;
             }

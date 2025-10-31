@@ -38,11 +38,9 @@ class JournalWidget(QWidget):
             try:
                 self.devise = parent.get_currency_symbol()
             except Exception as e:
-                print(f"[DEBUG] JournalWidget: Erreur lors de l'obtention de la devise: {e}")
-                self.devise = "€"  # Fallback
+                self.devise = ""  # Fallback
         else:
-            print(f"[DEBUG] JournalWidget: parent sans get_currency_symbol(), devise par défaut")
-            self.devise = "€"  # Fallback
+            self.devise = ""  # Fallback
 
         # Layout principal
         self.layout = QVBoxLayout(self)
@@ -54,12 +52,12 @@ class JournalWidget(QWidget):
         header_frame.setStyleSheet('''
             QFrame#journalHeader {
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 #8E44AD, stop:1 #732d91);
+                    stop:0 #8E44AD, stop:1 #8E44AD);
                 border-radius: 8px;
                 padding: 12px;
             }
             QLabel#titleLabel { color: white; font-size:16px; font-weight:bold }
-            QLabel#subLabel { color: #E8DAEF; font-size:12px }
+            QLabel#subLabel { color: rgba(255,255,255,0.85); font-size:12px }
         ''')
         header_layout = QHBoxLayout(header_frame)
         title = QLabel("Journal Comptable")
@@ -88,10 +86,10 @@ class JournalWidget(QWidget):
 
         # Boutons
         filtre_btn = QPushButton("Filtrer")
-        filtre_btn.setStyleSheet("background-color:#6f2f86; color:white; padding:6px 12px; border-radius:6px;")
+        filtre_btn.setStyleSheet("background-color:#8E44AD; color:white; padding:6px 12px; border-radius:6px;")
         filtre_btn.clicked.connect(self.load_data)
         refresh_btn = QPushButton("Rafraîchir")
-        refresh_btn.setStyleSheet("background-color:#5e2a73; color:white; padding:6px 12px; border-radius:6px;")
+        refresh_btn.setStyleSheet("background-color:#8E44AD; color:white; padding:6px 12px; border-radius:6px;")
         refresh_btn.clicked.connect(self.load_data)
 
         # Connexions des filtres pour rafraîchissement automatique
@@ -136,24 +134,25 @@ class JournalWidget(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setStretchLastSection(True)
 
+
         # Style du header et des lignes sélectionnées, thème comptabilité
         self.table.setStyleSheet('''
-            QHeaderView::section { background-color: #8E44AD; color: white; font-weight: bold; padding:8px }
-            QTableView::item:selected { background-color: #F4ECF7; color: #5D2D6E }
+            QHeaderView::section { background-color: #8E44AD; color: white; font-weight: bold; padding:1px }
+            QTableView::item:selected { background-color: #e3f2fd; color: #8E44AD }
             QTableView { alternate-background-color: #FBF5FF }
         ''')
 
         # Largeurs par défaut
-        self.table.setColumnWidth(0, 150)
-        self.table.setColumnWidth(1, 460)
+        self.table.setColumnWidth(0, 140)
+        self.table.setColumnWidth(1, 400)
         self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 80)
+        self.table.setColumnWidth(3, 50)
 
         # Forcer hauteur d'en-tête et hauteur de ligne pour éviter agrandissement
         try:
-            self.table.horizontalHeader().setFixedHeight(36)
+            self.table.horizontalHeader().setFixedHeight(40)
             # Hauteur par défaut des lignes
-            self.table.verticalHeader().setDefaultSectionSize(28)
+            self.table.verticalHeader().setDefaultSectionSize(25)
         except Exception:
             pass
 
@@ -373,7 +372,11 @@ class JournalWidget(QWidget):
         data = [["Date/Heure", "Libellé", "Montant", "Type"]]
         for j in self.journaux:
             date_str = j.date_operation.strftime('%d/%m/%Y %H:%M')
-            montant_str = f"{j.montant:,.0f} {self.devise}" if self.devise else f"{j.montant:,.0f}"
+            try:
+                from ayanna_erp.modules.comptabilite.utils.pdf_export import format_amount
+                montant_str = format_amount(getattr(j, 'montant', 0), self.controller)
+            except Exception:
+                montant_str = f"{j.montant:,.0f} {self.devise}" if self.devise else f"{j.montant:,.0f}"
             libelle_pdf = self.truncate(j.libelle, 40)
             date_pdf = self.truncate(date_str, 20)
             montant_pdf = self.truncate(montant_str, 15)
@@ -387,69 +390,22 @@ class JournalWidget(QWidget):
         # Largeurs PDF personnalisées
         page_width = A4[0] - 4*cm
         col_widths = [3.2*cm, 7.5*cm, 3.2*cm, 2.1*cm]
-        # Récupérer infos école/logo (utilise des valeurs par défaut pour l'instant)
-        entite_info = {'nom': 'Ayanna ERP', 'adresse': '', 'telephone': '', 'email': ''}
-        logo_path = None
-        # Création du PDF
-        doc = SimpleDocTemplate(
-            path,
-            pagesize=A4,
-            rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm
-        )
+        # Création du PDF et header via utilitaire
+        doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
         elements = []
         styles = getSampleStyleSheet()
-        styleN = styles['Normal']
         styleTitre = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=15, spaceAfter=10)
-        styleMention = ParagraphStyle('Mention', parent=styles['Normal'], alignment=1, textColor=colors.HexColor('#888888'), fontSize=9, spaceAfter=0, spaceBefore=0)
-        # Mention spéciale en haut avec nom d'entreprise dynamique
         try:
-            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-            entreprise_controller = EntrepriseController()
-            entreprise_id = getattr(self.controller, 'entreprise_id', 1)
-            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
-            entreprise_name = entreprise_info['name']
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import prepare_header_elements
+            header_elems = prepare_header_elements(self.controller, getattr(self.controller, 'entreprise_id', None), title="JOURNAL COMPTABLE")
+            elements.extend(header_elems)
         except Exception:
-            entreprise_name = 'AYANNA ERP'
-        
-        mention_text = "Généré par {} - {}".format(entreprise_name, datetime.now().strftime('%d/%m/%Y %H:%M'))
-        elements.append(Paragraph(mention_text, styleMention))
-        elements.append(Spacer(1, 0.2*cm))
-        # Bloc logo + infos école
-        header_data = []
-        if logo_path and os.path.exists(logo_path):
-            try:
-                img = Image(logo_path, width=2.5*cm, height=2.5*cm)
-                header_data.append([
-                    img,
-                    Paragraph(f"<b>{entite_info.get('nom','')}</b><br/>{entite_info.get('adresse','')}<br/>{entite_info.get('telephone','')}<br/>{entite_info.get('email','')}", styleN)
-                ])
-            except Exception:
-                header_data.append([
-                    Paragraph("<b>Logo non lisible</b>", styleN),
-                    Paragraph(f"<b>{entite_info.get('nom','')}</b><br/>{entite_info.get('adresse','')}<br/>{entite_info.get('telephone','')}<br/>{entite_info.get('email','')}", styleN)
-                ])
-        else:
-            header_data.append([
-                "",
-                Paragraph(f"<b>{entite_info.get('nom','')}</b><br/>{entite_info.get('adresse','')}<br/>{entite_info.get('telephone','')}<br/>{entite_info.get('email','')}", styleN)
-            ])
-        t = Table(header_data, colWidths=[3*cm, 12*cm], hAlign='LEFT')
-        t.setStyle(TableStyle([
-            ('VALIGN', (0,0), (-1,-1), 'TOP'),
-            ('ALIGN', (0,0), (-1,-1), 'LEFT'),
-            ('BOTTOMPADDING', (0,0), (-1,-1), 6),
-            ('TOPPADDING', (0,0), (-1,-1), 0),
-        ]))
-        elements.append(t)
-        elements.append(Spacer(1, 0.2*cm))
-        # Titre stylisé
-        titre = "JOURNAL COMPTABLE"
-        elements.append(Paragraph(titre, styleTitre))
-        elements.append(Spacer(1, 0.2*cm))
+            elements.append(Paragraph("JOURNAL COMPTABLE", styleTitre))
+            elements.append(Spacer(1, 0.2*cm))
         # Tableau
         table = Table(data, repeatRows=1, colWidths=col_widths)
         table.setStyle(TableStyle([
-            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#FF9800')),
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#8E44AD')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),
             ('ALIGN', (0,0), (-1,-1), 'LEFT'),
             ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
@@ -547,7 +503,7 @@ class JournalWidget(QWidget):
         btns = QHBoxLayout()
         btn_ok = QPushButton("Valider")
         btn_cancel = QPushButton("Annuler")
-        btn_ok.setStyleSheet("background-color: #1976d2; color: white; font-weight: bold; padding: 6px 18px; border-radius: 6px;")
+        btn_ok.setStyleSheet("background-color: #8E44AD; color: white; font-weight: bold; padding: 6px 18px; border-radius: 6px;")
         btn_cancel.setStyleSheet("background-color: #e0e0e0; color: #333; font-weight: bold; padding: 6px 18px; border-radius: 6px;")
         btns.addWidget(btn_ok)
         btns.addWidget(btn_cancel)

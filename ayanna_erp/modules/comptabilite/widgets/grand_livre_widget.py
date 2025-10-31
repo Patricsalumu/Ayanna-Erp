@@ -14,7 +14,7 @@ Affiche tous les comptes ave        # Largeurs par défaut
             # Appliquer Stretch sur la dernière colonne
             header.setSectionResizeMode(col_count-1, QHeaderView.ResizeMode.Stretch)aux débit, crédit, solde. Double-clic = détail écritures.
 """
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QDialog
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QDialog, QLabel, QFrame, QLineEdit
 from PyQt6.QtGui import QStandardItemModel
 class GrandLivreWidget(QWidget):
     def __init__(self, controller, parent=None):
@@ -34,21 +34,59 @@ class GrandLivreWidget(QWidget):
             print(f"[DEBUG] GrandLivreWidget: parent sans get_currency_symbol(), devise par défaut")
             self.devise = "€"  # Fallback
         try:
+            # Main layout
             self.layout = QVBoxLayout(self)
+            self.layout.setContentsMargins(12, 12, 12, 12)
+
+            # Header card
+            header = QFrame()
+            header.setStyleSheet('''
+                QFrame { background: qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #8E44AD, stop:1 #8E44AD); border-radius:8px; padding:6px }
+                QLabel { color: white; font-weight: bold }
+            ''')
+            h_layout = QHBoxLayout(header)
+            title = QLabel("📘 Grand Livre")
+            title.setStyleSheet('font-size:16px')
+            h_layout.addWidget(title)
+            h_layout.addStretch()
+            self.layout.addWidget(header)
+
+            # Filters: search + refresh + export
+            filter_frame = QFrame()
+            filter_layout = QHBoxLayout(filter_frame)
+            filter_layout.setContentsMargins(0, 6, 0, 6)
+            self.search_input = QLineEdit()
+            self.search_input.setPlaceholderText("Rechercher compte, libellé...")
+            self.search_input.textChanged.connect(self.load_data)
+            filter_layout.addWidget(self.search_input)
+            refresh_btn = QPushButton("🔄 Rafraîchir")
+            refresh_btn.setStyleSheet("background-color:#8E44AD; color:white; padding:6px 12px; border-radius:6px;")
+            refresh_btn.clicked.connect(self.load_data)
+            export_btn = QPushButton("📤 Exporter")
+            export_btn.setStyleSheet("background-color:#4CAF50; color:white; padding:6px 12px; border-radius:6px;")
+            export_btn.clicked.connect(self.export_pdf)
+            filter_layout.addWidget(refresh_btn)
+            filter_layout.addWidget(export_btn)
+            self.layout.addWidget(filter_frame)
+
+            # Table container
+            table_frame = QFrame()
+            table_frame.setStyleSheet('QFrame { background: white; border-radius:6px; padding:4px }')
+            table_layout = QVBoxLayout(table_frame)
+
             self.table = QTableView()
             self.model = QStandardItemModel()
             self.table.setModel(self.model)
             # Style uniforme
             self.table.setSelectionBehavior(self.table.SelectionBehavior.SelectRows)
             self.table.setEditTriggers(self.table.EditTrigger.NoEditTriggers)
-            header = self.table.horizontalHeader()
             from PyQt6.QtWidgets import QHeaderView
-            # Configuration des colonnes sera faite après le chargement des données
-            header.setSectionResizeMode(header.ResizeMode.Interactive)
-            header.setStretchLastSection(True)
+            header_view = self.table.horizontalHeader()
+            header_view.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+            header_view.setStretchLastSection(True)
             self.table.setStyleSheet('''
                 QHeaderView::section {
-                    background-color: #FF9800;
+                    background-color: #8E44AD;
                     color: white;
                     font-weight: bold;
                     font-size: 13px;
@@ -57,16 +95,15 @@ class GrandLivreWidget(QWidget):
                 }
                 QTableView::item:selected {
                     background-color: #e3f2fd;
-                    color: #1976d2;
+                    color: #8E44AD;
                 }
             ''')
-            self.layout.addWidget(self.table)
-            btn_layout = QHBoxLayout()
-            self.export_btn = QPushButton("Exporter PDF")
-            btn_layout.addWidget(self.export_btn)
-            self.layout.addLayout(btn_layout)
-            self.export_btn.clicked.connect(self.export_pdf)
+            table_layout.addWidget(self.table)
+            self.layout.addWidget(table_frame)
+
+            # Connections
             self.table.doubleClicked.connect(self.show_ecritures)
+            # initial load
             self.load_data()
         except Exception as e:
             print(f"[ERROR] GrandLivreWidget: erreur lors de la création des widgets/layout: {e}")
@@ -109,8 +146,72 @@ class GrandLivreWidget(QWidget):
         return f"{value:,.0f}"
 
     def export_pdf(self):
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-        QMessageBox.information(self, "Export PDF", "Export PDF, non encore implémenté dans cette version.")
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.units import cm
+            from reportlab.platypus import Table, TableStyle, SimpleDocTemplate, Paragraph, Spacer
+            from reportlab.lib import colors
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from PyQt6.QtWidgets import QFileDialog
+            import datetime
+        except ImportError:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "ReportLab manquant", "Veuillez installer reportlab : pip install reportlab")
+            return
+
+        path, _ = QFileDialog.getSaveFileName(self, "Exporter le Grand Livre en PDF", "grand_livre.pdf", "Fichiers PDF (*.pdf)")
+        if not path:
+            return
+
+        data = self.controller.get_grand_livre(self.entreprise_id)
+        doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+        elements = []
+        styles = getSampleStyleSheet()
+        styleTitre = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=15, spaceAfter=10)
+
+        # Header (logo + title)
+        try:
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import prepare_header_elements, format_amount
+            header_elems = prepare_header_elements(self.controller, self.entreprise_id, title="GRAND LIVRE")
+            elements.extend(header_elems)
+        except Exception:
+            elements.append(Paragraph("GRAND LIVRE", styleTitre))
+            elements.append(Spacer(1, 0.2*cm))
+
+        table_data = [["Numéro", "Libellé", "Total Débit", "Total Crédit", "Solde"]]
+        for row in data:
+            try:
+                td = format_amount(row.get('total_debit', 0), self.controller)
+                tc = format_amount(row.get('total_credit', 0), self.controller)
+                sd = format_amount(row.get('solde', 0), self.controller)
+            except Exception:
+                td = f"{row.get('total_debit',0):,.2f}"
+                tc = f"{row.get('total_credit',0):,.2f}"
+                sd = f"{row.get('solde',0):,.2f}"
+            table_data.append([
+                str(row.get('numero','')),
+                str(row.get('nom','')),
+                td,
+                tc,
+                sd,
+            ])
+
+        table = Table(table_data, colWidths=[3*cm, 7*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+        table.setStyle(TableStyle([
+            ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#8E44AD')),
+            ('TEXTCOLOR', (0,0), (-1,0), colors.white),
+            ('ALIGN', (2,1), (-1,-1), 'RIGHT'),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+        ]))
+        elements.append(table)
+
+        try:
+            doc.build(elements)
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.information(self, "Export PDF réussi", f"Le Grand Livre a été exporté en PDF dans :\n{path}")
+        except Exception as e:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.warning(self, "Erreur export PDF", f"Une erreur est survenue lors de l'export :\n{e}")
 
     def show_ecritures(self, index):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTableView, QDialogButtonBox, QPushButton, QFileDialog, QMessageBox, QHBoxLayout
@@ -163,7 +264,7 @@ class GrandLivreWidget(QWidget):
         header.setStretchLastSection(True)
         table.setStyleSheet('''
             QHeaderView::section {
-                background-color: #FF9800;
+                background-color: #8E44AD;
                 color: white;
                 font-weight: bold;
                 font-size: 13px;
@@ -172,7 +273,7 @@ class GrandLivreWidget(QWidget):
             }
             QTableView::item:selected {
                 background-color: #e3f2fd;
-                color: #1976d2;
+                color: #8E44AD;
             }
         ''')
         layout.addWidget(table)

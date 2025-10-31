@@ -5,7 +5,7 @@ Gère les requêtes SQLAlchemy, calculs de soldes, transferts, et fournit les do
 """
 
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.comptabilite.model.comptabilite import (
     ComptaClasses, ComptaComptes, ComptaJournaux, ComptaEcritures, ComptaConfig
@@ -130,7 +130,8 @@ class ComptabiliteController:
         comptes = (
             self.session.query(ComptaComptes, ComptaClasses)
             .join(ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id)
-            .filter(ComptaClasses.enterprise_id == entreprise_id)
+            # Inclure les classes appartenant à l'entreprise OU les classes globales (enterprise_id IS NULL)
+            .filter(or_(ComptaClasses.enterprise_id == entreprise_id, ComptaClasses.enterprise_id == None))
             .filter(ComptaClasses.type.in_(["actif", "passif"]))
             .all()
         )
@@ -376,13 +377,17 @@ class ComptabiliteController:
         return self.session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
 
     def get_comptes_par_classe(self, enterprise_id, classe_code):
-        """Récupère les comptes d'une classe donnée (ex: '4' pour clients, '5' pour caisse/banque, etc.)"""
-        return (self.session.query(CompteComptable)
-                .join(ClasseComptable)
-                .filter(ClasseComptable.enterprise_id == enterprise_id)
-                .filter(ClasseComptable.code.like(f'{classe_code}%'))
-                .filter(CompteComptable.actif == True)
-                .all())
+        """Récupère les comptes d'une classe donnée (ex: '4' pour clients, '5' pour caisse/banque, etc.)
+        Inclut les classes appartenant à l'entreprise ainsi que les classes globales (enterprise_id IS NULL).
+        """
+        return (
+            self.session.query(CompteComptable)
+            .join(ClasseComptable)
+            .filter(or_(ClasseComptable.enterprise_id == enterprise_id, ClasseComptable.enterprise_id == None))
+            .filter(ClasseComptable.code.like(f'{classe_code}%'))
+            .filter(CompteComptable.actif == True)
+            .all()
+        )
 
     def get_comptes_caisse_banque(self, entreprise_id):
         """
