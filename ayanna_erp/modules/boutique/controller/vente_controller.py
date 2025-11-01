@@ -257,10 +257,6 @@ class VenteController:
             if discount_amount > 0 and not compte_remise_id:
                 return False, "Une remise a été appliquée mais aucun compte remise n'est configuré pour ce point de vente. Veuillez configurer le compte remise dans les paramètres comptables."
 
-            # Calculer le poids de chaque article dans le panier
-            total_cart_weight = sum(item['unit_price'] * item['quantity'] for item in cart_items)
-            if total_cart_weight == 0:
-                return False, "Panier vide"
 
             # Si on a des produits physiques, s'assurer que les comptes stock/charge sont configurés
             has_product_items = any(item.get('type') == 'product' for item in cart_items)
@@ -427,7 +423,9 @@ class VenteController:
                     # Déterminer le compte charge à utiliser (hiérarchie: compte_charge_id produit > compte_achat_id config > compte_variation_stock_id)
                     compte_charge_id = product_compte_charge_id or compte_achat_id or compte_variation_stock_id
 
+                    print(f"DEBUGG 1 UNIT COSTE {unit_cost}")
                     cogs_amount = unit_cost * qty
+                    print(f"DEBUGG 2 COGS AMOUNT {cogs_amount}")
                     if cogs_amount <= 0:
                         # Si pas de coût renseigné on saute (ne doit pas arrêter la vente)
                         continue

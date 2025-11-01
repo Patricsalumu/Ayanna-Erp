@@ -132,7 +132,7 @@ class ComptabiliteController:
             .join(ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id)
             # Inclure les classes appartenant à l'entreprise OU les classes globales (enterprise_id IS NULL)
             .filter(or_(ComptaClasses.enterprise_id == entreprise_id, ComptaClasses.enterprise_id == None))
-            .filter(ComptaClasses.type.in_(["actif", "passif"]))
+            .filter(ComptaClasses.type.in_(["actif", "passif", "mixte"]))
             .all()
         )
 
@@ -165,6 +165,16 @@ class ComptabiliteController:
                 solde = total_credit - total_debit
                 passifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
                 total_passifs += solde
+            elif classe.type == "mixte":
+                solde = total_debit - total_credit
+                if solde < 0:
+                    solde = -(solde)
+                    passifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
+                    total_passifs += solde
+                elif solde > 0:
+                    actifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
+                    total_passifs += solde
+                
 
         # Ajout du résultat net dans le passif
         resultat = self.get_compte_resultat(entreprise_id, date_debut, date_fin)
@@ -550,8 +560,8 @@ class ComptabiliteController:
                 "journal": getattr(journal, 'nom', ''),
                 "journal_id": ecriture.journal_id,
                 "libelle": getattr(ecriture, 'libelle', ''),
-                "debit": ecriture.debit,
-                "credit": ecriture.credit
+                "debit": float(ecriture.debit),
+                "credit": float(ecriture.credit)
             })               
         return result
 
