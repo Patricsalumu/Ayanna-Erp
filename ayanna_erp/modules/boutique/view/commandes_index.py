@@ -499,22 +499,26 @@ class CommandesIndexWidget(QWidget):
         
     def update_period_stats(self, commandes=None):
         """Mettre à jour les statistiques de période"""
-        if not commandes:
+        try:
+            # Récupérer bornes
+            d1 = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
+            d2 = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
+
+            # Prioriser une source directe en base pour des chiffres cohérents
+            stats = self.commande_controller.get_period_commandes_stats(d1, d2)
+
             stats_text = f"""
-Période: Derniers 30 jours
-Commandes: 0
-Chiffre d'affaires: 0 {self.get_currency_symbol()}
-Créances: 0 {self.get_currency_symbol()}
-Panier moyen: 0 {self.get_currency_symbol()}
+Période: {self.date_debut.date().toString('dd/MM/yyyy')} - {self.date_fin.date().toString('dd/MM/yyyy')}
+Commandes: {stats.get('nb_commandes', 0)}
+Chiffre d'affaires: {stats.get('total_ca', 0):.0f} {self.get_currency_symbol()}
+Total payés: {stats.get('total_paid', 0):.0f} {self.get_currency_symbol()}
+Total non payés: {stats.get('total_unpaid', 0):.0f} {self.get_currency_symbol()}
+Créances: {stats.get('nb_creances', 0)}
+Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             """
-        else:
-            # Utiliser le contrôleur pour formater les statistiques
-            stats = self.commande_controller.get_commandes_statistics(commandes)
-            stats_text = self.commande_controller.format_period_stats(
-                stats, self.date_debut.date(), self.date_fin.date()
-            )
-            
-        self.stats_text.setText(stats_text.strip())
+            self.stats_text.setText(stats_text.strip())
+        except Exception as e:
+            print(f"❌ Erreur update_period_stats: {e}")
         
     def filter_commandes(self):
         """Filtrer les commandes selon les critères actuels"""
@@ -1267,14 +1271,15 @@ Notes: {notes_preview}
             elements.append(Paragraph(f"<b>Nombre de commandes:</b> {len(commandes)}", styles['NormalText']))
             elements.append(Spacer(1, 0.5*cm))
             
-            # Statistiques générales
-            stats = self.commande_controller.get_commandes_statistics(commandes)
+            # Statistiques générales (utiliser la source DB pour cohérence)
+            stats = self.commande_controller.get_period_commandes_stats(date_debut, date_fin)
             stats_data = [
                 ['Statistiques générales', ''],
-                ['Total CA:', f"{stats['total_ca']:.0f} {self.get_currency_symbol()}"],
-                ['Créances:', f"{stats['total_creances']:.0f} {self.get_currency_symbol()}"],
-                ['Commandes payées:', f"{stats['commandes_payees']}"],
-                ['Commandes non payées:', f"{stats['commandes_non_payees']}"]
+                ['Total CA:', f"{stats.get('total_ca',0):.0f} {self.get_currency_symbol()}"],
+                ['Total payés:', f"{stats.get('total_paid',0):.0f} {self.get_currency_symbol()}"],
+                ['Total non payés:', f"{stats.get('total_unpaid',0):.0f} {self.get_currency_symbol()}"],
+                ['Créances (nb):', f"{stats.get('nb_creances',0)}"],
+                ['Commandes:', f"{stats.get('nb_commandes',0)}"]
             ]
             
             stats_table = Table(stats_data, colWidths=[4*cm, 4*cm])
@@ -1292,7 +1297,7 @@ Notes: {notes_preview}
             
             # Tableau des commandes
             table_data = [
-                ['N° Commande', 'Date/Heure', 'Client', 'Produits/Services', 'Sous-total', 'Remise', 'Total', 'Payé']
+                ['N° Commande', 'Date/Heure', 'Client', 'Produits/Services', 'Sous-total', 'Remise', 'Total', 'Payé', 'Status']
             ]
             
             for commande in commandes:
@@ -1321,12 +1326,13 @@ Notes: {notes_preview}
                     f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}",
                     f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}",
                     f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}",
-                    f"{commande.get('montant_paye', 0):.0f} {self.get_currency_symbol()}"
+                    f"{commande.get('montant_paye', 0):.0f} {self.get_currency_symbol()}",
+                    (commande.get('status') or '').capitalize()
                 ]
                 table_data.append(row)
             
             # Créer le tableau avec des largeurs appropriées
-            col_widths = [3*cm, 2*cm, 3*cm, 7*cm, 1.8*cm, 1.8*cm, 1.8*cm, 1.8*cm]
+            col_widths = [3*cm, 2*cm, 3*cm, 6.5*cm, 1.6*cm, 1.6*cm, 1.6*cm, 1.6*cm, 1.2*cm]
             commandes_table = Table(table_data, colWidths=col_widths, repeatRows=1)
             
             # Style du tableau

@@ -233,6 +233,118 @@ class CommandeController:
             'panier_moyen': panier_moyen
         }
 
+    def get_period_commandes_stats(self, date_debut, date_fin) -> Dict[str, Any]:
+        """
+        Calculer les statistiques des commandes pour une période donnée (depuis la base).
+
+        Règles :
+        - n'inclut pas les commandes dont status = 'cancelled'
+        - chiffre d'affaires = somme des total_final des commandes de la période
+        - total_paid = somme des paiements (shop_payments.amount) liés aux commandes de la période
+        - total_unpaid = chiffre d'affaires - total_paid
+        - total_creances = somme des montants restants pour les commandes où montant_paye < total_final
+        """
+        try:
+            # Normaliser les bornes (inclusives)
+            from datetime import datetime, time
+            if isinstance(date_debut, datetime):
+                d1 = date_debut
+            else:
+                d1 = datetime.combine(date_debut, time.min)
+            if isinstance(date_fin, datetime):
+                d2 = date_fin
+            else:
+                d2 = datetime.combine(date_fin, time.max)
+
+            with self.db_manager.get_session() as session:
+                # Récupérer commandes valides dans la période
+                q_cmd = text("""
+                    SELECT id, COALESCE(total_final,0) as total_final
+                    FROM shop_paniers
+                    WHERE created_at >= :d1 AND created_at <= :d2
+                    AND LOWER(COALESCE(status,'')) <> 'cancelled'
+                """)
+                res = session.execute(q_cmd, {'d1': d1, 'd2': d2})
+                rows = res.fetchall()
+                if not rows:
+                    return {
+                        'total_ca': 0,
+                        'total_paid': 0,
+                        'total_unpaid': 0,
+                        'total_creances': 0,
+                        'nb_commandes': 0,
+                        'panier_moyen': 0,
+                    }
+
+                total_ca = sum((r.total_final or 0) for r in rows)
+
+                # Total payé : somme des paiements liés aux commandes sélectionnées (via join sur date)
+                q_paid = text("""
+                    SELECT COALESCE(SUM(sp.amount),0) as total_paid
+                    FROM shop_payments sp
+                    JOIN shop_paniers p ON sp.panier_id = p.id
+                    WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                    AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                """)
+                paid_row = session.execute(q_paid, {'d1': d1, 'd2': d2}).fetchone()
+                total_paid = paid_row.total_paid if paid_row and paid_row.total_paid is not None else 0
+
+                # Total créances : sommes des (total_final - montant_paye) pour commandes où montant_paye < total_final
+                q_creances = text("""
+                    SELECT COALESCE(SUM(p.total_final - COALESCE(p.montant_paye,0)),0) as total_creances
+                    FROM (
+                        SELECT pp.id, COALESCE(pp.total_final,0) as total_final,
+                               (SELECT COALESCE(SUM(sp.amount),0) FROM shop_payments sp WHERE sp.panier_id = pp.id) as montant_paye
+                        FROM shop_paniers pp
+                        WHERE pp.created_at >= :d1 AND pp.created_at <= :d2
+                        AND LOWER(COALESCE(pp.status,'')) <> 'cancelled'
+                    ) p
+                    WHERE COALESCE(p.montant_paye,0) < COALESCE(p.total_final,0)
+                """)
+                cre_row = session.execute(q_creances, {'d1': d1, 'd2': d2}).fetchone()
+                total_creances = cre_row.total_creances if cre_row and cre_row.total_creances is not None else 0
+
+                # Nombre de créances (nombre de commandes where montant_paye < total_final)
+                q_nb_creances = text("""
+                    SELECT COUNT(1) as nb_creances
+                    FROM (
+                        SELECT pp.id,
+                               (SELECT COALESCE(SUM(sp.amount),0) FROM shop_payments sp WHERE sp.panier_id = pp.id) as montant_paye,
+                               COALESCE(pp.total_final,0) as total_final
+                        FROM shop_paniers pp
+                        WHERE pp.created_at >= :d1 AND pp.created_at <= :d2
+                        AND LOWER(COALESCE(pp.status,'')) <> 'cancelled'
+                    ) t
+                    WHERE COALESCE(t.montant_paye,0) < COALESCE(t.total_final,0)
+                """)
+                nb_cre_row = session.execute(q_nb_creances, {'d1': d1, 'd2': d2}).fetchone()
+                nb_creances = int(nb_cre_row.nb_creances) if nb_cre_row and nb_cre_row.nb_creances is not None else 0
+
+                total_unpaid = total_ca - total_paid
+
+                nb_commandes = len(rows)
+                panier_moyen = (total_ca / nb_commandes) if nb_commandes > 0 else 0
+
+                return {
+                    'total_ca': total_ca,
+                    'total_paid': total_paid,
+                    'total_unpaid': total_unpaid,
+                    'total_creances': total_creances,
+                    'nb_creances': nb_creances,
+                    'nb_commandes': nb_commandes,
+                    'panier_moyen': panier_moyen,
+                }
+        except Exception as e:
+            print(f"❌ Erreur get_period_commandes_stats: {e}")
+            return {
+                'total_ca': 0,
+                'total_paid': 0,
+                'total_unpaid': 0,
+                'total_creances': 0,
+                'nb_commandes': 0,
+                'panier_moyen': 0,
+            }
+
     def format_period_stats(self, stats: Dict[str, Any], date_debut, date_fin) -> str:
         """
         Formater les statistiques de période
