@@ -517,18 +517,14 @@ class InvoicePrintManager:
             y_sim -= max(6 * mm, lines * 2.5 * mm)
             y_sim -= 3 * mm  # séparation après notes
 
-        # réserver un espace pour la signature
-        signature_height = 20 * mm
-        y_sim -= signature_height
-
         # filigrane
-        y_sim -= 4 * mm
+        y_sim -= 10 * mm
 
         used_height = simulate_start_height - y_sim
         # ajouter petite marge
-        TICKET_HEIGHT = used_height + 6 * mm
+        TICKET_HEIGHT = used_height + 12 * mm
         # garantir une hauteur minimale
-        min_height = 80 * mm
+        min_height = 85 * mm
         if TICKET_HEIGHT < min_height:
             TICKET_HEIGHT = min_height
 
@@ -768,28 +764,12 @@ class InvoicePrintManager:
             c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
             y_position -= 3*mm
 
-        # Signature (zone réservée)
-        try:
-            c.setFont('Helvetica', 6)
-            c.drawString(2*mm, y_position, 'Signature:')
-            y_position -= 6*mm
-            # Ligne de signature
-            c.line(20*mm, y_position, TICKET_WIDTH - 20*mm, y_position)
-            # Consommer le reste de l'espace réservé à la signature si défini
-            try:
-                y_position -= signature_height
-            except Exception:
-                # signature_height peut ne pas exister (sécurité)
-                y_position -= 14*mm
-        except Exception:
-            # Si pour une raison quelconque le dessin de la signature échoue, ignorer
-            pass
 
         # Filigrane avec nom d'entreprise dynamique
-        c.setFont('Helvetica', 5)
+        c.setFont('Helvetica', 6)
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
         filigrane_text = f"Ayanna Erp App (c) {generation_time}"
-        text_width = c.stringWidth(filigrane_text, 'Helvetica', 5)
+        text_width = c.stringWidth(filigrane_text, 'Helvetica', 6)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
 
         # Sauvegarder le PDF

@@ -28,7 +28,7 @@ class LoginWindow(QWidget):
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
         self.setWindowTitle("Ayanna ERP - Connexion")
-        self.setFixedSize(600, 700)
+        self.setFixedSize(600, 650)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         
         # Layout principal
@@ -188,7 +188,7 @@ class LoginWindow(QWidget):
     def setup_footer(self, layout):
         """Configuration du pied de page"""
         # Texte de base
-        base_text = "© 2018 Congo Mémoire - Tous droits réservés"
+        base_text = "© 2025 Ayanna Tech - Tous droits réservés"
 
         # Tenter de récupérer une licence active ou non expirée
         licence_text = ""

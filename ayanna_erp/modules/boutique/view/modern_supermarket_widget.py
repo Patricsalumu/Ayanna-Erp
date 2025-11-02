@@ -330,7 +330,7 @@ class ModernSupermarketWidget(QWidget):
         card_layout.addWidget(price_label)
 
         # Source badge
-        source_label = QLabel("(événement)" if source == 'event' else "(boutique)")
+        source_label = QLabel("(service)" if source == 'event' else "(service)")
         source_label.setStyleSheet("color:#777; font-size:11px;")
         card_layout.addWidget(source_label)
         # Bouton ajouter
@@ -380,7 +380,7 @@ class ModernSupermarketWidget(QWidget):
         layout.addWidget(price_label, 1, Qt.AlignmentFlag.AlignRight)
 
         # Source
-        source_label = QLabel("(événement)" if source == 'event' else "(boutique)")
+        source_label = QLabel("(service)" if source == 'event' else "(service)")
         source_label.setStyleSheet("color:#777; font-size:11px;")
         layout.addWidget(source_label, 1, Qt.AlignmentFlag.AlignRight)
 

@@ -261,7 +261,7 @@ class ProduitIndex(QWidget):
             else:
                 details += f"<b>Dernière vente :</b> Jamais vendu<br>"
             details += f"<b>Chiffre d'affaires :</b> {sales_stats['total_revenue']:.2f} {self.get_currency_symbol()}<br>"
-            details += f"<b>Bénéfice :</b> {sales_stats['total_profit']:.2f} {self.get_currency_symbol()}<br>"
+            details += f"<b>Marge :</b> {sales_stats['total_profit']:.2f} {self.get_currency_symbol()}<br>"
             
             # Ajouter les détails de stock
             stock_details = self.produit_controller.get_product_stock_details(session, product_id)

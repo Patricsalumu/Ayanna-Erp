@@ -159,12 +159,14 @@ class ComptabiliteController:
             total_credit = float(res.total_credit or 0)
             if classe.type == "actif":
                 solde = total_debit - total_credit
-                actifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
-                total_actifs += solde
+                if solde != 0:
+                    actifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
+                    total_actifs += solde
             elif classe.type == "passif":
                 solde = total_credit - total_debit
-                passifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
-                total_passifs += solde
+                if solde != 0:
+                    passifs.append({"compte": compte.numero, "nom": compte.nom, "solde": solde})
+                    total_passifs += solde
             elif classe.type == "mixte":
                 solde = total_debit - total_credit
                 if solde < 0:
@@ -999,6 +1001,7 @@ class ComptabiliteController:
             raise Exception("Compte introuvable")
         compte.numero = data["numero"]
         compte.nom = data["nom"]
+        compte.libelle = data['libelle']
         compte.classe_comptable_id = data["classe_comptable_id"]
         self.session.commit()
 

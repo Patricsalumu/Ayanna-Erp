@@ -7,7 +7,7 @@ from ayanna_erp.core.services.licence_service import activer_licence
 class LicenceActivationDialog(QDialog):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Activation de la licence Ayanna School")
+        self.setWindowTitle("Activation de la licence Ayanna Erp")
         self.setFixedSize(670, 550)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.WindowStaysOnTopHint)
 
@@ -24,11 +24,11 @@ class LicenceActivationDialog(QDialog):
         # Explication générale
         explication = QLabel(
             "<b>Qu'est-ce qu'une clé de licence ?</b><br>"
-            "Une clé de licence est un code unique qui permet d'activer et d'utiliser légalement le logiciel <b>Ayanna School</b> sur cet ordinateur.\n"
+            "Une clé de licence est un code unique qui permet d'activer et d'utiliser légalement le logiciel <b>Ayanna ERP</b> sur cet ordinateur.\n"
             "<br><br>"
             "<b>Comment obtenir une clé ?</b><br>"
-            "Contactez l'équipe de <b>Congo Mémoire</b> pour acheter ou demander une clé de licence.\n"
-            "<br>Développeur : <b>Congo Mémoire</b>\n"
+            "Contactez l'équipe <b>Ayanna Tech</b> pour acheter ou demander une clé d'essaie.\n"
+            "<br>Développeur : <b>Ayanna Tech</b>\n"
             "<br>Téléphone : <b>+243997554905</b>\n"
             "<br><br>"
             "<span style='color:#666'>Entrez la clé reçue ci-dessous pour activer votre logiciel.</span>"
@@ -70,7 +70,7 @@ class LicenceActivationDialog(QDialog):
         layout.addLayout(btn_layout)
 
         # Footer branding
-        footer = QLabel("Développé par <b>Congo Mémoire</b>  |  Contact : <b>+243997554905</b>")
+        footer = QLabel("Développé par <b>Ayanna Tech</b>  |  Contact : <b>+243997554905</b>")
         footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer.setStyleSheet("color: #888; font-size: 12px; margin-top: 18px;")
         layout.addWidget(footer)

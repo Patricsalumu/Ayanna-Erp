@@ -324,7 +324,7 @@ class ServiceController(QObject):
                     ShopPanier.created_at.label('event_date')
                 )
                 .join(ShopPanier, ShopPanierService.panier_id == ShopPanier.id)
-                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed']))
+                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending']))
                 .all()
             )
             
@@ -422,7 +422,7 @@ class ServiceController(QObject):
                 )
                 .join(ShopPanierService, ShopPanier.id == ShopPanierService.panier_id)
                 .outerjoin(ShopClient, ShopPanier.client_id == ShopClient.id)
-                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed']))
+                .filter(ShopPanierService.service_id == service_id, ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending']))
                 .all()
             )
             

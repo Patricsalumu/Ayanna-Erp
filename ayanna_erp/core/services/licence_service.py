@@ -17,8 +17,8 @@ LICENCE_KEYS = {
     # Démo (4)
     "Qm3AYO": {"type": "Essai", "duree_jours": 30},
     "LfTR4b": {"type": "Essai", "duree_jours": 30},
-    "E4fvGb": {"type": "Essai", "duree_jours": 30},
-    "UCVeIW": {"type": "Essai", "duree_jours": 30},
+    "E4fvGb": {"type": "Essai", "duree_jours": 2},
+    "UCVeIW": {"type": "Essai", "duree_jours": 2},
 
     # Mensuel (exemples)
     "4AoMjg": {"type": "Mensuel", "duree_jours": 30},
