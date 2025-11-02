@@ -648,12 +648,26 @@ class ComptabiliteController:
 
         # Logo + infos école (optionnel)
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        tmp_logo = None
+        # Try to use the temp writer from pdf_export to avoid creating persistent files
+        try:
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import _write_logo_temp, cleanup_temp_path
+        except Exception:
+            _write_logo_temp = None
+            cleanup_temp_path = None
+
         # Gestion du logo depuis la base de données
         if entreprise_info.get('logo'):
             try:
-                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
-                with open(logo_path, "wb") as f:
-                    f.write(entreprise_info['logo'])
+                if _write_logo_temp:
+                    tmp_logo = _write_logo_temp(entreprise_info['logo'])
+                    if tmp_logo:
+                        logo_path = tmp_logo
+                else:
+                    # backward-compatible fallback: write into images folder
+                    logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                    with open(logo_path, "wb") as f:
+                        f.write(entreprise_info['logo'])
             except Exception as e:
                 print(f"Erreur lors de la sauvegarde du logo: {e}")
         
@@ -697,6 +711,12 @@ class ComptabiliteController:
 
         c.showPage()
         c.save()
+        # Cleanup du fichier temporaire si on en a créé un
+        try:
+            if tmp_logo and cleanup_temp_path:
+                cleanup_temp_path(tmp_logo)
+        except Exception:
+            pass
 
     
 
@@ -766,15 +786,27 @@ class ComptabiliteController:
 
         # Logo + infos entreprise
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        tmp_logo = None
+        try:
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import _write_logo_temp, cleanup_temp_path
+        except Exception:
+            _write_logo_temp = None
+            cleanup_temp_path = None
+
         # Gestion du logo depuis la base de données
         if entreprise_info.get('logo'):
             try:
-                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
-                with open(logo_path, "wb") as f:
-                    f.write(entreprise_info['logo'])
+                if _write_logo_temp:
+                    tmp_logo = _write_logo_temp(entreprise_info['logo'])
+                    if tmp_logo:
+                        logo_path = tmp_logo
+                else:
+                    logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                    with open(logo_path, "wb") as f:
+                        f.write(entreprise_info['logo'])
             except Exception as e:
                 print(f"Erreur lors de la sauvegarde du logo: {e}")
-        
+
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
@@ -847,6 +879,11 @@ class ComptabiliteController:
 
         c.showPage()
         c.save()
+        try:
+            if tmp_logo and cleanup_temp_path:
+                cleanup_temp_path(tmp_logo)
+        except Exception:
+            pass
 
     
     # Comptes Comptables
@@ -869,7 +906,20 @@ class ComptabiliteController:
 
     def get_compte_resultat(self, entreprise_id, date_debut, date_fin):
         from sqlalchemy import func
+        import datetime
         # Import remplac� par les nouveaux mod�les
+
+        # Normalize dates: make sure date_debut is at 00:00:00 and date_fin at 23:59:59.999999
+        try:
+            if isinstance(date_debut, datetime.date) and not isinstance(date_debut, datetime.datetime):
+                date_debut = datetime.datetime.combine(date_debut, datetime.time.min)
+        except Exception:
+            pass
+        try:
+            if isinstance(date_fin, datetime.date) and not isinstance(date_fin, datetime.datetime):
+                date_fin = datetime.datetime.combine(date_fin, datetime.time.max)
+        except Exception:
+            pass
 
         # Charges (classe 6, type 'charge')
         charges_query = (
@@ -1000,15 +1050,27 @@ class ComptabiliteController:
 
         # Logo + infos entreprise
         logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
+        tmp_logo = None
+        try:
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import _write_logo_temp, cleanup_temp_path
+        except Exception:
+            _write_logo_temp = None
+            cleanup_temp_path = None
+
         # Gestion du logo depuis la base de données
         if entreprise_info.get('logo'):
             try:
-                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
-                with open(logo_path, "wb") as f:
-                    f.write(entreprise_info['logo'])
+                if _write_logo_temp:
+                    tmp_logo = _write_logo_temp(entreprise_info['logo'])
+                    if tmp_logo:
+                        logo_path = tmp_logo
+                else:
+                    logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
+                    with open(logo_path, "wb") as f:
+                        f.write(entreprise_info['logo'])
             except Exception as e:
                 print(f"Erreur lors de la sauvegarde du logo: {e}")
-        
+
         if os.path.exists(logo_path):
             c.drawImage(logo_path, 1*cm, height-2.5*cm, width=1.5*cm, height=1.5*cm, mask='auto')
         c.setFont("Helvetica-Bold", 12)
@@ -1047,6 +1109,11 @@ class ComptabiliteController:
 
         c.showPage()
         c.save()
+        try:
+            if tmp_logo and cleanup_temp_path:
+                cleanup_temp_path(tmp_logo)
+        except Exception:
+            pass
 
     # Classes Comptables
     def get_classes(self, entreprise_id):

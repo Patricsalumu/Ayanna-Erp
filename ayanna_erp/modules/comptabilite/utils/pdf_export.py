@@ -163,3 +163,14 @@ def format_amount(value, controller=None):
         return f"{float(value):,.2f}"
     except Exception:
         return str(value)
+
+
+def cleanup_temp_path(path):
+    """Supprime un chemin temporaire précédemment enregistré par _write_logo_temp.
+    Ne fera rien si le chemin n'est pas géré comme temporaire par ce module.
+    """
+    try:
+        if path in _TEMP_LOGO_PATHS:
+            _remove_temp_path(path)
+    except Exception:
+        pass

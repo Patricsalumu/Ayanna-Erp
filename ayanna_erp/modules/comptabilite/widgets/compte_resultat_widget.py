@@ -51,7 +51,8 @@ class CompteResultatWidget(QWidget):
         fl.addWidget(QLabel("Au"))
         self.date_fin_edit = QDateEdit()
         self.date_fin_edit.setCalendarPopup(True)
-        self.date_fin_edit.setDate(QDate.currentDate())
+        # Par défaut, ouvrir l'onglet avec la date de fin = aujourd'hui + 1 jour
+        self.date_fin_edit.setDate(QDate.currentDate().addDays(1))
         fl.addWidget(self.date_fin_edit)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filtrer par compte ou libellé...")
