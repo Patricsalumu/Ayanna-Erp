@@ -226,8 +226,12 @@ class JournalWidget(QWidget):
         for j in self.journaux:
             # Date+Heure
             date_str = j.date_operation.strftime('%d/%m/%Y %H:%M')
-            # Montant avec devise
-            montant_str = f"{j.montant:,.0f} {self.devise}" if self.devise else f"{j.montant:,.0f}"
+            # Montant avec devise — utiliser le formatage central si disponible
+            try:
+                montant_str = self.controller.format_amount(getattr(j, 'montant', 0))
+            except Exception:
+                montant = getattr(j, 'montant', 0) or 0
+                montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
             row = [
                 QStandardItem(date_str),
                 QStandardItem(j.libelle),
@@ -333,7 +337,10 @@ class JournalWidget(QWidget):
             # Utiliser la valeur non nulle comme montant affiché
             montant = credit_val if sens == 'Crédit' else debit_val
             montant = montant or 0
-            montant_str = f"{montant:,.0f} {self.devise}" if self.devise else f"{montant:,.0f}"
+            try:
+                montant_str = self.controller.format_amount(montant)
+            except Exception:
+                montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
 
             # Créer un item pour cette écriture
             detail_text = f"{sens} : {compte} - {libelle}  Montant : {montant_str}"
@@ -376,7 +383,8 @@ class JournalWidget(QWidget):
                 from ayanna_erp.modules.comptabilite.utils.pdf_export import format_amount
                 montant_str = format_amount(getattr(j, 'montant', 0), self.controller)
             except Exception:
-                montant_str = f"{j.montant:,.0f} {self.devise}" if self.devise else f"{j.montant:,.0f}"
+                montant = getattr(j, 'montant', 0) or 0
+                montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
             libelle_pdf = self.truncate(j.libelle, 40)
             date_pdf = self.truncate(date_str, 20)
             montant_pdf = self.truncate(montant_str, 15)
@@ -457,7 +465,11 @@ class JournalWidget(QWidget):
         comptes_caisse = self.controller.get_comptes_caisse_banque(self.entreprise_id)
         for c in comptes_caisse:
             solde = self.controller.get_solde_compte(c.id)
-            cb_debit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde:,.0f} {self.devise})", c.id)
+            try:
+                solde_str = self.controller.format_amount(solde)
+            except Exception:
+                solde_str = f"{solde:,.2f} {self.devise}" if self.devise else f"{solde:,.2f}"
+            cb_debit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde_str})", c.id)
         h_debit.addWidget(cb_debit)
         layout.addLayout(h_debit)
 
@@ -478,7 +490,11 @@ class JournalWidget(QWidget):
             comptes_credit += [c for c in cl.comptes if c.actif]
         for c in comptes_credit:
             solde = self.controller.get_solde_compte(c.id)
-            cb_credit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde:,.0f} {self.devise})", c.id)
+            try:
+                solde_str = self.controller.format_amount(solde)
+            except Exception:
+                solde_str = f"{solde:,.2f} {self.devise}" if self.devise else f"{solde:,.2f}"
+            cb_credit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde_str})", c.id)
         h_credit.addWidget(cb_credit)
         layout.addLayout(h_credit)
 
@@ -538,7 +554,11 @@ class JournalWidget(QWidget):
             credit_label = cb_credit.currentText()
             details = f"<b>Compte à débiter :</b> {debit_label}<br>"
             details += f"<b>Compte à créditer :</b> {credit_label}<br>"
-            details += f"<b>Montant :</b> {montant:,.0f} {self.devise}<br>"
+            try:
+                montant_display = self.controller.format_amount(montant)
+            except Exception:
+                montant_display = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
+            details += f"<b>Montant :</b> {montant_display}<br>"
             details += f"<b>Libellé :</b> {libelle}"
 
             confirm = QMessageBox(self)

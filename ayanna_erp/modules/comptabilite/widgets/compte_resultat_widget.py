@@ -181,9 +181,15 @@ class CompteResultatWidget(QWidget):
         return QStandardItem(value)
 
     def _format_currency(self, value):
+        # Utiliser le formatage central si possible (respecter la configuration entreprise)
+        try:
+            if hasattr(self, 'controller') and self.controller:
+                return self.controller.format_amount(value)
+        except Exception:
+            pass
         if self.devise:
-            return f"{value:,.0f} {self.devise}"
-        return f"{value:,.0f}"
+            return f"{value:,.2f} {self.devise}"
+        return f"{value:,.2f}"
 
     def export_pdf(self):
         try:

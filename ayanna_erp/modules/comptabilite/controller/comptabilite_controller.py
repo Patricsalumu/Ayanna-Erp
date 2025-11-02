@@ -199,97 +199,128 @@ class ComptabiliteController:
         import os
         from sqlalchemy import select
 
-        c = canvas.Canvas(file_path, pagesize=A4)
-        width, height = A4
-
-        # Récupérer les informations de l'entreprise dynamiquement
+        # Utiliser SimpleDocTemplate + utilitaires d'entête pour un export unifié
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         try:
-            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-            entreprise_controller = EntrepriseController()
-            # Utiliser l'entreprise_id passé en paramètre ou celui de l'instance
-            if not entreprise_id:
-                entreprise_id = getattr(self, 'entreprise_id', 1)
-            entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id)
-        except Exception as e:
-            print(f"Erreur lors de la récupération des infos entreprise: {e}")
-            # Fallback vers les valeurs par défaut
-            entreprise_info = {
-                'name': 'AYANNA ERP',
-                'address': '123 Avenue de la République',
-                'phone': '+243 123 456 789',
-                'email': 'contact@ayanna-erp.com',
-                'rccm': 'CD/KIN/RCCM/23-B-1234'
-            }
+            from ayanna_erp.modules.comptabilite.utils.pdf_export import prepare_header_elements, format_amount, get_entreprise_info
+        except Exception:
+            prepare_header_elements = None
+            format_amount = None
+            get_entreprise_info = None
 
-        # Mention spéciale en haut
-        now = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-        c.setFont("Helvetica", 10)
-        c.setFillColorRGB(0.6, 0.6, 0.6)
-        c.drawCentredString(width/2, height-1.2*cm, f"Généré par {entreprise_info['name']} - {now}")
-        c.setFillColorRGB(0, 0, 0)
+        doc = SimpleDocTemplate(file_path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+        elements = []
 
-        # Bloc logo + infos école
-        logo_x = 1*cm
-        logo_y = height-2.5*cm
-        logo_w = 1.5*cm
-        logo_h = 1.5*cm
-        info_x = logo_x + logo_w + 0.5*cm
-        info_y = logo_y + logo_h - 0.2*cm
-        
-        # Utiliser les informations récupérées dynamiquement
-        school_name = entreprise_info['name']
-        school_address = entreprise_info['address']
-        school_phone = entreprise_info['phone']
-        school_email = entreprise_info['email']
-        logo_path = os.path.join(os.path.dirname(__file__), "../../images/favicon.ico")
-        
-        # Gestion du logo depuis la base de données
-        if entreprise_info.get('logo'):
+        # Récupérer les informations de l'entreprise (pour devise et affichage)
+        entreprise_info = {}
+        try:
+            if get_entreprise_info:
+                entreprise_info = get_entreprise_info(self, entreprise_id) or {}
+            else:
+                from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+                entreprise_controller = EntrepriseController()
+                if not entreprise_id:
+                    entreprise_id = getattr(self, 'entreprise_id', 1)
+                entreprise_info = entreprise_controller.get_current_enterprise(entreprise_id) or {}
+        except Exception:
+            entreprise_info = {}
+
+        # Header via utilitaire si disponible
+        if prepare_header_elements:
             try:
-                logo_path = os.path.join(os.path.dirname(__file__), f"../../images/logo_{entreprise_id}.png")
-                with open(logo_path, "wb") as f:
-                    f.write(entreprise_info['logo'])
-            except Exception as e:
-                print(f"Erreur lors de la sauvegarde du logo: {e}")
-        
-        if os.path.exists(logo_path):
-            c.drawImage(logo_path, logo_x, logo_y, width=logo_w, height=logo_h, mask='auto')
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(info_x, logo_y+logo_h-0.2*cm, school_name)
-        c.setFont("Helvetica", 9)
-        c.drawString(info_x, logo_y+logo_h-0.8*cm, school_address)
-        c.drawString(info_x, logo_y+logo_h-1.4*cm, f"Tél : {school_phone}")
-        c.drawString(info_x, logo_y+logo_h-2.0*cm, f"Email : {school_email}")
+                header_elems = prepare_header_elements(self, entreprise_id, title="DÉTAIL DES ÉCRITURES DU COMPTE")
+                elements.extend(header_elems)
+            except Exception:
+                pass
+        else:
+            styles = getSampleStyleSheet()
+            title_style = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=14)
+            elements.append(Paragraph("DÉTAIL DES ÉCRITURES DU COMPTE", title_style))
+            elements.append(Spacer(1, 6))
 
-        # Récupérer le nom du compte (si possible)
+        # Récupérer le nom du compte (si possible) et l'ajouter
         nom_compte = ""
         if data and "compte_nom" in data[0]:
             nom_compte = data[0]["compte_nom"]
         elif data and "nom" in data[0]:
             nom_compte = data[0]["nom"]
-        # Titre centré + nom du compte
-        c.setFont("Helvetica-Bold", 15)
-        c.drawCentredString(width/2, height-4*cm, "DÉTAIL DES ÉCRITURES DU COMPTE")
         if nom_compte:
-            c.setFont("Helvetica-Bold", 13)
-            c.drawCentredString(width/2, height-4.7*cm, f"Compte : {nom_compte}")
-        
+            styles = getSampleStyleSheet()
+            sub_style = ParagraphStyle('Sub', parent=styles['Normal'], alignment=1, fontSize=12)
+            elements.append(Paragraph(f"Compte : {nom_compte}", sub_style))
+            elements.append(Spacer(1, 6))
+
         # Récupérer la devise de l'entreprise
         devise = entreprise_info.get('currency', 'USD')
-        
+
         # Tableau
         table_data = [["Date", "Libellé", "Débit", "Crédit"]]
         total_debit = 0.0
         total_credit = 0.0
-        for row in data:
-            # Récupère la valeur affichée dans le tableau, nettoie et convertit en float
-            debit_str = str(row.get("debit", "0"))
-            credit_str = str(row.get("credit", "0"))
+
+        import re
+
+        def _parse_amount(value):
+            """Parse a string/number like '1 234,56 €' or '1,234.56 $' into float.
+            Returns 0.0 for empty values. Raises ValueError on unrecoverable strings.
+            """
+            # Already numeric
             try:
-                debit_val = float(debit_str.replace(" ","").replace(devise,"").replace(",",""))
-                credit_val = float(credit_str.replace(" ","").replace(devise,"").replace(",",""))
-            except ValueError:
-                raise ValueError(f"Valeur non convertible en float : {debit_str} ou {credit_str}")
+                if value is None:
+                    return 0.0
+                if isinstance(value, (int, float)):
+                    return float(value)
+                # SQLAlchemy Numeric may return Decimal
+                from decimal import Decimal
+                if isinstance(value, Decimal):
+                    return float(value)
+            except Exception:
+                pass
+
+            s = str(value).strip()
+            if not s:
+                return 0.0
+
+            # Remove non-breaking spaces
+            s = s.replace('\u00A0', ' ')
+
+            # Remove known currency text if present
+            try:
+                if devise and isinstance(devise, str):
+                    s = s.replace(devise, '')
+            except Exception:
+                pass
+
+            # Keep only digits, separators and sign
+            s_clean = re.sub(r'[^0-9,\.\-+]', '', s)
+
+            # Decide decimal separator:
+            # - If contains both '.' and ',' assume '.' is decimal (e.g. 1,234.56) -> remove commas
+            # - If contains only ',' assume it's the decimal separator -> replace with '.'
+            # - Otherwise leave '.' as decimal
+            if s_clean.count('.') > 0 and s_clean.count(',') > 0:
+                # remove thousand separators (commas)
+                s_norm = s_clean.replace(',', '')
+            elif s_clean.count(',') > 0 and s_clean.count('.') == 0:
+                s_norm = s_clean.replace(',', '.')
+            else:
+                s_norm = s_clean
+
+            # Final sanity
+            if s_norm in ('', '.', '-', '+'):
+                return 0.0
+
+            try:
+                return float(s_norm)
+            except Exception:
+                raise ValueError(f"Valeur non convertible en float : {value}")
+
+        for row in data:
+            debit_str = row.get("debit", 0)
+            credit_str = row.get("credit", 0)
+            debit_val = _parse_amount(debit_str)
+            credit_val = _parse_amount(credit_str)
             total_debit += debit_val
             total_credit += credit_val
             # Correction : afficher le nom du journal si disponible
@@ -301,9 +332,9 @@ class ComptabiliteController:
                 credit_str,
             ])
         solde = total_debit - total_credit
-        # Couleurs personnalisées pour l'en-tête
-        app_bg = colors.HexColor("#2C3E50")  # Bleu foncé
-        app_fg = colors.HexColor("#ECF0F1")  # Blanc/gris clair
+        # Créer le tableau et l'ajouter aux éléments Platypus
+        app_bg = colors.HexColor("#8E44AD")  # harmonisé avec le thème
+        app_fg = colors.HexColor("#FFFFFF")
         table = Table(table_data, colWidths=[3*cm, 8*cm, 3*cm, 3*cm])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), app_bg),
@@ -313,23 +344,36 @@ class ComptabiliteController:
             ("FONTSIZE", (0,0), (-1,-1), 10),
             ("BOTTOMPADDING", (0,0), (-1,0), 8),
             ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+            ("ROWBACKGROUNDS", (0,1), (-1,-1), [colors.whitesmoke, colors.lightgrey]),
         ]))
-        table.wrapOn(c, width-2*cm, height)
-        table_height = table._height
-        table.drawOn(c, 1*cm, height-5*cm-table_height)
 
+        elements.append(table)
+        # Totaux
+        try:
+            if format_amount:
+                td = format_amount(total_debit, self)
+                tc = format_amount(total_credit, self)
+                sd = format_amount(solde, self)
+            else:
+                td = f"{total_debit:,.2f} {devise}"
+                tc = f"{total_credit:,.2f} {devise}"
+                sd = f"{solde:,.2f} {devise}"
+        except Exception:
+            td = f"{total_debit:,.2f} {devise}"
+            tc = f"{total_credit:,.2f} {devise}"
+            sd = f"{solde:,.2f} {devise}"
 
-        # Ajout des totaux en bas du PDF
-        c.setFont("Helvetica-Bold", 12)
-        c.setFillColorRGB(0.2, 0.2, 0.2)
-        y_totaux = height-5*cm-table_height-1*cm
-        c.drawString(1*cm, y_totaux, f"Total Débit : {total_debit:,.2f} {devise}")
-        c.drawString(6*cm, y_totaux, f"Total Crédit : {total_credit:,.2f} {devise}")
-        c.drawString(11*cm, y_totaux, f"Solde : {solde:,.2f} {devise}")
-        c.setFillColorRGB(0, 0, 0)
+        styles = getSampleStyleSheet()
+        normal = styles['Normal']
+        elements.append(Spacer(1, 6))
+        elements.append(Paragraph(f"Total Débit : {td}", normal))
+        elements.append(Paragraph(f"Total Crédit : {tc}", normal))
+        elements.append(Paragraph(f"Solde : {sd}", normal))
 
-        c.showPage()
-        c.save()
+        try:
+            doc.build(elements)
+        except Exception as e:
+            print(f"Erreur lors de la génération du PDF détail compte: {e}")
     # --- Gestion de la configuration des comptes (caisse, frais, client) ---
     def get_compte_config(self, enterprise_id, pos_id=None):
         """Récupère la configuration des comptes pour une entreprise et un point de vente (ou None si pas encore configuré)"""
