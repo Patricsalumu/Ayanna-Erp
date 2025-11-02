@@ -21,6 +21,7 @@ if venv_site_packages.exists():
 try:
     from PyQt6.QtWidgets import QApplication
     from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QIcon
     from ayanna_erp.database.database_manager import DatabaseManager
     from ayanna_erp.ui.login_window import LoginWindow
     from ayanna_erp.core.config import Config
@@ -47,6 +48,15 @@ def main():
     
     # Configurer le style de l'application
     app.setStyle('Fusion')
+    # Définir l'icône de l'application et de la fenêtre (préfère .ico, fallback png)
+    icon_path = os.path.join(str(project_root), 'data', 'images', 'icone_ayanna_erp.ico')
+    if not os.path.exists(icon_path):
+        icon_path = os.path.join(str(project_root), 'data', 'images', 'icone_ayanna_erp.png')
+    if os.path.exists(icon_path):
+        try:
+            app.setWindowIcon(QIcon(icon_path))
+        except Exception as e:
+            print(f"Avertissement: impossible de définir l'icône de l'application: {e}")
     
     # Initialiser la base de données
     db_manager = DatabaseManager()
@@ -56,6 +66,12 @@ def main():
     
     # Créer et afficher la fenêtre de connexion
     login_window = LoginWindow()
+    # Appliquer l'icône à la fenêtre de connexion si disponible
+    try:
+        if 'icon_path' in locals() and os.path.exists(icon_path):
+            login_window.setWindowIcon(QIcon(icon_path))
+    except Exception:
+        pass
     login_window.show()
     
     # Démarrer la boucle d'événements

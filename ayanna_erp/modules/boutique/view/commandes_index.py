@@ -160,7 +160,8 @@ class CommandesIndexWidget(QWidget):
     def create_commandes_table(self):
         """Créer le tableau des commandes"""
         self.commandes_table = QTableWidget()
-        self.commandes_table.setColumnCount(8)
+        # 9 colonnes : N° Commande, Date, Client, Produits/Services, Sous-total, Remise, Total, Payé, Paiement
+        self.commandes_table.setColumnCount(9)
         self.commandes_table.setHorizontalHeaderLabels([
             "N° Commande", "Date", "Client", "Produits / Services", 
             "Sous-total", "Remise", "Total", "Payé", "Paiement"
