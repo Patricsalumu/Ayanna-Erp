@@ -83,7 +83,7 @@ class LoginWindow(QWidget):
         """)
         
         # Sous-titre
-        subtitle_label = QLabel("Système de Gestion Intégré")
+        subtitle_label = QLabel("Numérisez, Maîtrisez, Réussissez : une entreprise qui transcende les générations.")
         subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle_label.setStyleSheet("""
             color: #BDC3C7;
