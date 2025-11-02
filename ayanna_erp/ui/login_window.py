@@ -8,6 +8,8 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QPalette, QColor, QIcon
 from ayanna_erp.database.database_manager import DatabaseManager, User, Entreprise
+from ayanna_erp.modules.core.models import Licence
+import datetime
 
 
 class LoginWindow(QWidget):
@@ -185,14 +187,50 @@ class LoginWindow(QWidget):
     
     def setup_footer(self, layout):
         """Configuration du pied de page"""
-        footer_label = QLabel("© 2018 Congo Mémoire - Tous droits réservés")
+        # Texte de base
+        base_text = "© 2018 Congo Mémoire - Tous droits réservés"
+
+        # Tenter de récupérer une licence active ou non expirée
+        licence_text = ""
+        try:
+            session = self.db_manager.get_session()
+            now = datetime.datetime.utcnow()
+            # Chercher licence active récente
+            lic = session.query(Licence).filter_by(active=True).order_by(Licence.date_activation.desc()).first()
+            if not lic:
+                lic = session.query(Licence).filter(Licence.date_expiration >= now).order_by(Licence.date_activation.desc()).first()
+
+            if lic:
+                # calculer jours restants
+                try:
+                    delta = lic.date_expiration - now
+                    days = max(0, delta.days)
+                except Exception:
+                    days = None
+
+                if days is None:
+                    licence_text = f"Licence: {lic.type} — statut inconnu"
+                else:
+                    if days == 0:
+                        when = "aujourd'hui"
+                    elif days == 1:
+                        when = "1 jour"
+                    else:
+                        when = f"{days} jours"
+                    licence_text = f"Licence {lic.type} valide dans {when}"
+            else:
+                licence_text = "Aucune licence active"
+        except Exception as e:
+            # En cas d'erreur, ne pas planter l'UI
+            licence_text = "État de la licence indisponible"
+
+        footer_label = QLabel(f"{base_text}  |  {licence_text}")
         footer_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         footer_label.setStyleSheet("""
             color: #BDC3C7;
             font-size: 12px;
             margin-top: 20px;
         """)
-        
         layout.addWidget(footer_label)
     
     def get_input_style(self):

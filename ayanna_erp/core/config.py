@@ -48,6 +48,9 @@ class Config:
     # Configuration des logs
     LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
     LOG_FILE = LOGS_DIR / "ayanna_erp.log"
+
+    # Secret pour signatures de licences (HMAC)
+    LICENCE_SECRET = os.getenv("LICENCE_SECRET", None)
     
     # Styles CSS pour l'application
     STYLES = {

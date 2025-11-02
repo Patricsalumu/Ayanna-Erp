@@ -25,6 +25,9 @@ try:
     from ayanna_erp.database.database_manager import DatabaseManager
     from ayanna_erp.ui.login_window import LoginWindow
     from ayanna_erp.core.config import Config
+    # service de licence (import tardif possible)
+    from ayanna_erp.core.services.licence_service import verifier_licence
+    from ayanna_erp.core.view.licence_dialog import LicenceActivationDialog
 except ImportError as e:
     print(f"❌ Erreur d'importation: {e}")
     print("\n🔧 Solutions possibles:")
@@ -62,6 +65,26 @@ def main():
     db_manager = DatabaseManager()
     if not db_manager.initialize_database():
         print("Erreur lors de l'initialisation de la base de données")
+        sys.exit(1)
+
+    # Vérifier la licence locale; si aucune licence valide, afficher la modale d'activation
+    try:
+        valid, msg = verifier_licence()
+        if not valid:
+            # afficher la fenêtre d'activation en mode modal
+            dlg = LicenceActivationDialog()
+            result = dlg.exec()
+            # Si l'utilisateur a accepté, re-vérifier
+            if result == 1:
+                valid2, msg2 = verifier_licence()
+                if not valid2:
+                    print("Licence introuvable ou invalide après activation :", msg2)
+                    sys.exit(1)
+            else:
+                print("Activation de licence annulée par l'utilisateur.")
+                sys.exit(1)
+    except Exception as e:
+        print("Erreur lors de la vérification de la licence:", e)
         sys.exit(1)
     
     # Créer et afficher la fenêtre de connexion
