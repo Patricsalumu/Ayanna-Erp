@@ -73,7 +73,7 @@ class VenteController:
                     'client_id': sale_data.get('client_id'),
                     'numero_commande': numero_commande,
                     'status': 'completed' if amount_received >= total_amount else 'pending',
-                    'payment_method': payment_data['method'] if amount_received > 0 else 'Credit',
+                    'payment_method': payment_data['method'] if amount_received > 0 else 'Crédit',
                     'subtotal': subtotal,
                     'remise_amount': discount_amount,
                     'total_final': total_amount,
