@@ -1083,11 +1083,40 @@ Notes: {notes_preview}
                 else:
                     # Pour les factures A4 : ouvrir le dossier factures_export
                     try:
-                        subprocess.run(['explorer', '/select,', result], shell=True, check=True)
-                        QMessageBox.information(dialog, "Export réussi",
-                                              f"La facture A4 a été exportée avec succès !\n\n"
-                                              f"Fichier: {result}\n\n"
-                                              "Le dossier contenant la facture a été ouvert.")
+                        import subprocess, os, sys
+                        if os.name == 'nt':
+                            explorer_arg = f"/select,{os.path.normpath(result)}"
+                            try:
+                                subprocess.run(['explorer', explorer_arg], check=True)
+                                opened = True
+                            except Exception:
+                                opened = False
+                                try:
+                                    os.startfile(result)
+                                    opened = True
+                                except Exception:
+                                    opened = False
+                        else:
+                            try:
+                                folder = os.path.dirname(result)
+                                if sys.platform == 'darwin':
+                                    subprocess.run(['open', folder], check=True)
+                                else:
+                                    subprocess.run(['xdg-open', folder], check=True)
+                                opened = True
+                            except Exception:
+                                opened = False
+
+                        if opened:
+                            QMessageBox.information(dialog, "Export réussi",
+                                                  f"La facture A4 a été exportée avec succès !\n\n"
+                                                  f"Fichier: {result}\n\n"
+                                                  "Le dossier contenant la facture a été ouvert.")
+                        else:
+                            QMessageBox.information(dialog, "Export réussi",
+                                                  f"La facture A4 a été exportée avec succès !\n\n"
+                                                  f"Fichier: {result}\n\n"
+                                                  "Impossible d'ouvrir automatiquement le dossier. Vous pouvez ouvrir manuellement le répertoire.")
                     except Exception as open_error:
                         QMessageBox.information(dialog, "Export réussi",
                                               f"La facture A4 a été exportée avec succès !\n\n"
@@ -1129,12 +1158,43 @@ Notes: {notes_preview}
             if pdf_filename and os.path.exists(pdf_filename):
                 # Ouvrir le dossier contenant le PDF
                 try:
-                    import subprocess
-                    subprocess.run(['explorer', '/select,', pdf_filename], shell=True, check=True)
-                    QMessageBox.information(self, "Export réussi",
-                                          f"Les commandes ont été exportées avec succès !\n\n"
-                                          f"Fichier: {pdf_filename}\n\n"
-                                          "Le dossier contenant l'export a été ouvert.")
+                    import subprocess, os, sys
+                    # Sur Windows, utiliser explorer /select,<path> en un seul argument
+                    if os.name == 'nt':
+                        explorer_arg = f"/select,{os.path.normpath(pdf_filename)}"
+                        try:
+                            subprocess.run(['explorer', explorer_arg], check=True)
+                            opened = True
+                        except Exception:
+                            opened = False
+                            # fallback: tenter d'ouvrir le fichier directement
+                            try:
+                                os.startfile(pdf_filename)
+                                opened = True
+                            except Exception:
+                                opened = False
+                    else:
+                        # Autres OS: tenter d'ouvrir le dossier contenant le fichier
+                        try:
+                            folder = os.path.dirname(pdf_filename)
+                            if sys.platform == 'darwin':
+                                subprocess.run(['open', folder], check=True)
+                            else:
+                                subprocess.run(['xdg-open', folder], check=True)
+                            opened = True
+                        except Exception:
+                            opened = False
+
+                    if opened:
+                        QMessageBox.information(self, "Export réussi",
+                                              f"Les commandes ont été exportées avec succès !\n\n"
+                                              f"Fichier: {pdf_filename}\n\n"
+                                              "Le dossier contenant l'export a été ouvert.")
+                    else:
+                        QMessageBox.information(self, "Export réussi",
+                                              f"Les commandes ont été exportées avec succès !\n\n"
+                                              f"Fichier: {pdf_filename}\n\n"
+                                              "Impossible d'ouvrir automatiquement le dossier. Vous pouvez ouvrir manuellement le répertoire.")
                 except Exception as open_error:
                     QMessageBox.information(self, "Export réussi",
                                           f"Les commandes ont été exportées avec succès !\n\n"

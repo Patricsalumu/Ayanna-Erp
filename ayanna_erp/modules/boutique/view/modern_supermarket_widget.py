@@ -585,7 +585,6 @@ class ModernSupermarketWidget(QWidget):
         top_line_layout = QHBoxLayout(top_line_frame)
         top_line_layout.setContentsMargins(0, 0, 0, 0)
         top_line_layout.setSpacing(15)
-
         # Sous-total
         subtotal_frame = QFrame()
         subtotal_layout = QVBoxLayout(subtotal_frame)
@@ -1927,12 +1926,43 @@ Paiement: {payment_data['method']}
                 else:
                     # Pour les factures A4 : ouvrir le dossier factures_export
                     try:
-                        import subprocess
-                        subprocess.run(['explorer', '/select,', result], shell=True, check=True)
-                        QMessageBox.information(dialog, "Export réussi",
-                                              f"La facture A4 a été exportée avec succès !\n\n"
-                                              f"Fichier: {result}\n\n"
-                                              "Le dossier contenant la facture a été ouvert.")
+                        import subprocess, os, sys
+                        # Sur Windows, utiliser explorer /select,<path> en un seul argument
+                        if os.name == 'nt':
+                            explorer_arg = f"/select,{os.path.normpath(result)}"
+                            try:
+                                subprocess.run(['explorer', explorer_arg], check=True)
+                                opened = True
+                            except Exception:
+                                opened = False
+                                # fallback: tenter d'ouvrir le fichier directement
+                                try:
+                                    os.startfile(result)
+                                    opened = True
+                                except Exception:
+                                    opened = False
+                        else:
+                            # Autres OS: tenter d'ouvrir le dossier contenant le fichier
+                            try:
+                                folder = os.path.dirname(result)
+                                if sys.platform == 'darwin':
+                                    subprocess.run(['open', folder], check=True)
+                                else:
+                                    subprocess.run(['xdg-open', folder], check=True)
+                                opened = True
+                            except Exception:
+                                opened = False
+
+                        if opened:
+                            QMessageBox.information(dialog, "Export réussi",
+                                                  f"La facture A4 a été exportée avec succès !\n\n"
+                                                  f"Fichier: {result}\n\n"
+                                                  "Le dossier contenant la facture a été ouvert.")
+                        else:
+                            QMessageBox.information(dialog, "Export réussi",
+                                                  f"La facture A4 a été exportée avec succès !\n\n"
+                                                  f"Fichier: {result}\n\n"
+                                                  "Impossible d'ouvrir automatiquement le dossier. Vous pouvez ouvrir manuellement le répertoire.")
                     except Exception as open_error:
                         QMessageBox.information(dialog, "Export réussi",
                                               f"La facture A4 a été exportée avec succès !\n\n"
