@@ -1627,9 +1627,13 @@ class ModernSupermarketWidget(QWidget):
             success, message, panier_id = self.vente_controller.process_sale(sale_data)
 
             if success:
-                # Afficher le reçu seulement si il y a eu un paiement
-                if payment_data['amount_received'] > 0:
+                # Afficher le reçu (impression disponible) même si le montant reçu est 0
+                # L'utilisateur doit toujours pouvoir imprimer la facture/reçu.
+                try:
                     self._show_sale_receipt(sale_data, payment_data)
+                except Exception as e:
+                    # Ne pas bloquer le flux de vente si l'affichage du reçu échoue
+                    print(f"Erreur affichage reçu: {e}")
 
                 # Nettoyer le panier automatiquement après le traitement
                 self.clear_cart()
