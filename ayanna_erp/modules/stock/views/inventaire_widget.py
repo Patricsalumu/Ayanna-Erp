@@ -1847,12 +1847,27 @@ class InventaireWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with self.db_manager.get_session() as session:
-                    self.controller.complete_inventory(session, inventory.get('id'))
+                    result = self.controller.complete_inventory(session, inventory.get('id'))
                     session.commit()
-                    
-                    QMessageBox.information(self, "Succès", "Inventaire terminé avec succès!")
-                    self.load_data()
-                    self.inventory_completed.emit()
+
+                    # Supporter l'ancien et le nouveau format de retour
+                    success = False
+                    warn_msg = None
+                    if isinstance(result, tuple) or isinstance(result, list):
+                        success = bool(result[0])
+                        warn_msg = result[1] if len(result) > 1 else None
+                    else:
+                        success = bool(result)
+
+                    if success:
+                        if warn_msg:
+                            QMessageBox.warning(self, "Attention", warn_msg)
+                        QMessageBox.information(self, "Succès", "Inventaire terminé avec succès!")
+                        self.load_data()
+                        self.inventory_completed.emit()
+                    else:
+                        # Si échec sans message, afficher message générique
+                        QMessageBox.critical(self, "Erreur", f"Erreur lors de la finalisation de l'inventaire: {warn_msg or 'Opération échouée.'}")
                     
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la finalisation:\n{str(e)}")
@@ -2207,12 +2222,25 @@ class InventaireWidget(QWidget):
         if reply == QMessageBox.StandardButton.Yes:
             try:
                 with self.controller.db_manager.get_session() as session:
-                    self.controller.complete_inventory(session, inventory_id)
+                    result = self.controller.complete_inventory(session, inventory_id)
                     session.commit()
-                
-                QMessageBox.information(self, "Succès", "Inventaire finalisé avec succès !")
-                self.load_data()
-                self.inventory_completed.emit()
+
+                success = False
+                warn_msg = None
+                if isinstance(result, tuple) or isinstance(result, list):
+                    success = bool(result[0])
+                    warn_msg = result[1] if len(result) > 1 else None
+                else:
+                    success = bool(result)
+
+                if success:
+                    if warn_msg:
+                        QMessageBox.warning(self, "Attention", warn_msg)
+                    QMessageBox.information(self, "Succès", "Inventaire finalisé avec succès !")
+                    self.load_data()
+                    self.inventory_completed.emit()
+                else:
+                    QMessageBox.critical(self, "Erreur", f"Erreur lors de la finalisation: {warn_msg or 'Opération échouée.'}")
                 
             except Exception as e:
                 QMessageBox.critical(self, "Erreur", f"Erreur lors de la finalisation:\n{str(e)}")

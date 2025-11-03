@@ -439,13 +439,86 @@ class InventaireController:
                     product_warehouse.quantity += item.variance
                     product_warehouse.total_cost = product_warehouse.quantity * product_warehouse.unit_cost
                     product_warehouse.last_movement_date = datetime.now()
+
+            # Comptabiliser la variation totale (création d'une écriture comptable)
+            try:
+                # Calculer la valeur totale des écarts (à l'achat)
+                total_variance_value = sum(float(it.variance_value or 0) for it in items_with_variance)
+                # Importer le contrôleur / modèles comptables localement pour éviter dépendances circulaires
+                from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+                from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaJournaux as JournalComptable, ComptaEcritures as EcritureComptable
+
+                # Récupérer la configuration des comptes pour l'entreprise (pos_id non fourni)
+                compta_ctrl = ComptabiliteController()
+                compte_config = compta_ctrl.get_compte_config(inventory.entreprise_id)
+
+                compte_stock_id = None
+                compte_achat_id = None
+                if compte_config:
+                    # Atteindre les noms possibles selon la version du modèle
+                    compte_stock_id = getattr(compte_config, 'compte_stock_id', None)
+                    compte_achat_id = getattr(compte_config, 'compte_achat_id', None)
+                    # Certains schémas utilisent un champ nommé compte_variation_stock_id / compte_variation_id
+                    if not compte_achat_id:
+                        compte_achat_id = getattr(compte_config, 'compte_variation_stock_id', None) or getattr(compte_config, 'compte_variation_id', None)
+
+                # Ne rien faire si pas de comptes configurés ou montant nul
+                if total_variance_value and compte_stock_id and compte_achat_id:
+                    montant = abs(float(total_variance_value))
+
+                    # Préparer le journal
+                    user_id = inventory.completed_by or inventory.created_by or 1
+                    journal = JournalComptable(
+                        date_operation=datetime.now(),
+                        libelle=f"Ajustement inventaire {inventory.reference}",
+                        montant=montant,
+                        type_operation="inventaire",
+                        reference=inventory.reference,
+                        description=f"Ajustement de stock suite à l'inventaire {inventory.session_name}",
+                        enterprise_id=inventory.entreprise_id,
+                        user_id=user_id
+                    )
+                    session.add(journal)
+                    session.flush()
+
+                    # Si perte (valeur négative), débiter compte charge/achat et créditer compte stock
+                    if float(total_variance_value) < 0:
+                        e_debit = EcritureComptable(journal_id=journal.id, compte_comptable_id=compte_achat_id, debit=montant, credit=0, ordre=1, libelle=f"Perte inventaire {inventory.reference}")
+                        e_credit = EcritureComptable(journal_id=journal.id, compte_comptable_id=compte_stock_id, debit=0, credit=montant, ordre=2, libelle=f"Perte inventaire {inventory.reference}")
+                    else:
+                        # Surplus : débiter compte stock et créditer compte charge/achat
+                        e_debit = EcritureComptable(journal_id=journal.id, compte_comptable_id=compte_stock_id, debit=montant, credit=0, ordre=1, libelle=f"Surplus inventaire {inventory.reference}")
+                        e_credit = EcritureComptable(journal_id=journal.id, compte_comptable_id=compte_achat_id, debit=0, credit=montant, ordre=2, libelle=f"Surplus inventaire {inventory.reference}")
+
+                    session.add(e_debit)
+                    session.add(e_credit)
+                    # Mettre à jour le total de l'inventaire
+                    inventory.total_variance_value = total_variance_value
+                else:
+                    # Si la configuration des comptes est incomplète, on ignore la comptabilisation
+                    # Ne pas lever d'exception : simplement logguer
+                    # (On pourrait notifier l'utilisateur dans l'UI)
+                    pass
+            except Exception as e:
+                # Ne pas empêcher la finalisation de l'inventaire en cas d'erreur comptable
+                print(f"Erreur lors de la création des écritures comptables d'inventaire: {e}")
             
             # Marquer comme complété
             inventory.status = 'COMPLETED'
             inventory.completed_date = datetime.now()
             inventory.completed_by_name = performed_by
-            
-            return True
+
+            # Retourner un message d'avertissement si la comptabilisation n'a pas été faite
+            if 'total_variance_value' in locals():
+                # total_variance_value calculé plus haut
+                if total_variance_value and (not (compte_stock_id and compte_achat_id)):
+                    warn = "Comptes comptables pour la variation de stock non configurés (compte stock / compte achat).\nVeuillez configurer ces comptes dans le module Comptabilité." 
+                else:
+                    warn = None
+            else:
+                warn = None
+
+            return True, warn
         except Exception as e:
             print(f"Erreur lors de la finalisation de l'inventaire: {e}")
-            return False
+            return False, str(e)
