@@ -1926,29 +1926,20 @@ Paiement: {payment_data['method']}
                 else:
                     # Pour les factures A4 : ouvrir le dossier factures_export
                     try:
-                        import subprocess, os, sys
-                        # Sur Windows, utiliser explorer /select,<path> en un seul argument
+                        import os, sys, subprocess
+                        opened = False
                         if os.name == 'nt':
-                            explorer_arg = f"/select,{os.path.normpath(result)}"
                             try:
-                                subprocess.run(['explorer', explorer_arg], check=True)
+                                os.startfile(result)
                                 opened = True
                             except Exception:
                                 opened = False
-                                # fallback: tenter d'ouvrir le fichier directement
-                                try:
-                                    os.startfile(result)
-                                    opened = True
-                                except Exception:
-                                    opened = False
                         else:
-                            # Autres OS: tenter d'ouvrir le dossier contenant le fichier
                             try:
-                                folder = os.path.dirname(result)
                                 if sys.platform == 'darwin':
-                                    subprocess.run(['open', folder], check=True)
+                                    subprocess.run(['open', result], check=True)
                                 else:
-                                    subprocess.run(['xdg-open', folder], check=True)
+                                    subprocess.run(['xdg-open', result], check=True)
                                 opened = True
                             except Exception:
                                 opened = False
@@ -1957,17 +1948,17 @@ Paiement: {payment_data['method']}
                             QMessageBox.information(dialog, "Export réussi",
                                                   f"La facture A4 a été exportée avec succès !\n\n"
                                                   f"Fichier: {result}\n\n"
-                                                  "Le dossier contenant la facture a été ouvert.")
+                                                  "Le fichier a été ouvert dans l'application par défaut.")
                         else:
                             QMessageBox.information(dialog, "Export réussi",
                                                   f"La facture A4 a été exportée avec succès !\n\n"
                                                   f"Fichier: {result}\n\n"
-                                                  "Impossible d'ouvrir automatiquement le dossier. Vous pouvez ouvrir manuellement le répertoire.")
+                                                  "Impossible d'ouvrir automatiquement le fichier. Vous pouvez l'ouvrir manuellement.")
                     except Exception as open_error:
                         QMessageBox.information(dialog, "Export réussi",
                                               f"La facture A4 a été exportée avec succès !\n\n"
                                               f"Fichier: {result}\n\n"
-                                              f"Erreur ouverture dossier: {open_error}")
+                                              f"Erreur lors de l'ouverture du fichier: {open_error}")
 
                 dialog.accept()
             else:
