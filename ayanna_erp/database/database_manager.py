@@ -5,6 +5,7 @@ Utilise SQLAlchemy pour la gestion des modèles et des connexions
 """
 
 import os
+import importlib
 from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary
 from sqlalchemy.ext.declarative import declarative_base
@@ -20,6 +21,18 @@ try:
 except ImportError:
     # Les modèles comptables ne sont pas encore disponibles
     pass
+except ImportError:
+    pass
+
+# Cartographie des modules vers leurs modules de modèles (import paths)
+MODULE_MODEL_PATHS = {
+    'SalleFete': 'ayanna_erp.modules.salle_fete.model.salle_fete',
+    'Stock': 'ayanna_erp.modules.stock.models',
+    'Boutique': 'ayanna_erp.modules.boutique.model.models',
+    'Comptabilite': 'ayanna_erp.modules.comptabilite.model.comptabilite',
+    'Achats': 'ayanna_erp.modules.achats.models',
+    # Ajouter d'autres modules si nécessaire
+}
 
 # Import des modèles core pour qu'ils soient inclus dans Base.metadata
 try:
@@ -39,8 +52,7 @@ except ImportError:
 try:
     from ayanna_erp.modules.boutique.model.models import (
         ShopClient, ShopService, ShopPanier, ShopPanierProduct, ShopPanierService,
-        ShopPayment, ShopExpense, ShopComptesConfig, ShopWarehouse, ShopWarehouseStock,
-        ShopStockMovement, ShopStockTransfer
+        ShopPayment, ShopExpense, ShopComptesConfig
     )
 except ImportError:
     # Les modèles boutique ne sont pas encore disponibles
@@ -101,6 +113,11 @@ class DatabaseManager:
             
             # Insérer les données par défaut
             self._insert_default_data()
+            # Initialiser les tables spécifiques aux modules (générique)
+            try:
+                self.initialize_modules()
+            except Exception as e:
+                print(f"⚠️ Erreur lors de l'initialisation des modules : {e}")
             
             return True
         except Exception as e:
@@ -276,6 +293,43 @@ class DatabaseManager:
             
         except Exception as e:
             raise
+
+    def initialize_modules(self):
+        """Initialiser (créer) les tables pour les modules connus en réutilisant l'engine.
+
+        Pour chaque module listé dans MODULE_MODEL_PATHS, on tente d'importer
+        le module de modèles, on collecte les classes qui exposent `__table__`
+        et on appelle `Base.metadata.create_all(..., tables=...)`.
+        Les erreurs d'import sont tolérées et logguées.
+        """
+        created_count = 0
+        for mod_name, import_path in MODULE_MODEL_PATHS.items():
+            try:
+                mod = importlib.import_module(import_path)
+            except Exception as e:
+                print(f"⚠️ Module '{mod_name}' non importable ({import_path}): {e}")
+                continue
+
+            tables = []
+            for attr_name in dir(mod):
+                try:
+                    attr = getattr(mod, attr_name)
+                    if hasattr(attr, '__table__'):
+                        tables.append(attr.__table__)
+                except Exception:
+                    continue
+
+            if tables:
+                try:
+                    Base.metadata.create_all(bind=self.engine, tables=tables, checkfirst=True)
+                    created_count += len(tables)
+                    print(f"✅ {len(tables)} tables créées pour le module '{mod_name}'")
+                except Exception as e:
+                    print(f"⚠️ Erreur lors de la création des tables pour '{mod_name}': {e}")
+            else:
+                print(f"ℹ️ Aucun modèle détecté pour le module '{mod_name}' ({import_path})")
+
+        print(f"✅ Initialisation de modules terminée. Total de tables traitées: {created_count}")
     
     def _insert_default_accounting_data(self, session, enterprise_id):
         """Insérer les données comptables par défaut SYSCOHADA"""

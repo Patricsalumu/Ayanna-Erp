@@ -47,7 +47,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName("Ayanna ERP")
     app.setApplicationVersion("1.0.0")
-    app.setOrganizationName("Ayanna Solutions")
+    app.setOrganizationName("Ayanna Tech")
     
     # Configurer le style de l'application
     app.setStyle('Fusion')

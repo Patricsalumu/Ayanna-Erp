@@ -10,7 +10,7 @@ from PyQt6.QtCore import QObject, pyqtSignal
 
 # Ajouter le chemin vers le modèle
 sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from ayanna_erp.modules.salle_fete.model.salle_fete import initialize_salle_fete_module, get_database_manager
+from ayanna_erp.modules.salle_fete.model.salle_fete import get_database_manager
 
 
 class MainWindowController(QObject):
@@ -88,40 +88,14 @@ class MainWindowController(QObject):
                 self.database_ready.emit()
                 return True
             
-            print("🎪 Première initialisation du module Salle de Fête...")
-            
-            # Initialiser les tables et données seulement si ce n'est pas encore fait
-            success = initialize_salle_fete_module(self.pos_id)
-            
-            if success:
-                self.is_initialized = True
-                print("✅ Module Salle de Fête initialisé avec succès")
-                self.initialization_completed.emit(True)
-                self.database_ready.emit()
-                
-                # Afficher un message de confirmation seulement pour la première initialisation
-                if self.parent_window:
-                    QMessageBox.information(
-                        self.parent_window,
-                        "Initialisation réussie",
-                        "Le module Salle de Fête a été initialisé avec succès !\n\n"
-                        "✅ Base de données créée\n"
-                        "✅ Tables initialisées\n"
-                        "✅ Données d'exemple ajoutées"
-                    )
-                return True
-            else:
-                print("❌ Échec de l'initialisation")
-                self.initialization_completed.emit(False)
-                
-                if self.parent_window:
-                    QMessageBox.critical(
-                        self.parent_window,
-                        "Erreur d'initialisation",
-                        "Impossible d'initialiser le module Salle de Fête.\n"
-                        "Veuillez vérifier les permissions et réessayer."
-                    )
-                return False
+            # Les tables du module sont désormais créées lors de l'initialisation
+            # globale de l'application (DatabaseManager.initialize_database()).
+            # Ne pas exécuter d'initialisation supplémentaire au premier clic.
+            print("ℹ️ Les tables et la configuration du module Salle de Fête sont gérées au démarrage de l'application.")
+            self.is_initialized = True
+            self.initialization_completed.emit(True)
+            self.database_ready.emit()
+            return True
                 
         except Exception as e:
             print(f"❌ Erreur lors de l'initialisation: {e}")
