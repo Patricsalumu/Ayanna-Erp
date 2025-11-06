@@ -3,17 +3,15 @@ Modèles SQLAlchemy pour le module Salle de Fête
 Gestion des événements, réservations, services, produits et paiements
 """
 
-import sys
 import os
 from sqlalchemy import Column, Integer, String, DateTime, Text, Float, Boolean, ForeignKey, inspect
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from datetime import datetime
 
-# Import du gestionnaire de base de données principal
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+# Import du Base et du gestionnaire global de base de données
 from ayanna_erp.database.base import Base
-from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.database.database_manager import get_database_manager
 
 
 class EventClient(Base):
@@ -240,31 +238,7 @@ class EventExpense(Base):
     created_at = Column(DateTime, default=func.current_timestamp())
 
 
-# Instance globale du gestionnaire de base de données principal
-from ayanna_erp.database.database_manager import DatabaseManager
 
-# Variable globale pour le gestionnaire
-salle_fete_db = None
-
-def get_database_manager():
-    """Obtenir l'instance du gestionnaire de base de données principal"""
-    global salle_fete_db
-    if salle_fete_db is None:
-        # Utiliser le même chemin que l'application principale
-        import ayanna_erp
-        main_db_path = os.path.join(os.path.dirname(ayanna_erp.__file__), '..', 'ayanna_erp.db')
-        main_db_path = os.path.abspath(main_db_path)
-        database_url = f'sqlite:///{main_db_path}'
-        salle_fete_db = DatabaseManager(database_url)
-        
-        # Créer les tables du module si nécessaire
-        try:
-            Base.metadata.create_all(bind=salle_fete_db.engine, checkfirst=True)
-            print(f"✅ Tables créées dans: {main_db_path}")
-        except Exception as e:
-            print(f"⚠️ Erreur lors de la création des tables: {e}")
-        
-    return salle_fete_db
 
 
 def initialize_salle_fete_tables():
