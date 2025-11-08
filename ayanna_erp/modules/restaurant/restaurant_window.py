@@ -14,7 +14,10 @@ from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QBrush, QPen, QColor
 from decimal import Decimal
 from datetime import datetime
-from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.database.database_manager import get_database_manager
+from ayanna_erp.modules.restaurant.views.salle_view import SalleView
+from ayanna_erp.modules.restaurant.views.vente_view import VenteView
+from ayanna_erp.modules.restaurant.views.commandes_view import CommandesView
 
 
 class TableLayoutWidget(QGraphicsView):
@@ -305,7 +308,8 @@ class RestaurantWindow(QMainWindow):
     def __init__(self, current_user):
         super().__init__()
         self.current_user = current_user
-        self.db_manager = DatabaseManager()
+        # Utiliser l'instance globale de DatabaseManager partagée par l'application
+        self.db_manager = get_database_manager()
         
         self.setWindowTitle("Ayanna ERP - Restaurant/Bar")
         self.setMinimumSize(1400, 900)
@@ -365,128 +369,19 @@ class RestaurantWindow(QMainWindow):
         main_layout.addWidget(self.tab_widget)
     
     def setup_pos_tab(self):
-        """Configuration de l'onglet POS"""
-        pos_widget = QWidget()
-        pos_layout = QHBoxLayout(pos_widget)
-        
-        # Splitter pour diviser l'écran
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        
-        # Disposition des tables à gauche
-        tables_group = QGroupBox("Disposition des tables")
-        tables_layout = QVBoxLayout(tables_group)
-        
-        # Sélecteur de salle
-        hall_selector_layout = QHBoxLayout()
-        hall_selector_layout.addWidget(QLabel("Salle:"))
-        
-        self.hall_combo = QComboBox()
-        self.hall_combo.addItems(["Salle principale", "Terrasse", "Salon privé"])
-        hall_selector_layout.addWidget(self.hall_combo)
-        hall_selector_layout.addStretch()
-        
-        self.table_layout_widget = TableLayoutWidget()
-        
-        tables_layout.addLayout(hall_selector_layout)
-        tables_layout.addWidget(self.table_layout_widget)
-        
-        # Widget de commande à droite
-        self.order_widget = OrderWidget()
-        
-        splitter.addWidget(tables_group)
-        splitter.addWidget(self.order_widget)
-        splitter.setSizes([600, 500])
-        
-        pos_layout.addWidget(splitter)
-        self.tab_widget.addTab(pos_widget, "🍽️ Point de Vente")
+        """Configuration de l'onglet POS en réutilisant la vue du module (VenteView)"""
+        pos_view = VenteView(entreprise_id=1, parent=self)
+        self.tab_widget.addTab(pos_view, "🍽️ Point de Vente")
     
     def setup_halls_tab(self):
-        """Configuration de l'onglet Salles"""
-        halls_widget = QWidget()
-        halls_layout = QVBoxLayout(halls_widget)
-        
-        # Barre d'outils
-        toolbar_layout = QHBoxLayout()
-        
-        add_hall_button = QPushButton("➕ Nouvelle Salle")
-        add_hall_button.setStyleSheet("""
-            QPushButton {
-                background-color: #F39C12;
-                color: white;
-                border: none;
-                padding: 10px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #E67E22;
-            }
-        """)
-        
-        edit_hall_button = QPushButton("✏️ Modifier")
-        delete_hall_button = QPushButton("🗑️ Supprimer")
-        
-        toolbar_layout.addWidget(add_hall_button)
-        toolbar_layout.addWidget(edit_hall_button)
-        toolbar_layout.addWidget(delete_hall_button)
-        toolbar_layout.addStretch()
-        
-        # Table des salles
-        self.halls_table = QTableWidget()
-        self.halls_table.setColumnCount(4)
-        self.halls_table.setHorizontalHeaderLabels([
-            "ID", "Nom", "Description", "Nombre de tables"
-        ])
-        self.halls_table.horizontalHeader().setStretchLastSection(True)
-        
-        halls_layout.addLayout(toolbar_layout)
-        halls_layout.addWidget(self.halls_table)
-        
-        self.tab_widget.addTab(halls_widget, "🏢 Salles")
+        """Onglet Salles — utiliser la vue de gestion des salles (SalleView)"""
+        salle_view = SalleView(entreprise_id=1, parent=self)
+        self.tab_widget.addTab(salle_view, "🏢 Salles")
     
     def setup_tables_tab(self):
-        """Configuration de l'onglet Tables"""
-        tables_widget = QWidget()
-        tables_layout = QVBoxLayout(tables_widget)
-        
-        # Barre d'outils
-        toolbar_layout = QHBoxLayout()
-        
-        add_table_button = QPushButton("➕ Nouvelle Table")
-        add_table_button.setStyleSheet("""
-            QPushButton {
-                background-color: #8E44AD;
-                color: white;
-                border: none;
-                padding: 10px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7D3C98;
-            }
-        """)
-        
-        edit_table_button = QPushButton("✏️ Modifier")
-        delete_table_button = QPushButton("🗑️ Supprimer")
-        
-        toolbar_layout.addWidget(add_table_button)
-        toolbar_layout.addWidget(edit_table_button)
-        toolbar_layout.addWidget(delete_table_button)
-        toolbar_layout.addStretch()
-        
-        # Table des tables
-        self.tables_table = QTableWidget()
-        self.tables_table.setColumnCount(7)
-        self.tables_table.setHorizontalHeaderLabels([
-            "ID", "Salle", "Numéro", "Forme", "Capacité", "Position", "Statut"
-        ])
-        self.tables_table.horizontalHeader().setStretchLastSection(True)
-        
-        tables_layout.addLayout(toolbar_layout)
-        tables_layout.addWidget(self.tables_table)
-        
-        self.tab_widget.addTab(tables_widget, "🪑 Tables")
+        """Onglet Tables — réutilise `SalleView` (plan et édition des tables)"""
+        tables_view = SalleView(entreprise_id=1, parent=self)
+        self.tab_widget.addTab(tables_view, "🪑 Tables")
     
     def setup_menu_tab(self):
         """Configuration de l'onglet Menu"""
@@ -533,32 +428,9 @@ class RestaurantWindow(QMainWindow):
         self.tab_widget.addTab(menu_widget, "📋 Menu")
     
     def setup_orders_tab(self):
-        """Configuration de l'onglet Commandes"""
-        orders_widget = QWidget()
-        orders_layout = QVBoxLayout(orders_widget)
-        
-        # Filtres
-        filters_layout = QHBoxLayout()
-        
-        self.status_filter = QComboBox()
-        self.status_filter.addItems(["Toutes", "En attente", "En préparation", "Prête", "Servie", "Payée"])
-        
-        filters_layout.addWidget(QLabel("Statut:"))
-        filters_layout.addWidget(self.status_filter)
-        filters_layout.addStretch()
-        
-        # Table des commandes
-        self.orders_table = QTableWidget()
-        self.orders_table.setColumnCount(7)
-        self.orders_table.setHorizontalHeaderLabels([
-            "ID", "Table", "Client", "Heure", "Total", "Statut", "Actions"
-        ])
-        self.orders_table.horizontalHeader().setStretchLastSection(True)
-        
-        orders_layout.addLayout(filters_layout)
-        orders_layout.addWidget(self.orders_table)
-        
-        self.tab_widget.addTab(orders_widget, "📝 Commandes")
+        """Onglet Commandes — utiliser la vue de commandes du module"""
+        commandes_view = CommandesView(entreprise_id=1, parent=self)
+        self.tab_widget.addTab(commandes_view, "📝 Commandes")
     
     def setup_clients_tab(self):
         """Configuration de l'onglet Clients"""

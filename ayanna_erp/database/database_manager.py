@@ -34,6 +34,11 @@ MODULE_MODEL_PATHS = {
     # Ajouter d'autres modules si nécessaire
 }
 
+# Ajouter le mapping pour le module Restaurant
+MODULE_MODEL_PATHS.update({
+    'Restaurant': 'ayanna_erp.modules.restaurant.models.restaurant'
+})
+
 # Import des modèles core pour qu'ils soient inclus dans Base.metadata
 try:
     from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory, POSProductAccess
