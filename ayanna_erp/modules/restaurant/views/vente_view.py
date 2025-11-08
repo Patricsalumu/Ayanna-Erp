@@ -1,9 +1,7 @@
-"""
-Simple PyQt6 view for restaurant vente (plan de salle + panier)
-"""
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QListWidget, QListWidgetItem,
-    QFrame, QDialog, QFormLayout, QLineEdit, QSpinBox, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
+    QFrame, QDialog, QFormLayout, QLineEdit, QSpinBox,
+    QMessageBox, QScrollArea
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor
@@ -12,95 +10,195 @@ from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleCont
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 
 
+# ----------------------------------------------------------------------
+# BOUTON TABLE - STYLE TYPE "AYANNA CLOUD"
+# ----------------------------------------------------------------------
 class TableButton(QPushButton):
     def __init__(self, table_obj, parent_view):
         super().__init__(str(table_obj.number), parent_view.plan_frame)
         self.table_obj = table_obj
         self.table_id = table_obj.id
         self.parent_view = parent_view
-        self.setFixedSize(table_obj.width or 80, table_obj.height or 80)
-        self.move(table_obj.pos_x or 0, table_obj.pos_y or 0)
+
+        w = int(getattr(table_obj, "width", 80) or 80)
+        h = int(getattr(table_obj, "height", 80) or 80)
+        self.setFixedSize(w, h)
+
+        self.move(
+            int(getattr(table_obj, "pos_x", 0) or 0),
+            int(getattr(table_obj, "pos_y", 0) or 0)
+        )
+
+        self.apply_style()
+
+    def apply_style(self, occupied=False, selected=False):
+        border_free = "#28a745"
+        bg_free = "#ffffff"
+        bg_occ = "#28a74522"
+        border_occ = "#28a745"
+        border_select = "#1e7e34"
+
+        shape = (getattr(self.table_obj, "shape", "square") or "").lower()
+        w = self.width()
+        h = self.height()
+
+        radius = min(w, h) // 2 if shape in ("round", "circle") else 6
+
+        bg = bg_occ if occupied else bg_free
+        border = border_select if selected else (border_occ if occupied else border_free)
+
+        self.setStyleSheet(f"""
+            background-color: {bg};
+            border: 3px solid {border};
+            border-radius: {radius}px;
+            font-size: 18px;
+            font-weight: bold;
+        """)
+
+        # Badge montant (si occupée)
+        if occupied:
+            montant = occupied if isinstance(occupied, str) else ""
+            self.setText(f"{self.table_obj.number}\n<font color='#e53935'><b>{montant}</b></font>")
+        else:
+            self.setText(str(self.table_obj.number))
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
-        # On click, ouvrir le panneau panier
+        self.parent_view.select_table_button(self)
         self.parent_view.open_table_panel(self.table_id)
 
 
+# ----------------------------------------------------------------------
+# VUE PRINCIPALE RESTAURANT
+# ----------------------------------------------------------------------
 class VenteView(QWidget):
     def __init__(self, entreprise_id=1, parent=None):
         super().__init__(parent)
         self.entreprise_id = entreprise_id
-        self.salle_ctrl = SalleController(entreprise_id=self.entreprise_id)
-        self.vente_ctrl = VenteController(entreprise_id=self.entreprise_id)
+
+        self.salle_ctrl = SalleController(entreprise_id=entreprise_id)
+        self.vente_ctrl = VenteController(entreprise_id=entreprise_id)
+
         self.table_buttons = {}
         self.current_salle_id = None
+
         self.init_ui()
 
     def init_ui(self):
-        layout = QHBoxLayout(self)
-        # Left: salles
-        left = QVBoxLayout()
-        left.addWidget(QLabel("Salles"))
-        self.salles_list = QListWidget()
-        self.salles_list.itemClicked.connect(self.on_salle_selected)
-        left.addWidget(self.salles_list)
-        refresh_btn = QPushButton("Charger salles")
-        refresh_btn.clicked.connect(self.load_salles)
-        left.addWidget(refresh_btn)
-        layout.addLayout(left, 1)
+        layout = QVBoxLayout(self)
 
-        # Right: plan / panier placeholder
-        right = QVBoxLayout()
-        right.addWidget(QLabel("Plan de salle / Table"))
+        # ----------------------------
+        # ✅ BARRE D’ONGLETS DES SALLES
+        # ----------------------------
+        self.tabs_layout = QHBoxLayout()
+        self.tabs_layout.setSpacing(10)
+        layout.addLayout(self.tabs_layout)
+
+        # ----------------------------
+        # ✅ ZONE DU PLAN DE SALLE
+        # ----------------------------
         self.plan_frame = QFrame()
-        self.plan_frame.setFrameShape(QFrame.Shape.StyledPanel)
-        self.plan_frame.setFixedSize(800, 480)
-        right.addWidget(self.plan_frame)
-        layout.addLayout(right, 2)
+        self.plan_frame.setMinimumHeight(500)
+        self.plan_frame.setStyleSheet("""
+            background-color: #f7f7f7;
+            border-radius: 8px;
+        """)
+        layout.addWidget(self.plan_frame)
 
         self.load_salles()
 
+    # ------------------------------------------------------------------
     def load_salles(self):
-        self.salles_list.clear()
-        try:
-            salles = self.salle_ctrl.list_salles()
-            for s in salles:
-                item = QListWidgetItem(f"{s.name} (ID:{s.id})")
-                item.setData(Qt.ItemDataRole.UserRole, s.id)
-                self.salles_list.addItem(item)
-        except Exception as e:
-            print(f"Erreur load_salles: {e}")
+        # vider onglets
+        while self.tabs_layout.count():
+            w = self.tabs_layout.takeAt(0).widget()
+            if w:
+                w.deleteLater()
 
-    def on_salle_selected(self, item):
-        try:
-            sid = int(str(item.text()).split(' (ID:')[1].rstrip(')'))
-        except Exception:
-            return
-        self.current_salle_id = sid
-        self.load_tables_for_salle(sid)
+        salles = self.salle_ctrl.list_salles()
 
+        self.salle_buttons = {}
+
+        for s in salles:
+            btn = QPushButton(s.name)
+            btn.setCheckable(True)
+            btn.setProperty("salle_id", s.id)
+
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e3e4e6;
+                    padding: 8px 20px;
+                    border-radius: 6px;
+                    font-weight: 600;
+                }
+                QPushButton:checked {
+                    background-color: #28a745;
+                    color: white;
+                }
+            """)
+
+            btn.clicked.connect(lambda checked, sid=s.id, b=btn: self.select_salle(sid, b))
+
+            self.tabs_layout.addWidget(btn)
+            self.salle_buttons[s.id] = btn
+
+    # ------------------------------------------------------------------
+    def select_salle(self, salle_id, btn):
+        if hasattr(self, "active_salle") and self.active_salle:
+            self.active_salle.setChecked(False)
+
+        btn.setChecked(True)
+        self.active_salle = btn
+
+        self.current_salle_id = salle_id
+        self.load_tables_for_salle(salle_id)
+
+    # ------------------------------------------------------------------
     def load_tables_for_salle(self, salle_id):
-        # clear existing
+        # Clear plan
         for b in list(self.table_buttons.values()):
             b.setParent(None)
         self.table_buttons.clear()
-        try:
-            tables = self.salle_ctrl.list_tables_for_salle(salle_id)
-            for t in tables:
-                btn = TableButton(t, self)
-                # vérifier si table a un panier en_cours
-                panier = self.vente_ctrl.get_open_panier_for_table(t.id)
-                if panier:
-                    total_lines, total_paid = self.vente_ctrl.get_panier_total(panier.id)
-                    btn.setStyleSheet("background-color: #c8e6c9; border:1px solid #2e7d32; border-radius:4px;")
-                    btn.setToolTip(f"Montant: {total_lines:.2f} - Payé: {total_paid:.2f}")
-                else:
-                    btn.setStyleSheet("background-color: #f5f5f5; border:1px solid #ccc; border-radius:4px;")
-                btn.show()
-                self.table_buttons[t.id] = btn
-        except Exception as e:
-            print(f"Erreur load_tables_for_salle: {e}")
+
+        tables = self.salle_ctrl.list_tables_for_salle(salle_id)
+
+        for t in tables:
+            btn = TableButton(t, self)
+
+            panier = self.vente_ctrl.get_open_panier_for_table(t.id)
+
+            if panier:
+                total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                btn.apply_style(occupied=f"{int(total)} F")
+            else:
+                btn.apply_style(occupied=False)
+
+            btn.show()
+            self.table_buttons[t.id] = btn
+
+    # ------------------------------------------------------------------
+    def select_table_button(self, table_button):
+        if hasattr(self, "active_table_btn") and self.active_table_btn:
+            panier = self.vente_ctrl.get_open_panier_for_table(self.active_table_btn.table_id)
+            total = None
+            if panier:
+                total, _ = self.vente_ctrl.get_panier_total(panier.id)
+
+            self.active_table_btn.apply_style(
+                occupied=(f"{int(total)} F" if total else False),
+                selected=False
+            )
+
+        panier = self.vente_ctrl.get_open_panier_for_table(table_button.table_id)
+        total = None
+        if panier:
+            total, _ = self.vente_ctrl.get_panier_total(panier.id)
+
+        table_button.apply_style(
+            occupied=(f"{int(total)} F" if total else False),
+            selected=True
+        )
+        self.active_table_btn = table_button
 
     def open_table_panel(self, table_id):
         """Ouvre un petit dialogue permettant de créer le panier, ajouter un produit simulé, ou payer."""
