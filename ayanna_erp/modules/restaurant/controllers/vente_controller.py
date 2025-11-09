@@ -3,6 +3,7 @@ Controller for restaurant sales (panier, add products, payments)
 """
 from decimal import Decimal
 from datetime import datetime
+from types import SimpleNamespace
 from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.restaurant.models.restaurant import (
     RestauPanier, RestauProduitPanier, RestauPayment, RestauTable
@@ -31,7 +32,21 @@ class VenteController:
             session.add(panier)
             session.flush()
             session.commit()
-            return panier
+            # detach safe lightweight object to avoid Session-bound attribute refresh errors
+            session.refresh(panier)
+            return SimpleNamespace(
+                id=panier.id,
+                table_id=panier.table_id,
+                client_id=panier.client_id,
+                serveuse_id=panier.serveuse_id,
+                user_id=panier.user_id,
+                status=panier.status,
+                subtotal=panier.subtotal,
+                remise_amount=panier.remise_amount,
+                total_final=panier.total_final,
+                created_at=panier.created_at,
+                updated_at=panier.updated_at
+            )
         except Exception as e:
             session.rollback()
             raise
@@ -60,7 +75,15 @@ class VenteController:
             panier.total_final = subtotal - (panier.remise_amount or 0.0)
             panier.updated_at = datetime.utcnow()
             session.commit()
-            return ligne
+            session.refresh(ligne)
+            return SimpleNamespace(
+                id=ligne.id,
+                panier_id=ligne.panier_id,
+                product_id=ligne.product_id,
+                quantity=ligne.quantity,
+                price=ligne.price,
+                total=ligne.total
+            )
         except Exception:
             session.rollback()
             raise
@@ -87,7 +110,15 @@ class VenteController:
                 panier.status = 'valide'
             panier.updated_at = datetime.utcnow()
             session.commit()
-            return pay
+            session.refresh(pay)
+            return SimpleNamespace(
+                id=pay.id,
+                panier_id=pay.panier_id,
+                amount=pay.amount,
+                payment_method=pay.payment_method,
+                user_id=pay.user_id,
+                created_at=pay.created_at
+            )
         except Exception:
             session.rollback()
             raise
@@ -98,7 +129,23 @@ class VenteController:
         session = self.db.get_session()
         try:
             panier = session.query(RestauPanier).filter_by(id=panier_id).first()
-            return panier
+            if not panier:
+                return None
+            # return lightweight detached object
+            session.refresh(panier)
+            return SimpleNamespace(
+                id=panier.id,
+                table_id=panier.table_id,
+                client_id=panier.client_id,
+                serveuse_id=panier.serveuse_id,
+                user_id=panier.user_id,
+                status=panier.status,
+                subtotal=panier.subtotal,
+                remise_amount=panier.remise_amount,
+                total_final=panier.total_final,
+                created_at=panier.created_at,
+                updated_at=panier.updated_at
+            )
         finally:
             self.db.close_session()
 
@@ -107,7 +154,22 @@ class VenteController:
         session = self.db.get_session()
         try:
             panier = session.query(RestauPanier).filter_by(table_id=table_id, status='en_cours').first()
-            return panier
+            if not panier:
+                return None
+            session.refresh(panier)
+            return SimpleNamespace(
+                id=panier.id,
+                table_id=panier.table_id,
+                client_id=panier.client_id,
+                serveuse_id=panier.serveuse_id,
+                user_id=panier.user_id,
+                status=panier.status,
+                subtotal=panier.subtotal,
+                remise_amount=panier.remise_amount,
+                total_final=panier.total_final,
+                created_at=panier.created_at,
+                updated_at=panier.updated_at
+            )
         finally:
             self.db.close_session()
 

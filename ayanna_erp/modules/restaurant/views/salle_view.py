@@ -88,7 +88,7 @@ class DraggableTable(QPushButton):
 
     def apply_style(self):
         # Thème restaurant
-        primary = '#F39C12'  # warm orange
+        primary = '#28a745'  # vert
         accent = '#D35400'
         free_bg = '#ecf3ea'
         border = '#7f8c8d'
@@ -97,9 +97,9 @@ class DraggableTable(QPushButton):
         h = int(getattr(self.table_obj, 'height', 80) or 80)
         if shape in ('round', 'circle'):
             radius = min(w, h) // 2
-            style = f"background-color: {free_bg}; border: 2px solid {accent}; border-radius: {radius}px; font-weight: bold;"
+            style = f"background-color: {free_bg}; border: 2px solid {primary}; border-radius: {radius}px; font-weight: bold;"
         else:
-            style = f"background-color: {free_bg}; border: 2px solid {border}; border-radius: 6px; font-weight: bold;"
+            style = f"background-color: {free_bg}; border: 2px solid {primary}; border-radius: 6px; font-weight: bold;"
         self.setStyleSheet(style)
 
     def mousePressEvent(self, event):
@@ -170,8 +170,8 @@ class SalleView(QWidget):
         self.setStyleSheet('''
             QWidget { background-color: #fffdf8; color: #2c3e50; }
             QLabel { color: #2c3e50; font-weight: 600; }
-            QPushButton { background-color: #F39C12; color: white; border: none; padding: 6px; border-radius: 6px; }
-            QPushButton[secondary="true"] { background-color: #95A5A6; }
+            QPushButton { background-color: #28a745; color: white; border: none; padding: 6px; border-radius: 6px; }
+            QPushButton[secondary="true"] { background-color: #28a745; }
         ''')
         layout.addWidget(QLabel('Gestion des salles'))
 

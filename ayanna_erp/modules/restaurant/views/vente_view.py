@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor
 
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
+from ayanna_erp.modules.restaurant.views.catalogue_widget import CatalogueWidget
 
 
 # ----------------------------------------------------------------------
@@ -58,7 +59,7 @@ class TableButton(QPushButton):
         # Badge montant (si occupée)
         if occupied:
             montant = occupied if isinstance(occupied, str) else ""
-            self.setText(f"{self.table_obj.number}\n<font color='#e53935'><b>{montant}</b></font>")
+            # self.setText(f"{self.table_obj.number}\n<font color='#e53935'><b>{montant}</b></font>")
         else:
             self.setText(str(self.table_obj.number))
 
@@ -201,44 +202,24 @@ class VenteView(QWidget):
         self.active_table_btn = table_button
 
     def open_table_panel(self, table_id):
-        """Ouvre un petit dialogue permettant de créer le panier, ajouter un produit simulé, ou payer."""
-        try:
-            panier = self.vente_ctrl.get_open_panier_for_table(table_id)
-            dlg = QDialog(self)
-            dlg.setWindowTitle(f"Table {table_id} - Panier")
-            form = QFormLayout(dlg)
-            if not panier:
-                create_btn = QPushButton('Créer panier')
-                create_btn.clicked.connect(lambda: self._create_panier_and_close(table_id, dlg))
-                form.addRow(create_btn)
-            else:
-                # afficher totaux et options
-                total_lines, total_paid = self.vente_ctrl.get_panier_total(panier.id)
-                form.addRow(QLabel(f"Total lignes: {total_lines:.2f}"))
-                form.addRow(QLabel(f"Total payé: {total_paid:.2f}"))
-                # ajouter produit simulé
-                prod_id_input = QLineEdit()
-                prod_id_input.setPlaceholderText('product_id (int)')
-                qty_input = QSpinBox(); qty_input.setValue(1)
-                price_input = QLineEdit(); price_input.setPlaceholderText('price')
-                add_prod_btn = QPushButton('Ajouter produit (simulé)')
-                add_prod_btn.clicked.connect(lambda: self._add_product_to_panier(panier.id, prod_id_input.text(), qty_input.value(), price_input.text(), dlg))
-                form.addRow('Product ID:', prod_id_input)
-                form.addRow('Qty:', qty_input)
-                form.addRow('Price:', price_input)
-                form.addRow(add_prod_btn)
-                # paiement
-                pay_amount = QLineEdit(); pay_amount.setPlaceholderText('amount')
-                pay_method = QLineEdit(); pay_method.setPlaceholderText('Espèces/Carte')
-                pay_btn = QPushButton('Enregistrer paiement')
-                pay_btn.clicked.connect(lambda: self._add_payment_to_panier(panier.id, pay_amount.text(), pay_method.text(), dlg))
-                form.addRow('Montant:', pay_amount)
-                form.addRow('Méthode:', pay_method)
-                form.addRow(pay_btn)
+        """Ouvre le catalogue complet (produits + panier) pour la table dans un dialogue.
 
-            dlg.setLayout(form)
+        Le widget embarque un catalogue inspiré de `modern_supermarket_widget.py` mais
+        adapté au restaurant (pavé numérique pour modifier quantités, suppression de lignes,
+        sélection client/serveuse est possible depuis le widget).
+        """
+        try:
+            dlg = QDialog(self)
+            dlg.setWindowTitle(f"Catalogue - Table {table_id}")
+            layout = QVBoxLayout(dlg)
+            # passer current_user si disponible
+            current_user = getattr(self, 'current_user', None)
+            catalog = CatalogueWidget(table_id=table_id, entreprise_id=self.entreprise_id, pos_id=1, current_user=current_user, parent=dlg)
+            layout.addWidget(catalog)
+            dlg.setLayout(layout)
+            dlg.resize(1000, 700)
             dlg.exec()
-            # Après interaction, recharger l'affichage pour rafraîchir couleur/montant
+            # après fermeture, rafraîchir plan si nécessaire
             if self.current_salle_id:
                 self.load_tables_for_salle(self.current_salle_id)
         except Exception as e:

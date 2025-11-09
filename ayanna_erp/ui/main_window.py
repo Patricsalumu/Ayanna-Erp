@@ -271,15 +271,15 @@ class MainWindow(QMainWindow):
                 },
                 "Pharmacie": {
                     "description": "Gestion de la pharmacie\net des médicaments",
-                    "color": "#2ECC71"
+                    "color": "#F39C12"
                 },
                 "Restaurant": {
                     "description": "Gestion du restaurant\net du bar",
-                    "color": "#F39C12"
+                    "color": "#28a745"
                 },
                 "Hotel": {
                     "description": "Gestion de l'hôtel\net des réservations",
-                    "color": "#9B59B6"
+                    "color": "#D9F10695"
                 },
                 "Achats": {
                     "description": "Gestion des achats\net fournisseurs",
