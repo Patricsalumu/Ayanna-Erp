@@ -757,19 +757,53 @@ class CatalogueWidget(QWidget):
         if ok != QMessageBox.StandardButton.Yes:
             return
         try:
-            # mark panier as cancelled
+            # If panier is empty -> delete it (free the table) and return to plan view
+            items = []
+            try:
+                items = self.controller.list_cart_items(self.panier.id) or []
+            except Exception:
+                items = []
+
             session = self.vente_ctrl.db.get_session()
             from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
             p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
             if p:
-                p.status = 'annule'
-                session.commit()
+                if not items:
+                    # delete empty panier -> free table
+                    try:
+                        session.delete(p)
+                        session.commit()
+                    except Exception:
+                        session.rollback()
+                        raise
+                    finally:
+                        session.close()
+                    QMessageBox.information(self, 'Succès', 'Panier vide supprimé, table libérée')
+                    # return to plan view if possible
+                    parent = self.parent()
+                    while parent is not None and not hasattr(parent, 'show_plan_view'):
+                        parent = parent.parent()
+                    try:
+                        if parent and hasattr(parent, 'show_plan_view'):
+                            parent.show_plan_view()
+                    except Exception:
+                        pass
+                    return
+                else:
+                    # mark panier as cancelled
+                    p.status = 'annule'
+                    session.commit()
             session.close()
             QMessageBox.information(self, 'Succès', 'Commande annulée')
-            # reset local panier and refresh (ensure a new panier is created)
-            self.panier = None
-            self.ensure_panier()
-            self.refresh_cart()
+            # After cancelling, go back to plan view
+            parent = self.parent()
+            while parent is not None and not hasattr(parent, 'show_plan_view'):
+                parent = parent.parent()
+            try:
+                if parent and hasattr(parent, 'show_plan_view'):
+                    parent.show_plan_view()
+            except Exception:
+                pass
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la commande: {e}")
 
@@ -937,6 +971,21 @@ class CatalogueWidget(QWidget):
                     self.panier = self.vente_ctrl.get_panier(self.panier.id)
                 except Exception:
                     pass
+                # if panier is now validated (paid) -> go back to plan view
+                try:
+                    if getattr(self.panier, 'status', None) and str(getattr(self.panier, 'status')) != 'en_cours':
+                        parent = self.parent()
+                        while parent is not None and not hasattr(parent, 'show_plan_view'):
+                            parent = parent.parent()
+                        try:
+                            if parent and hasattr(parent, 'show_plan_view'):
+                                parent.show_plan_view()
+                                return
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
                 self.refresh_cart()
 
         except Exception as e:
