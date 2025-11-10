@@ -2,13 +2,14 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QFrame, QLabel, QPushButton, QLineEdit, QSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QComboBox, QDialog,
-    QSplitter
+    QSplitter, QTextEdit
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
+from ayanna_erp.database.database_manager import get_database_manager, User
 
 
 class CatalogueWidget(QWidget):
@@ -36,6 +37,8 @@ class CatalogueWidget(QWidget):
         # state
         self.panier = None
         self.selected_cart_row = None
+        # keypad buffer (string)
+        self._keypad_buffer = ""
 
         self.init_ui()
         self.load_products()
@@ -43,9 +46,31 @@ class CatalogueWidget(QWidget):
 
     def init_ui(self):
         main = QVBoxLayout(self)
-        header = QLabel(f"Catalogue - Table {self.table_id}")
-        header.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
-        main.addWidget(header)
+        header_h = QHBoxLayout()
+        header_label = QLabel(f"Catalogue - Table {self.table_id}")
+        header_label.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
+        header_h.addWidget(header_label)
+        header_h.addStretch()
+
+        # Serveuse selection
+        self.serveuse_combo = QComboBox()
+        # populate options
+        try:
+            self._populate_serveuse_combo()
+        except Exception:
+            pass
+        header_h.addWidget(QLabel("Serveuse:"))
+        header_h.addWidget(self.serveuse_combo)
+        main.addLayout(header_h)
+
+        # Category filter buttons
+        self.category_bar = QHBoxLayout()
+        main.addLayout(self.category_bar)
+        self.selected_category = None
+        try:
+            self._populate_category_buttons()
+        except Exception:
+            pass
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         main.addWidget(splitter)
@@ -90,6 +115,37 @@ class CatalogueWidget(QWidget):
         pad.addWidget(inc_btn); pad.addWidget(dec_btn); pad.addWidget(del_btn)
         right_l.addLayout(pad)
 
+        # Numeric keypad (compose qty then Apply to selected line)
+        keypad = QWidget()
+        keypad_layout = QGridLayout(keypad)
+        keypad_layout.setSpacing(4)
+        keys = [
+            ('7', 0, 0), ('8', 0, 1), ('9', 0, 2),
+            ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
+            ('1', 2, 0), ('2', 2, 1), ('3', 2, 2),
+            ('C', 3, 0), ('0', 3, 1), ('OK', 3, 2),
+        ]
+        for key, r, c in keys:
+            btn = QPushButton(key)
+            btn.setFixedSize(44, 36)
+            if key == 'C':
+                btn.clicked.connect(self.keypad_clear)
+            elif key == 'OK':
+                btn.clicked.connect(self.keypad_apply)
+            else:
+                btn.clicked.connect(lambda _checked, k=key: self.keypad_digit(k))
+            keypad_layout.addWidget(btn, r, c)
+        right_l.addWidget(keypad)
+
+        # Note du panier
+        right_l.addWidget(QLabel('Note (commande)'))
+        self.note_edit = QTextEdit()
+        self.note_edit.setFixedHeight(80)
+        right_l.addWidget(self.note_edit)
+        save_note_btn = QPushButton('Enregistrer la note')
+        save_note_btn.clicked.connect(self.save_note)
+        right_l.addWidget(save_note_btn)
+
         # Finalize
         splitter.addWidget(right)
         splitter.setSizes([700, 300])
@@ -97,30 +153,152 @@ class CatalogueWidget(QWidget):
     def ensure_panier(self):
         p = self.vente_ctrl.get_open_panier_for_table(self.table_id)
         if not p:
-            p = self.controller.get_or_create_panier_for_table(self.table_id, user_id=getattr(self.current_user, 'id', None))
+            # récupérer la serveuse sélectionnée si présente
+            serveuse_id = None
+            try:
+                serveuse_id = int(self.serveuse_combo.currentData() or 0) if hasattr(self, 'serveuse_combo') else None
+            except Exception:
+                serveuse_id = None
+            p = self.controller.get_or_create_panier_for_table(self.table_id, user_id=getattr(self.current_user, 'id', None), serveuse_id=serveuse_id)
         self.panier = p
         self.refresh_cart()
+        # charger la note si présente
+        try:
+            if self.panier:
+                session = self.controller.db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+                obj = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+                if obj and getattr(obj, 'note', None):
+                    try:
+                        self.note_edit.setPlainText(str(obj.note))
+                    except Exception:
+                        pass
+                session.close()
+        except Exception:
+            pass
 
     def load_products(self):
         search = self.search_edit.text() if hasattr(self, 'search_edit') else None
-        products = self.controller.list_products(search=search)
+        cat_id = self.selected_category
+        products = self.controller.list_products(search=search, category_id=cat_id)
         # clear
         for i in reversed(range(self.products_layout.count())):
-            w = self.products_layout.itemAt(i).widget()
-            if w:
-                w.setParent(None)
+            it = self.products_layout.itemAt(i)
+            if it:
+                w = it.widget()
+                if w:
+                    w.setParent(None)
 
         cols = 3
         for idx, prod in enumerate(products):
-            card = QFrame(); card.setFrameStyle(QFrame.Shape.StyledPanel)
-            card_l = QVBoxLayout(card)
-            name = QLabel(getattr(prod, 'name', 'Produit'))
-            price = QLabel(f"{getattr(prod, 'price_unit', getattr(prod, 'price', 0))} F")
-            add_btn = QPushButton('➕')
-            add_btn.clicked.connect(lambda _checked, pid=prod.id: self.add_product(pid))
-            card_l.addWidget(name); card_l.addWidget(price); card_l.addWidget(add_btn)
+            card = self.create_product_card(prod)
             r = idx // cols; c = idx % cols
             self.products_layout.addWidget(card, r, c)
+
+        # ensure some stretch so cards align top
+        self.products_layout.setRowStretch((len(products) // cols) + 1, 1)
+
+    def create_product_card(self, product):
+        """Créer une carte produit similaire à ModernSupermarketWidget.create_product_card
+        adaptée au catalogue de la table (simplifiée).
+        """
+        card = QFrame()
+        card.setFrameStyle(QFrame.Shape.StyledPanel)
+        card.setStyleSheet("""
+            QFrame {
+                background-color: white;
+                border: 1px solid #E0E0E0;
+                border-radius: 8px;
+                padding: 8px;
+            }
+            QFrame:hover {
+                border-color: #1976D2;
+                background-color: #F3F9FF;
+            }
+        """)
+        card.setFixedSize(220, 180)
+
+        layout = QVBoxLayout(card)
+        layout.setSpacing(6)
+
+        # Image placeholder
+        img = QLabel()
+        img.setFixedSize(160, 80)
+        img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        img.setText("🧾")
+        layout.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # Name
+        name = getattr(product, 'name', 'Produit')
+        name_label = QLabel(name[:30] + '...' if len(name) > 30 else name)
+        name_label.setWordWrap(True)
+        name_label.setStyleSheet("font-weight: bold; color: #212529;")
+        name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(name_label)
+
+        # Price and add button row
+        bottom = QHBoxLayout()
+        price = float(getattr(product, 'price_unit', getattr(product, 'price', 0) or 0))
+        price_label = QLabel(f"{int(price)} F")
+        price_label.setStyleSheet("font-weight:bold; color:#28A745;")
+        bottom.addWidget(price_label)
+        bottom.addStretch()
+        add_btn = QPushButton("➕ Ajouter")
+        add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px; padding:6px;")
+        add_btn.clicked.connect(lambda _checked, pid=getattr(product, 'id', None): self.add_product(pid))
+        bottom.addWidget(add_btn)
+        layout.addLayout(bottom)
+
+        return card
+
+    def _populate_category_buttons(self):
+        # Clear existing buttons
+        while self.category_bar.count():
+            it = self.category_bar.takeAt(0)
+            if it and it.widget():
+                it.widget().deleteLater()
+
+        # 'Tous' button
+        all_btn = QPushButton('Tous')
+        all_btn.setCheckable(True)
+        all_btn.setChecked(True if self.selected_category is None else False)
+        all_btn.clicked.connect(lambda _: self._on_category_selected(None, all_btn))
+        self.category_bar.addWidget(all_btn)
+
+        cats = []
+        try:
+            cats = self.controller.list_categories() or []
+        except Exception:
+            cats = []
+
+        for c in cats:
+            btn = QPushButton(getattr(c, 'name', 'Cat'))
+            btn.setCheckable(True)
+            btn.clicked.connect(lambda _checked, cid=getattr(c, 'id', None), b=btn: self._on_category_selected(cid, b))
+            self.category_bar.addWidget(btn)
+
+        self.category_bar.addStretch()
+
+    def _on_category_selected(self, category_id, button):
+        # Uncheck other buttons in the category bar
+        for i in range(self.category_bar.count()):
+            it = self.category_bar.itemAt(i)
+            if it and it.widget() and isinstance(it.widget(), QPushButton):
+                w = it.widget()
+                if w is not button:
+                    w.setChecked(False)
+
+        # Toggle selection
+        if self.selected_category == category_id:
+            # deselect
+            self.selected_category = None
+            button.setChecked(False)
+        else:
+            self.selected_category = category_id
+            button.setChecked(True)
+
+        # reload products with new filter
+        self.load_products()
 
     def add_product(self, product_id: int):
         try:
@@ -203,3 +381,80 @@ class CatalogueWidget(QWidget):
             self.refresh_cart()
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
+
+    # -----------------------
+    # Keypad helpers
+    # -----------------------
+    def keypad_digit(self, digit: str):
+        try:
+            if digit.isdigit():
+                if self._keypad_buffer == '0':
+                    self._keypad_buffer = digit
+                else:
+                    self._keypad_buffer += digit
+                try:
+                    val = int(self._keypad_buffer)
+                    self.qty_spin.setValue(max(1, val))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    def keypad_clear(self):
+        self._keypad_buffer = ""
+        self.qty_spin.setValue(1)
+
+    def keypad_apply(self):
+        if self.selected_cart_row is None:
+            QMessageBox.information(self, 'Info', "Sélectionnez une ligne du panier d'abord")
+            return
+        try:
+            newq = int(self.qty_spin.value())
+            lp_id = int(self.cart_table.item(self.selected_cart_row, 0).text())
+            self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            self.refresh_cart()
+            # reset buffer
+            self._keypad_buffer = ""
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', str(e))
+
+    def save_note(self):
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        note = self.note_edit.toPlainText()
+        try:
+            self.controller.set_panier_note(self.panier.id, note)
+            QMessageBox.information(self, 'Succès', 'Note enregistrée')
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer la note: {e}")
+
+    def _populate_serveuse_combo(self):
+        try:
+            # tenter de lister les utilisateurs de l'entreprise
+            db = get_database_manager()
+            session = db.get_session()
+            users = session.query(User).filter_by(enterprise_id=self.entreprise_id).all()
+            session.close()
+            self.serveuse_combo.clear()
+            # ajouter une option vide
+            self.serveuse_combo.addItem('---', 0)
+            for u in users:
+                self.serveuse_combo.addItem(getattr(u, 'name', str(getattr(u, 'email', 'user'))), getattr(u, 'id', 0))
+            # si current_user présent, sélectionner
+            if getattr(self, 'current_user', None):
+                try:
+                    uid = getattr(self.current_user, 'id', None)
+                    if uid:
+                        index = self.serveuse_combo.findData(uid)
+                        if index >= 0:
+                            self.serveuse_combo.setCurrentIndex(index)
+                except Exception:
+                    pass
+        except Exception:
+            # fallback: si current_user disponible
+            try:
+                self.serveuse_combo.clear()
+                self.serveuse_combo.addItem(getattr(self.current_user, 'name', 'Serveuse'), getattr(self.current_user, 'id', 0))
+            except Exception:
+                pass

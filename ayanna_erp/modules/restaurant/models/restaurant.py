@@ -51,6 +51,7 @@ class RestauPanier(Base):
     remise_amount = Column(Float, default=0.0)
     total_final = Column(Float, default=0.0)
     user_id = Column(Integer, nullable=True)
+    note = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow)
 

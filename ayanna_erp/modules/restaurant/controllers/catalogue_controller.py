@@ -32,6 +32,15 @@ class CatalogueController:
         finally:
             self.db.close_session()
 
+    def list_categories(self):
+        """Retourne la liste des catégories CoreProductCategory pour l'entreprise du POS."""
+        session = self.db.get_session()
+        try:
+            cats = self.core_ctrl.get_categories(session)
+            return cats
+        finally:
+            self.db.close_session()
+
     # Panier helpers (restaurant-specific)
     def get_or_create_panier_for_table(self, table_id: int, client_id: Optional[int] = None, serveuse_id: Optional[int] = None, user_id: Optional[int] = None):
         # Try to find open panier, else create
@@ -98,3 +107,19 @@ class CatalogueController:
 
     def get_panier_totals(self, panier_id: int):
         return self.vente_ctrl.get_panier_total(panier_id)
+
+    def set_panier_note(self, panier_id: int, note: str):
+        session = self.db.get_session()
+        try:
+            panier = session.query(RestauPanier).filter_by(id=panier_id).first()
+            if not panier:
+                raise ValueError('Panier introuvable')
+            panier.note = note
+            panier.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            self.db.close_session()
