@@ -83,6 +83,10 @@ class CatalogueWidget(QWidget):
             pass
         header_h.addWidget(QLabel('Client:'))
         header_h.addWidget(self.client_combo)
+        try:
+            self.client_combo.currentIndexChanged.connect(self._on_client_selected)
+        except Exception:
+            pass
 
         self.serveuse_combo = QComboBox()
         # populate options
@@ -92,6 +96,10 @@ class CatalogueWidget(QWidget):
             pass
         header_h.addWidget(QLabel("Serveuse:"))
         header_h.addWidget(self.serveuse_combo)
+        try:
+            self.serveuse_combo.currentIndexChanged.connect(self._on_serveuse_selected)
+        except Exception:
+            pass
         main.addLayout(header_h)
 
         # Category filter buttons
@@ -127,8 +135,9 @@ class CatalogueWidget(QWidget):
         right = QWidget()
         right_l = QVBoxLayout(right)
         right_l.addWidget(QLabel('Panier'))
-        self.cart_table = QTableWidget(0, 4)
-        self.cart_table.setHorizontalHeaderLabels(['Ligne ID', 'Produit', 'Qté', 'Total'])
+        # Columns: hidden Ligne ID, Produit, Qté, Prix, Total
+        self.cart_table = QTableWidget(0, 5)
+        self.cart_table.setHorizontalHeaderLabels(['Ligne ID', 'Produit', 'Qté', 'Prix', 'Total'])
         self.cart_table.horizontalHeader().setSectionHidden(0, True)
         self.cart_table.horizontalHeader().setStretchLastSection(True)
         self.cart_table.verticalHeader().setVisible(False)
@@ -139,6 +148,11 @@ class CatalogueWidget(QWidget):
         pad = QHBoxLayout()
         self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999)
         pad.addWidget(self.qty_spin)
+        # apply qty when editing finished (focus lost)
+        try:
+            self.qty_spin.editingFinished.connect(self._apply_qty_from_spin)
+        except Exception:
+            pass
         inc_btn = QPushButton('+'); dec_btn = QPushButton('-'); del_btn = QPushButton('Suppr')
         inc_btn.clicked.connect(self.increment_selected_qty)
         dec_btn.clicked.connect(self.decrement_selected_qty)
@@ -173,6 +187,57 @@ class CatalogueWidget(QWidget):
                 serveuse_id = None
             p = self.controller.get_or_create_panier_for_table(self.table_id, user_id=getattr(self.current_user, 'id', None), serveuse_id=serveuse_id)
         self.panier = p
+        # positionner les combos client/serveuse selon le panier chargé
+        try:
+            # block signals to avoid re-persisting the same values
+            try:
+                self.client_combo.blockSignals(True)
+            except Exception:
+                pass
+            try:
+                self.serveuse_combo.blockSignals(True)
+            except Exception:
+                pass
+
+            # select client if present
+            try:
+                cid = getattr(self.panier, 'client_id', None)
+                if cid:
+                    idx = self.client_combo.findData(int(cid))
+                    if idx >= 0:
+                        self.client_combo.setCurrentIndex(idx)
+                    else:
+                        # fallback: ensure first placeholder selected
+                        self.client_combo.setCurrentIndex(0)
+                else:
+                    self.client_combo.setCurrentIndex(0)
+            except Exception:
+                pass
+
+            # select serveuse if present
+            try:
+                sid = getattr(self.panier, 'serveuse_id', None)
+                if sid:
+                    idx = self.serveuse_combo.findData(int(sid))
+                    if idx >= 0:
+                        self.serveuse_combo.setCurrentIndex(idx)
+                    else:
+                        self.serveuse_combo.setCurrentIndex(0)
+                else:
+                    self.serveuse_combo.setCurrentIndex(0)
+            except Exception:
+                pass
+
+        finally:
+            try:
+                self.client_combo.blockSignals(False)
+            except Exception:
+                pass
+            try:
+                self.serveuse_combo.blockSignals(False)
+            except Exception:
+                pass
+
         self.refresh_cart()
         # charger la note si présente
         try:
@@ -405,8 +470,11 @@ class CatalogueWidget(QWidget):
             self.cart_table.setItem(i, 1, name_item)
             qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
             self.cart_table.setItem(i, 2, qty_item)
+            # price per unit
+            price_item = QTableWidgetItem(str(getattr(it, 'price', 0.0)))
+            self.cart_table.setItem(i, 3, price_item)
             total_item = QTableWidgetItem(str(getattr(it, 'total')))
-            self.cart_table.setItem(i, 3, total_item)
+            self.cart_table.setItem(i, 4, total_item)
 
         # restore selection if possible
         if sel_id:
@@ -481,6 +549,71 @@ class CatalogueWidget(QWidget):
             self.refresh_cart()
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
+
+    def _apply_qty_from_spin(self):
+        """Apply the qty value from the spinbox to the selected cart line when editing is finished."""
+        if self.selected_cart_row is None:
+            return
+        try:
+            lp_id = int(self.cart_table.item(self.selected_cart_row, 0).text())
+            newq = int(self.qty_spin.value())
+            # remember selected_line_id so refresh preserves focus
+            self.selected_line_id = lp_id
+            self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            self.refresh_cart()
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'appliquer la quantité: {e}")
+
+    def _on_client_selected(self, index):
+        """Persist selected client into the panier as soon as selection changes."""
+        if not self.panier:
+            return
+        try:
+            client_id = int(self.client_combo.currentData() or 0)
+            # treat 0 as no client
+            client_val = client_id if client_id else None
+            try:
+                self.controller.set_panier_client(self.panier.id, client_val)
+            except Exception:
+                # fallback: try via vente_ctrl directly
+                session = self.vente_ctrl.db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+                p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+                if p:
+                    p.client_id = client_val
+                    session.commit()
+                session.close()
+            # update local cached panier if possible
+            try:
+                self.panier.client_id = client_val
+            except Exception:
+                pass
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer le client: {e}")
+
+    def _on_serveuse_selected(self, index):
+        """Persist selected serveuse into the panier as soon as selection changes."""
+        if not self.panier:
+            return
+        try:
+            serveuse_id = int(self.serveuse_combo.currentData() or 0)
+            serveuse_val = serveuse_id if serveuse_id else None
+            try:
+                self.controller.set_panier_serveuse(self.panier.id, serveuse_val)
+            except Exception:
+                session = self.vente_ctrl.db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+                p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+                if p:
+                    p.serveuse_id = serveuse_val
+                    session.commit()
+                session.close()
+            try:
+                self.panier.serveuse_id = serveuse_val
+            except Exception:
+                pass
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer la serveuse: {e}")
 
     # -----------------------
     # Keypad helpers

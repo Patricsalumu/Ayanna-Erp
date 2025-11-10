@@ -142,3 +142,37 @@ class CatalogueController:
             raise
         finally:
             self.db.close_session()
+
+    def set_panier_client(self, panier_id: int, client_id: int):
+        """Attribue un client au panier et persiste en base."""
+        session = self.db.get_session()
+        try:
+            panier = session.query(RestauPanier).filter_by(id=panier_id).first()
+            if not panier:
+                raise ValueError('Panier introuvable')
+            panier.client_id = int(client_id) if client_id else None
+            panier.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            self.db.close_session()
+
+    def set_panier_serveuse(self, panier_id: int, serveuse_id: int):
+        """Attribue une serveuse au panier et persiste en base."""
+        session = self.db.get_session()
+        try:
+            panier = session.query(RestauPanier).filter_by(id=panier_id).first()
+            if not panier:
+                raise ValueError('Panier introuvable')
+            panier.serveuse_id = int(serveuse_id) if serveuse_id else None
+            panier.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+        except Exception:
+            session.rollback()
+            raise
+        finally:
+            self.db.close_session()
