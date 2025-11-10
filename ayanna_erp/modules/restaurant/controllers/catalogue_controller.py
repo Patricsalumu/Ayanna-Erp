@@ -50,8 +50,27 @@ class CatalogueController:
         return self.vente_ctrl.create_panier(table_id=table_id, client_id=client_id, serveuse_id=serveuse_id, user_id=user_id)
 
     def add_product_to_panier(self, panier_id: int, product_id: int, quantity: float, price: float):
-        # Delegate to VenteController
-        return self.vente_ctrl.add_product(panier_id, product_id, quantity, price)
+        # If the product already exists in the panier, increment its quantity instead of creating a new line
+        session = self.db.get_session()
+        try:
+            existing = session.query(RestauProduitPanier).filter_by(panier_id=panier_id, product_id=product_id).first()
+            if existing:
+                existing.quantity = float(existing.quantity) + float(quantity)
+                existing.total = float(existing.quantity) * float(existing.price)
+                session.flush()
+                panier = session.query(RestauPanier).filter_by(id=panier_id).first()
+                if panier:
+                    panier.subtotal = sum([p.total for p in panier.produits]) if panier.produits else 0.0
+                    panier.total_final = panier.subtotal - (panier.remise_amount or 0.0)
+                    panier.updated_at = datetime.utcnow()
+                session.commit()
+                session.refresh(existing)
+                return existing
+            else:
+                # Delegate to VenteController to create a new line
+                return self.vente_ctrl.add_product(panier_id, product_id, quantity, price)
+        finally:
+            self.db.close_session()
 
     def remove_product_from_panier(self, panier_id: int, produit_panier_id: int):
         session = self.db.get_session()

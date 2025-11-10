@@ -10,6 +10,7 @@ from PyQt6.QtGui import QFont
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.database.database_manager import get_database_manager, User
+from ayanna_erp.database.database_manager import Entreprise
 
 
 class CatalogueWidget(QWidget):
@@ -36,23 +37,39 @@ class CatalogueWidget(QWidget):
 
         # state
         self.panier = None
+        self.selected_line_id = None
         self.selected_cart_row = None
         # keypad buffer (string)
         self._keypad_buffer = ""
+        # finish initialization
+        self.__post_init_load()
 
+    # initialize UI and ensure panier before loading products so badges are correct
+    def __post_init_load(self):
+        # helper called after __init__ to finish setup
         self.init_ui()
-        self.load_products()
         self.ensure_panier()
+        self.load_products()
 
     def init_ui(self):
         main = QVBoxLayout(self)
         header_h = QHBoxLayout()
-        header_label = QLabel(f"Catalogue - Table {self.table_id}")
+        uid = getattr(self.current_user, 'id', None) if getattr(self, 'current_user', None) else None
+        header_label = QLabel(f"Catalogue - Table {self.table_id}" + (f" — User {uid}" if uid else ""))
         header_label.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
         header_h.addWidget(header_label)
         header_h.addStretch()
 
         # Serveuse selection
+        # Client selection
+        self.client_combo = QComboBox()
+        try:
+            self._populate_client_combo()
+        except Exception:
+            pass
+        header_h.addWidget(QLabel('Client:'))
+        header_h.addWidget(self.client_combo)
+
         self.serveuse_combo = QComboBox()
         # populate options
         try:
@@ -115,27 +132,7 @@ class CatalogueWidget(QWidget):
         pad.addWidget(inc_btn); pad.addWidget(dec_btn); pad.addWidget(del_btn)
         right_l.addLayout(pad)
 
-        # Numeric keypad (compose qty then Apply to selected line)
-        keypad = QWidget()
-        keypad_layout = QGridLayout(keypad)
-        keypad_layout.setSpacing(4)
-        keys = [
-            ('7', 0, 0), ('8', 0, 1), ('9', 0, 2),
-            ('4', 1, 0), ('5', 1, 1), ('6', 1, 2),
-            ('1', 2, 0), ('2', 2, 1), ('3', 2, 2),
-            ('C', 3, 0), ('0', 3, 1), ('OK', 3, 2),
-        ]
-        for key, r, c in keys:
-            btn = QPushButton(key)
-            btn.setFixedSize(44, 36)
-            if key == 'C':
-                btn.clicked.connect(self.keypad_clear)
-            elif key == 'OK':
-                btn.clicked.connect(self.keypad_apply)
-            else:
-                btn.clicked.connect(lambda _checked, k=key: self.keypad_digit(k))
-            keypad_layout.addWidget(btn, r, c)
-        right_l.addWidget(keypad)
+        # (numeric keypad removed - we keep qty_spin + +/-/Suppr controls)
 
         # Note du panier
         right_l.addWidget(QLabel('Note (commande)'))
@@ -148,7 +145,8 @@ class CatalogueWidget(QWidget):
 
         # Finalize
         splitter.addWidget(right)
-        splitter.setSizes([700, 300])
+        # enlarge product area and reduce cart area
+        splitter.setSizes([1000, 200])
 
     def ensure_panier(self):
         p = self.vente_ctrl.get_open_panier_for_table(self.table_id)
@@ -189,7 +187,7 @@ class CatalogueWidget(QWidget):
                 if w:
                     w.setParent(None)
 
-        cols = 3
+        cols = 5
         for idx, prod in enumerate(products):
             card = self.create_product_card(prod)
             r = idx // cols; c = idx % cols
@@ -216,14 +214,24 @@ class CatalogueWidget(QWidget):
                 background-color: #F3F9FF;
             }
         """)
-        card.setFixedSize(220, 180)
+        card.setFixedSize(160, 120)
 
         layout = QVBoxLayout(card)
         layout.setSpacing(6)
 
+        # top row: badge on the right
+        top_row = QHBoxLayout()
+        top_row.addStretch()
+        badge = QLabel('0')
+        badge.setObjectName('cart_badge')
+        badge.setFixedSize(28, 18)
+        badge.setStyleSheet('background-color:#E53935; color:white; border-radius:9px; padding:2px; font-size:11px;')
+        top_row.addWidget(badge)
+        layout.addLayout(top_row)
+
         # Image placeholder
         img = QLabel()
-        img.setFixedSize(160, 80)
+        img.setFixedSize(120, 54)
         img.setAlignment(Qt.AlignmentFlag.AlignCenter)
         img.setText("🧾")
         layout.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
@@ -236,20 +244,61 @@ class CatalogueWidget(QWidget):
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(name_label)
 
-        # Price and add button row
-        bottom = QHBoxLayout()
+        # Entire card is clickable to add product; price/button removed per request
         price = float(getattr(product, 'price_unit', getattr(product, 'price', 0) or 0))
-        price_label = QLabel(f"{int(price)} F")
-        price_label.setStyleSheet("font-weight:bold; color:#28A745;")
-        bottom.addWidget(price_label)
-        bottom.addStretch()
-        add_btn = QPushButton("➕ Ajouter")
-        add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px; padding:6px;")
-        add_btn.clicked.connect(lambda _checked, pid=getattr(product, 'id', None): self.add_product(pid))
-        bottom.addWidget(add_btn)
-        layout.addLayout(bottom)
+        card.setToolTip(f"{getattr(product,'name','')} - {int(price)} {self._get_currency()}")
+
+        # clickable behaviour
+        def _on_click(prod_id=getattr(product, 'id', None)):
+            try:
+                self.add_product(prod_id)
+                # update badges by reloading products
+                self._update_badges()
+            except Exception as e:
+                QMessageBox.critical(self, 'Erreur', str(e))
+
+        # attach click handler
+        def _mouse_press(event):
+            _on_click()
+
+        card.mousePressEvent = _mouse_press
+
+        # set initial badge value if panier exists
+        try:
+            qty_in_cart = self._get_cart_quantity_for_product(getattr(product, 'id', None))
+            badge.setText(str(int(qty_in_cart)))
+            if int(qty_in_cart) <= 0:
+                badge.setVisible(False)
+        except Exception:
+            pass
 
         return card
+
+    def _get_cart_quantity_for_product(self, product_id):
+        if not self.panier:
+            return 0
+        try:
+            items = self.controller.list_cart_items(self.panier.id)
+            total = 0
+            for it in items:
+                if getattr(it, 'product_id', None) == product_id:
+                    total += float(getattr(it, 'quantity', 0))
+            return total
+        except Exception:
+            return 0
+
+    def _update_badges(self):
+        # iterate product cards and update badge labels
+        for i in range(self.products_layout.count()):
+            it = self.products_layout.itemAt(i)
+            w = it.widget()
+            if not w:
+                continue
+            # try to find badge child
+            badge = w.findChild(QLabel, 'cart_badge')
+            # infer product id from tooltip via 'id' not stored; safer to reload all products
+        # simplest: reload products to refresh badges
+        self.load_products()
 
     def _populate_category_buttons(self):
         # Clear existing buttons
@@ -319,18 +368,43 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             return
         items = self.controller.list_cart_items(self.panier.id)
+        # remember selected line id
+        sel_id = getattr(self, 'selected_line_id', None)
         self.cart_table.setRowCount(0)
         for i, it in enumerate(items):
             self.cart_table.insertRow(i)
             id_item = QTableWidgetItem(str(getattr(it, 'id')))
             id_item.setData(Qt.ItemDataRole.UserRole, getattr(it, 'id'))
             self.cart_table.setItem(i, 0, id_item)
+            # show product name ideally, but product_id for now
             name_item = QTableWidgetItem(str(getattr(it, 'product_id')))
             self.cart_table.setItem(i, 1, name_item)
             qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
             self.cart_table.setItem(i, 2, qty_item)
             total_item = QTableWidgetItem(str(getattr(it, 'total')))
             self.cart_table.setItem(i, 3, total_item)
+
+        # restore selection if possible
+        if sel_id:
+            found = False
+            for row in range(self.cart_table.rowCount()):
+                item = self.cart_table.item(row, 0)
+                if item and int(item.text()) == int(sel_id):
+                    self.selected_cart_row = row
+                    self.selected_line_id = sel_id
+                    self.cart_table.selectRow(row)
+                    # set qty spin to the row's qty
+                    try:
+                        qv = int(self.cart_table.item(row, 2).text())
+                        self.qty_spin.setValue(qv)
+                    except Exception:
+                        pass
+                    self.cart_table.setFocus()
+                    found = True
+                    break
+            if not found:
+                self.selected_cart_row = None
+                self.selected_line_id = None
 
     def on_cart_row_clicked(self, row, col):
         self.selected_cart_row = row
@@ -458,3 +532,36 @@ class CatalogueWidget(QWidget):
                 self.serveuse_combo.addItem(getattr(self.current_user, 'name', 'Serveuse'), getattr(self.current_user, 'id', 0))
             except Exception:
                 pass
+
+    def _populate_client_combo(self):
+        try:
+            db = get_database_manager()
+            session = db.get_session()
+            from ayanna_erp.modules.boutique.model.models import ShopClient
+            clients = session.query(ShopClient).filter_by(is_active=True).order_by(ShopClient.nom.asc()).all()
+            session.close()
+            self.client_combo.clear()
+            self.client_combo.addItem('---', 0)
+            for c in clients:
+                name = f"{getattr(c,'nom','') or ''} {getattr(c,'prenom','') or ''}".strip()
+                if not name:
+                    name = getattr(c, 'telephone', 'Client')
+                self.client_combo.addItem(name, getattr(c, 'id', 0))
+        except Exception:
+            try:
+                self.client_combo.clear()
+                self.client_combo.addItem('---', 0)
+            except Exception:
+                pass
+
+    def _get_currency(self):
+        try:
+            db = get_database_manager()
+            session = db.get_session()
+            ent = session.query(Entreprise).filter_by(id=self.entreprise_id).first()
+            session.close()
+            if ent and getattr(ent, 'currency', None):
+                return getattr(ent, 'currency')
+        except Exception:
+            pass
+        return 'F'
