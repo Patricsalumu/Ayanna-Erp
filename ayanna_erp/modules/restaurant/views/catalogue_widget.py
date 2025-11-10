@@ -55,7 +55,21 @@ class CatalogueWidget(QWidget):
         main = QVBoxLayout(self)
         header_h = QHBoxLayout()
         uid = getattr(self.current_user, 'id', None) if getattr(self, 'current_user', None) else None
-        header_label = QLabel(f"Catalogue - Table {self.table_id}" + (f" — User {uid}" if uid else ""))
+        # essayer d'obtenir le numéro de la table (champ `number`) plutôt que l'id
+        table_display = str(self.table_id)
+        try:
+            db = get_database_manager()
+            session = db.get_session()
+            from ayanna_erp.modules.restaurant.models.restaurant import RestauTable
+            tbl = session.query(RestauTable).filter_by(id=self.table_id).first()
+            if tbl and getattr(tbl, 'number', None):
+                table_display = str(getattr(tbl, 'number'))
+            session.close()
+        except Exception:
+            # fallback: conserver l'id si récupération impossible
+            pass
+
+        header_label = QLabel(f"Catalogue - Table {table_display}" + (f" — User {uid}" if uid else ""))
         header_label.setFont(QFont('Segoe UI', 14, QFont.Weight.Bold))
         header_h.addWidget(header_label)
         header_h.addStretch()
@@ -376,8 +390,18 @@ class CatalogueWidget(QWidget):
             id_item = QTableWidgetItem(str(getattr(it, 'id')))
             id_item.setData(Qt.ItemDataRole.UserRole, getattr(it, 'id'))
             self.cart_table.setItem(i, 0, id_item)
-            # show product name ideally, but product_id for now
-            name_item = QTableWidgetItem(str(getattr(it, 'product_id')))
+            # show product name instead of product_id
+            try:
+                pid = getattr(it, 'product_id')
+                prod = None
+                try:
+                    prod = self.controller.get_product(pid)
+                except Exception:
+                    prod = None
+                pname = str(getattr(prod, 'name', pid)) if prod else str(pid)
+            except Exception:
+                pname = str(getattr(it, 'product_id', ''))
+            name_item = QTableWidgetItem(pname)
             self.cart_table.setItem(i, 1, name_item)
             qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
             self.cart_table.setItem(i, 2, qty_item)
@@ -411,6 +435,8 @@ class CatalogueWidget(QWidget):
         pid_item = self.cart_table.item(row, 0)
         if pid_item:
             lp_id = int(pid_item.text())
+            # remember selected line id so refresh keeps selection/focus
+            self.selected_line_id = lp_id
             qty_item = self.cart_table.item(row, 2)
             try:
                 q = int(qty_item.text())
