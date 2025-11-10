@@ -102,6 +102,24 @@ class RestaurantWindow(QMainWindow):
         """Configuration de l'onglet POS en réutilisant la vue du module (VenteView)"""
         pos_view = VenteView(entreprise_id=1, parent=self)
         self.tab_widget.addTab(pos_view, "🍽️ Point de Vente")
+        # s'assurer que la première salle est chargée par défaut
+        try:
+            pos_view.ensure_first_salle_loaded()
+        except Exception:
+            pass
+
+        # Quand l'onglet change, si on revient sur le POS, s'assurer aussi de charger la première salle
+        try:
+            def on_tab_changed(index):
+                widget = self.tab_widget.widget(index)
+                if isinstance(widget, VenteView):
+                    try:
+                        widget.ensure_first_salle_loaded()
+                    except Exception:
+                        pass
+            self.tab_widget.currentChanged.connect(on_tab_changed)
+        except Exception:
+            pass
     
     def setup_halls_tab(self):
         """Onglet Salles — utiliser la vue de gestion des salles (SalleView)"""

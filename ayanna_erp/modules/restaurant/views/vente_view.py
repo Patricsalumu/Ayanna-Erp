@@ -1,9 +1,9 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFrame, QDialog, QFormLayout, QLineEdit, QSpinBox,
-    QMessageBox, QScrollArea
+    QMessageBox, QScrollArea, QStackedWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, QPoint
 from PyQt6.QtGui import QColor
 
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
@@ -96,17 +96,37 @@ class VenteView(QWidget):
         layout.addLayout(self.tabs_layout)
 
         # ----------------------------
-        # ✅ ZONE DU PLAN DE SALLE
+        # ✅ ZONE PRINCIPALE (Stack : plan de salle <-> catalogue)
         # ----------------------------
+        self.stack = QStackedWidget()
+
+        # Page 0 : plan de salle (conserve self.plan_frame pour compatibilité)
+        self.plan_page = QWidget()
+        plan_layout = QVBoxLayout(self.plan_page)
         self.plan_frame = QFrame()
         self.plan_frame.setMinimumHeight(500)
         self.plan_frame.setStyleSheet("""
             background-color: #f7f7f7;
             border-radius: 8px;
         """)
-        layout.addWidget(self.plan_frame)
+        plan_layout.addWidget(self.plan_frame)
+        self.stack.addWidget(self.plan_page)
+
+        # Page 1 : catalogue (rempli dynamiquement)
+        self.catalogue_page = QWidget()
+        cat_layout = QVBoxLayout(self.catalogue_page)
+        self.catalogue_container = QWidget()
+        cat_layout.addWidget(self.catalogue_container)
+        self.stack.addWidget(self.catalogue_page)
+
+        layout.addWidget(self.stack)
 
         self.load_salles()
+        # Charger automatiquement la première salle si disponible
+        try:
+            self.ensure_first_salle_loaded()
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------
     def load_salles(self):
@@ -177,6 +197,20 @@ class VenteView(QWidget):
             btn.show()
             self.table_buttons[t.id] = btn
 
+    def ensure_first_salle_loaded(self):
+        """Sélectionne la première salle disponible si aucune salle n'est active."""
+        try:
+            if not getattr(self, 'current_salle_id', None):
+                # sélectionner le premier bouton de salle créé
+                if hasattr(self, 'salle_buttons') and self.salle_buttons:
+                    # prendre le premier id dans l'ordre d'insertion
+                    first_id = next(iter(self.salle_buttons.keys()))
+                    first_btn = self.salle_buttons.get(first_id)
+                    if first_btn:
+                        self.select_salle(first_id, first_btn)
+        except Exception:
+            pass
+
     # ------------------------------------------------------------------
     def select_table_button(self, table_button):
         if hasattr(self, "active_table_btn") and self.active_table_btn:
@@ -202,28 +236,115 @@ class VenteView(QWidget):
         self.active_table_btn = table_button
 
     def open_table_panel(self, table_id):
-        """Ouvre le catalogue complet (produits + panier) pour la table dans un dialogue.
+        """Afficher le catalogue EMBARQUÉ dans l'onglet vente (page du QStackedWidget).
 
-        Le widget embarque un catalogue inspiré de `modern_supermarket_widget.py` mais
-        adapté au restaurant (pavé numérique pour modifier quantités, suppression de lignes,
-        sélection client/serveuse est possible depuis le widget).
+        On remplace l'ancien comportement modal par l'affichage dans la page catalogue
+        avec une transition animée.
         """
         try:
-            dlg = QDialog(self)
-            dlg.setWindowTitle(f"Catalogue - Table {table_id}")
-            layout = QVBoxLayout(dlg)
-            # passer current_user si disponible
+            # Construire une NOUVELLE page catalogue (on ne réutilise pas l'ancien layout)
+            new_cat_page = QWidget()
+            new_cat_layout = QVBoxLayout(new_cat_page)
+
+            # bouton retour
+            back_btn = QPushButton("⬅ Retour au plan")
+            back_btn.setFixedHeight(36)
+            back_btn.clicked.connect(self.show_plan_view)
+            new_cat_layout.addWidget(back_btn)
+
+            # ajouter le widget catalogue
             current_user = getattr(self, 'current_user', None)
-            catalog = CatalogueWidget(table_id=table_id, entreprise_id=self.entreprise_id, pos_id=1, current_user=current_user, parent=dlg)
-            layout.addWidget(catalog)
-            dlg.setLayout(layout)
-            dlg.resize(1000, 700)
-            dlg.exec()
-            # après fermeture, rafraîchir plan si nécessaire
-            if self.current_salle_id:
-                self.load_tables_for_salle(self.current_salle_id)
+            catalog = CatalogueWidget(table_id=table_id, entreprise_id=self.entreprise_id, pos_id=1, current_user=current_user, parent=new_cat_page)
+            new_cat_layout.addWidget(catalog)
+
+            # Remplacer proprement la page catalogue (index 1) du stack
+            try:
+                old_widget = self.stack.widget(1)
+                # retirer et supprimer l'ancien
+                self.stack.removeWidget(old_widget)
+                try:
+                    old_widget.deleteLater()
+                except Exception:
+                    pass
+            except Exception:
+                # pas d'ancien widget, on ignore
+                pass
+
+            # insérer la nouvelle page en position 1
+            self.stack.insertWidget(1, new_cat_page)
+            # garder des références
+            self.catalogue_page = new_cat_page
+            self.catalogue_container = new_cat_page
+
+            # animer la transition vers la page catalogue
+            self._animate_transition(to_index=1, direction='left')
+
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
+
+    def show_plan_view(self):
+        # Retourner à la page du plan
+        self._animate_transition(to_index=0, direction='right')
+
+    def _animate_transition(self, to_index=0, direction='left'):
+        """Animation simple de slide entre pages du QStackedWidget."""
+        try:
+            from_index = self.stack.currentIndex()
+            if from_index == to_index:
+                return
+
+            w = self.stack.width()
+            h = self.stack.height()
+
+            current_widget = self.stack.widget(from_index)
+            next_widget = self.stack.widget(to_index)
+
+            # positionner next_widget en dehors de l'écran
+            if direction == 'left':
+                next_widget.setGeometry(QRect(w, 0, w, h))
+                start_cur = QRect(0, 0, w, h)
+                end_cur = QRect(-w, 0, w, h)
+                start_next = QRect(w, 0, w, h)
+                end_next = QRect(0, 0, w, h)
+            else:
+                next_widget.setGeometry(QRect(-w, 0, w, h))
+                start_cur = QRect(0, 0, w, h)
+                end_cur = QRect(w, 0, w, h)
+                start_next = QRect(-w, 0, w, h)
+                end_next = QRect(0, 0, w, h)
+
+            # make sure next is visible and stacked
+            self.stack.setCurrentIndex(to_index)
+
+            anim_cur = QPropertyAnimation(current_widget, b"geometry")
+            anim_cur.setDuration(300)
+            anim_cur.setStartValue(start_cur)
+            anim_cur.setEndValue(end_cur)
+            anim_cur.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+            anim_next = QPropertyAnimation(next_widget, b"geometry")
+            anim_next.setDuration(300)
+            anim_next.setStartValue(start_next)
+            anim_next.setEndValue(end_next)
+            anim_next.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+            # lancer les animations
+            anim_cur.start()
+            anim_next.start()
+
+            # garder une référence pour éviter GC
+            self._last_animations = (anim_cur, anim_next)
+
+            # rafraîchir plan si on revient
+            if to_index == 0 and hasattr(self, 'current_salle_id') and self.current_salle_id:
+                self.load_tables_for_salle(self.current_salle_id)
+        except Exception as e:
+            # fallback: changer d'index sans animation
+            try:
+                self.stack.setCurrentIndex(to_index)
+            except Exception:
+                pass
+            print(f"Animation erreur: {e}")
 
     def _create_panier_and_close(self, table_id, dlg):
         try:
