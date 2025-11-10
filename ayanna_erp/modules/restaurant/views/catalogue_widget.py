@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QFrame, QLabel, QPushButton, QLineEdit, QSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QComboBox, QDialog,
-    QSplitter, QTextEdit
+    QSplitter, QTextEdit, QDoubleSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -173,14 +173,67 @@ class CatalogueWidget(QWidget):
 
         # (numeric keypad removed - we keep qty_spin + +/-/Suppr controls)
 
-        # Note du panier
-        right_l.addWidget(QLabel('Note (commande)'))
+        # Note du panier (hauteur réduite) + bouton sur la même ligne
+        note_h = QHBoxLayout()
+        note_h.setSpacing(8)
+        note_h.addWidget(QLabel('Note'))
         self.note_edit = QTextEdit()
-        self.note_edit.setFixedHeight(80)
-        right_l.addWidget(self.note_edit)
-        save_note_btn = QPushButton('Enregistrer la note')
+        self.note_edit.setFixedHeight(48)
+        # make the note edit expand and occupy available horizontal space
+        self.note_edit.setSizePolicy(self.note_edit.sizePolicy().horizontalPolicy(), self.note_edit.sizePolicy().verticalPolicy())
+        note_h.addWidget(self.note_edit, stretch=1)
+        save_note_btn = QPushButton('Enregistrer')
+        save_note_btn.setFixedHeight(36)
+        save_note_btn.setFixedWidth(120)
         save_note_btn.clicked.connect(self.save_note)
-        right_l.addWidget(save_note_btn)
+        # style the button to match primary action
+        save_note_btn.setStyleSheet('background-color:#1976D2; color:white; font-weight:600;')
+        note_h.addWidget(save_note_btn)
+        right_l.addLayout(note_h)
+
+        # Remise (montant) et label Total
+        totals_h = QHBoxLayout()
+        self.remise_edit = QLineEdit()
+        self.remise_edit.setPlaceholderText('Remise (montant)')
+        self.remise_edit.setFixedWidth(120)
+        try:
+            self.remise_edit.editingFinished.connect(self._on_remise_changed)
+        except Exception:
+            pass
+        totals_h.addWidget(QLabel('Remise:'))
+        totals_h.addWidget(self.remise_edit)
+        totals_h.addStretch()
+        self.total_label = QLabel('Total: 0 F')
+        totals_h.addWidget(self.total_label)
+        right_l.addLayout(totals_h)
+
+        # Action buttons: Annuler, Payer, Addition
+        actions_h = QHBoxLayout()
+        self.annuler_btn = QPushButton('Annuler')
+        self.payer_btn = QPushButton('Payer')
+        self.addition_btn = QPushButton('Addition')
+        self.annuler_btn.setStyleSheet('background-color:#e53935; color:white;')
+        self.payer_btn.setStyleSheet('background-color:#28a745; color:white;')
+        self.addition_btn.setStyleSheet('background-color:#1976D2; color:white;')
+        actions_h.addWidget(self.annuler_btn)
+        actions_h.addWidget(self.payer_btn)
+        actions_h.addWidget(self.addition_btn)
+        right_l.addLayout(actions_h)
+
+        # Connect actions
+        try:
+            self.annuler_btn.clicked.connect(self._on_annuler_clicked)
+        except Exception:
+            pass
+        try:
+            # open payment dialog
+            self.payer_btn.clicked.connect(self._on_payer_dialog)
+        except Exception:
+            pass
+        try:
+            self.addition_btn.clicked.connect(self._on_addition_clicked)
+        except Exception:
+            pass
 
         # Finalize
         splitter.addWidget(right)
@@ -266,6 +319,15 @@ class CatalogueWidget(QWidget):
                         self.note_edit.setPlainText(str(obj.note))
                     except Exception:
                         pass
+                # populate remise field and update total label
+                try:
+                    r = getattr(obj, 'remise_amount', 0.0) or 0.0
+                    try:
+                        self.remise_edit.setText(str(int(r)) if r else '')
+                    except Exception:
+                        self.remise_edit.setText(str(r))
+                except Exception:
+                    pass
                 session.close()
         except Exception:
             pass
@@ -514,6 +576,12 @@ class CatalogueWidget(QWidget):
                 self.selected_cart_row = None
                 self.selected_line_id = None
 
+        # update total label after refreshing rows
+        try:
+            self._update_total_label()
+        except Exception:
+            pass
+
     def on_cart_row_clicked(self, row, col):
         self.selected_cart_row = row
         pid_item = self.cart_table.item(row, 0)
@@ -677,6 +745,296 @@ class CatalogueWidget(QWidget):
             QMessageBox.information(self, 'Succès', 'Note enregistrée')
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer la note: {e}")
+
+    # -----------------------
+    # Action button handlers
+    # -----------------------
+    def _on_annuler_clicked(self):
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        ok = QMessageBox.question(self, 'Annuler la commande', 'Confirmez-vous l\'annulation de cette commande ?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            # mark panier as cancelled
+            session = self.vente_ctrl.db.get_session()
+            from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+            p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+            if p:
+                p.status = 'annule'
+                session.commit()
+            session.close()
+            QMessageBox.information(self, 'Succès', 'Commande annulée')
+            # reset local panier and refresh (ensure a new panier is created)
+            self.panier = None
+            self.ensure_panier()
+            self.refresh_cart()
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la commande: {e}")
+
+    def _on_payer_clicked(self):
+        # kept for backward compatibility but payment now handled in dialog
+        return self._on_payer_dialog()
+
+    def _on_payer_dialog(self):
+        """Open a payment dialog where user saisit le montant reçu.
+        - default montant = total du panier
+        - if montant < total => enregistrer paiement avec méthode 'Crédit'
+        - n'accepte pas montant > total
+        """
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        try:
+            # refresh panier from DB to get latest subtotal/remise/total_final
+            p = self.vente_ctrl.get_panier(self.panier.id)
+            subtotal = float(getattr(p, 'subtotal', 0.0) or 0.0)
+            remise = float(getattr(p, 'remise_amount', 0.0) or 0.0)
+            total_final = float(getattr(p, 'total_final', subtotal - remise))
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle('Paiement')
+            dlg.setMinimumWidth(380)
+            dlg_l = QVBoxLayout(dlg)
+            # dialog styling
+            dlg.setStyleSheet('''
+                QLabel { font-size:13px; }
+                QPushButton { padding:6px 10px; border-radius:6px; }
+                QPushButton#confirm_btn { background-color: #28a745; color: white; font-weight:600; }
+                QPushButton#cancel_btn { background-color: #9e9e9e; color: white; }
+            ''')
+
+            # Summary
+            try:
+                tbl_display = str(getattr(self.table_id, 'number', self.table_id))
+            except Exception:
+                tbl_display = str(self.table_id)
+            client_name = '---'
+            try:
+                if getattr(p, 'client_id', None):
+                    # try to lookup client name
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    c = session.query(ShopClient).filter_by(id=p.client_id).first()
+                    if c:
+                        client_name = (getattr(c, 'nom', '') or '') + ' ' + (getattr(c, 'prenom', '') or '')
+                    session.close()
+            except Exception:
+                pass
+            serveuse_name = '---'
+            try:
+                if getattr(p, 'serveuse_id', None):
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.database.database_manager import User as DBUser
+                    u = session.query(DBUser).filter_by(id=p.serveuse_id).first()
+                    if u:
+                        serveuse_name = getattr(u, 'name', str(getattr(u, 'email', '')))
+                    session.close()
+            except Exception:
+                pass
+
+            # Nicely formatted summary using a frame and form layout
+            summary_frame = QFrame()
+            summary_frame.setStyleSheet('QFrame { border: 1px solid #e0e0e0; border-radius:6px; padding:8px; background:#fafafa }')
+            from PyQt6.QtWidgets import QFormLayout
+            form = QFormLayout(summary_frame)
+            form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
+            form.addRow(QLabel('Table:'), QLabel(str(tbl_display)))
+            form.addRow(QLabel('Client:'), QLabel(client_name))
+            form.addRow(QLabel('Serveuse:'), QLabel(serveuse_name))
+            form.addRow(QLabel('Sous-total:'), QLabel(f"{int(subtotal)} {self._get_currency()}"))
+            form.addRow(QLabel('Remise:'), QLabel(f"{int(remise)} {self._get_currency()}"))
+            form.addRow(QLabel('<b>Total à payer:</b>'), QLabel(f"<b>{int(total_final)} {self._get_currency()}</b>"))
+            dlg_l.addWidget(summary_frame)
+
+            # Amount received input (with change/remainder label)
+            amt_h = QHBoxLayout()
+            amt_h.setSpacing(8)
+            amt_h.addWidget(QLabel('Montant reçu:'))
+            amt_input = QDoubleSpinBox()
+            amt_input.setPrefix('')
+            amt_input.setSuffix(f' {self._get_currency()}')
+            amt_input.setDecimals(2)
+            amt_input.setMinimum(0.0)
+            # allow entering an amount greater than total so we can compute monnaie
+            try:
+                amt_input.setMaximum(max(total_final * 10, total_final + 10000))
+            except Exception:
+                amt_input.setMaximum(1e9)
+            amt_input.setValue(total_final)
+            amt_input.setFixedWidth(160)
+            amt_h.addWidget(amt_input)
+            change_lbl = QLabel('')
+            change_lbl.setStyleSheet('font-weight:600; color:#333;')
+            amt_h.addWidget(change_lbl)
+            amt_h.addStretch()
+            dlg_l.addLayout(amt_h)
+
+            # Buttons
+            btns_h = QHBoxLayout()
+            confirm_btn = QPushButton('Enregistrer le paiement')
+            confirm_btn.setObjectName('confirm_btn')
+            cancel_btn = QPushButton('Annuler')
+            cancel_btn.setObjectName('cancel_btn')
+            btns_h.addStretch()
+            btns_h.addWidget(cancel_btn)
+            btns_h.addWidget(confirm_btn)
+            dlg_l.addLayout(btns_h)
+
+            def do_cancel():
+                dlg.reject()
+
+            def update_change_label(val=None):
+                try:
+                    v = float(amt_input.value()) if val is None else float(val)
+                    if v >= total_final:
+                        monnaie = v - total_final
+                        change_lbl.setText(f"Monnaie: {int(monnaie)} {self._get_currency()}")
+                    else:
+                        reste = total_final - v
+                        change_lbl.setText(f"Reste: {int(reste)} {self._get_currency()}")
+                except Exception:
+                    change_lbl.setText('')
+
+            # update label initially
+            try:
+                update_change_label()
+            except Exception:
+                pass
+
+            amt_input.valueChanged.connect(update_change_label)
+
+            def do_confirm():
+                amt = float(amt_input.value())
+                try:
+                    if amt >= total_final:
+                        # record payment for the total due and compute monnaie to give back
+                        pay_amount = float(total_final)
+                        method = 'Espèces'
+                        self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
+                        monnaie = amt - total_final
+                        QMessageBox.information(dlg, 'Succès', f'Paiement de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Monnaie: {int(monnaie)} {self._get_currency()}')
+                    else:
+                        # partial payment -> credit
+                        pay_amount = float(amt)
+                        method = 'Crédit'
+                        self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
+                        reste = total_final - pay_amount
+                        QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Reste: {int(reste)} {self._get_currency()}')
+                    dlg.accept()
+                except Exception as e:
+                    QMessageBox.critical(dlg, 'Erreur', f"Impossible d'enregistrer le paiement: {e}")
+
+            cancel_btn.clicked.connect(do_cancel)
+            confirm_btn.clicked.connect(do_confirm)
+
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                # refresh local panier and cart
+                try:
+                    self.panier = self.vente_ctrl.get_panier(self.panier.id)
+                except Exception:
+                    pass
+                self.refresh_cart()
+
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Erreur paiement: {e}")
+
+    def _on_addition_clicked(self):
+        # show a simple bill dialog with items and totals
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        try:
+            items = self.controller.list_cart_items(self.panier.id)
+            lines = []
+            total = 0.0
+            for it in items:
+                try:
+                    prod = self.controller.get_product(getattr(it, 'product_id', None))
+                    name = getattr(prod, 'name', str(getattr(it, 'product_id', '')))
+                except Exception:
+                    name = str(getattr(it, 'product_id', ''))
+                qty = getattr(it, 'quantity', 0)
+                price = getattr(it, 'price', 0.0)
+                line_total = getattr(it, 'total', float(qty) * float(price))
+                total += float(line_total)
+                lines.append(f"{name}  x{int(qty)}  {int(price)} {self._get_currency()}  = {int(line_total)} {self._get_currency()}")
+
+            txt = "\n".join(lines)
+            txt += f"\n\nTotal: {int(total)} {self._get_currency()}"
+
+            # show in a dialog
+            dlg = QDialog(self)
+            dlg.setWindowTitle('Addition')
+            dlg_l = QVBoxLayout(dlg)
+            te = QTextEdit()
+            te.setReadOnly(True)
+            te.setPlainText(txt)
+            dlg_l.addWidget(te)
+            btn = QPushButton('Fermer')
+            btn.clicked.connect(dlg.accept)
+            dlg_l.addWidget(btn)
+            dlg.exec()
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'afficher l'addition: {e}")
+
+    def _on_remise_changed(self):
+        """Apply remise amount entered by user to the panier (montant)."""
+        if not self.panier:
+            return
+        try:
+            txt = self.remise_edit.text().strip()
+            if not txt:
+                val = 0.0
+            else:
+                try:
+                    val = float(txt)
+                except Exception:
+                    QMessageBox.warning(self, 'Erreur', 'Remise invalide')
+                    return
+            # persist remise on panier
+            session = self.vente_ctrl.db.get_session()
+            from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+            p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+            if not p:
+                session.close()
+                return
+            p.remise_amount = float(val)
+            # recompute total_final
+            subtotal = sum([pr.total for pr in p.produits]) if p.produits else 0.0
+            p.subtotal = subtotal
+            p.total_final = subtotal - (p.remise_amount or 0.0)
+            p.updated_at = p.updated_at
+            session.commit()
+            session.close()
+            # refresh local panier and UI
+            try:
+                self.panier = self.vente_ctrl.get_panier(self.panier.id)
+            except Exception:
+                pass
+            self._update_total_label()
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'appliquer la remise: {e}")
+
+    def _update_total_label(self):
+        try:
+            if not self.panier:
+                self.total_label.setText(f"Total: 0 {self._get_currency()}")
+                return
+            p = None
+            try:
+                p = self.vente_ctrl.get_panier(self.panier.id)
+            except Exception:
+                p = self.panier
+            subtotal = float(getattr(p, 'subtotal', 0.0) or 0.0)
+            remise = float(getattr(p, 'remise_amount', 0.0) or 0.0)
+            total_final = float(getattr(p, 'total_final', subtotal - remise))
+            self.total_label.setText(f"Total: {int(total_final)} {self._get_currency()}")
+        except Exception:
+            pass
 
     def _populate_serveuse_combo(self):
         try:
