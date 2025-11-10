@@ -958,6 +958,61 @@ class CatalogueWidget(QWidget):
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
                         reste = total_final - pay_amount
                         QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Reste: {int(reste)} {self._get_currency()}')
+                    # --- Nouvel ajout: fermer le panier même en cas de paiement partiel ---
+                    try:
+                        session = self.vente_ctrl.db.get_session()
+                        from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+                        p_upd = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+                        if p_upd:
+                            p_upd.status = 'valide'
+                            # mettez à jour la date si nécessaire
+                            try:
+                                p_upd.updated_at = p_upd.updated_at
+                            except Exception:
+                                pass
+                            session.commit()
+                        session.close()
+                    except Exception:
+                        try:
+                            session.rollback()
+                        except Exception:
+                            pass
+                        try:
+                            session.close()
+                        except Exception:
+                            pass
+                    # after payment, if panier has no products -> delete it and return to plan view
+                    try:
+                        items_after = self.controller.list_cart_items(self.panier.id) or []
+                        if not items_after:
+                            # delete empty panier -> free table
+                            session = self.vente_ctrl.db.get_session()
+                            from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
+                            pdel = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+                            if pdel:
+                                try:
+                                    session.delete(pdel)
+                                    session.commit()
+                                except Exception:
+                                    session.rollback()
+                                finally:
+                                    session.close()
+                            else:
+                                session.close()
+                            QMessageBox.information(dlg, 'Info', 'Panier vidé après paiement, table libérée')
+                            # navigate back to plan view
+                            parent = self.parent()
+                            while parent is not None and not hasattr(parent, 'show_plan_view'):
+                                parent = parent.parent()
+                            try:
+                                if parent and hasattr(parent, 'show_plan_view'):
+                                    parent.show_plan_view()
+                            except Exception:
+                                pass
+                            return
+                    except Exception:
+                        pass
+
                     dlg.accept()
                 except Exception as e:
                     QMessageBox.critical(dlg, 'Erreur', f"Impossible d'enregistrer le paiement: {e}")
