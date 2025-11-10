@@ -87,13 +87,13 @@ class VenteView(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
-
         # ----------------------------
-        # ✅ BARRE D’ONGLETS DES SALLES
+        # ✅ BARRE D’ONGLETS DES SALLES (wrap in a widget so we can hide it)
         # ----------------------------
-        self.tabs_layout = QHBoxLayout()
+        self.tabs_widget = QWidget()
+        self.tabs_layout = QHBoxLayout(self.tabs_widget)
         self.tabs_layout.setSpacing(10)
-        layout.addLayout(self.tabs_layout)
+        layout.addWidget(self.tabs_widget)
 
         # ----------------------------
         # ✅ ZONE PRINCIPALE (Stack : plan de salle <-> catalogue)
@@ -276,6 +276,14 @@ class VenteView(QWidget):
             self.catalogue_page = new_cat_page
             self.catalogue_container = new_cat_page
 
+            # masquer la barre des salles pour que le header du catalogue
+            # et le bouton retour puissent occuper cet espace vertical
+            try:
+                if hasattr(self, 'tabs_widget') and self.tabs_widget:
+                    self.tabs_widget.hide()
+            except Exception:
+                pass
+
             # animer la transition vers la page catalogue
             self._animate_transition(to_index=1, direction='left')
 
@@ -283,7 +291,13 @@ class VenteView(QWidget):
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 
     def show_plan_view(self):
-        # Retourner à la page du plan
+        # Réafficher la barre des salles puis retourner à la page du plan
+        try:
+            if hasattr(self, 'tabs_widget') and self.tabs_widget:
+                self.tabs_widget.show()
+        except Exception:
+            pass
+
         self._animate_transition(to_index=0, direction='right')
 
     def _animate_transition(self, to_index=0, direction='left'):

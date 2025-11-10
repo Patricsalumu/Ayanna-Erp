@@ -144,6 +144,17 @@ class CatalogueWidget(QWidget):
         self.cart_table.cellClicked.connect(self.on_cart_row_clicked)
         right_l.addWidget(self.cart_table)
 
+        # Configure header resize modes so we can drive widths proportionally
+        try:
+            header = self.cart_table.horizontalHeader()
+            # set fixed resize mode; we'll set widths based on proportions in resizeEvent
+            header.setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+            header.setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        except Exception:
+            pass
+
         # Numeric pad and actions
         pad = QHBoxLayout()
         self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999)
@@ -175,6 +186,11 @@ class CatalogueWidget(QWidget):
         splitter.addWidget(right)
         # enlarge product area and reduce cart area
         splitter.setSizes([1000, 200])
+        # apply initial proportional widths for cart columns
+        try:
+            self._apply_cart_column_proportions()
+        except Exception:
+            pass
 
     def ensure_panier(self):
         p = self.vente_ctrl.get_open_panier_for_table(self.table_id)
@@ -724,3 +740,31 @@ class CatalogueWidget(QWidget):
         except Exception:
             pass
         return 'F'
+
+    def _apply_cart_column_proportions(self):
+        """Apply proportional widths to cart columns: Produit 45%, Qté 10%, Prix 15%, Total 30%."""
+        try:
+            # viewport width is the available width for columns
+            total_w = self.cart_table.viewport().width()
+            if total_w <= 0:
+                return
+            # compute pixel widths
+            w_prod = int(total_w * 0.45)
+            w_qte = int(total_w * 0.10)
+            w_prix = int(total_w * 0.20)
+            w_total = max(0, total_w - (w_prod + w_qte + w_prix))
+            # set widths (column 0 is hidden)
+            self.cart_table.setColumnWidth(1, w_prod)
+            self.cart_table.setColumnWidth(2, w_qte)
+            self.cart_table.setColumnWidth(3, w_prix)
+            self.cart_table.setColumnWidth(4, w_total)
+        except Exception:
+            pass
+
+    def resizeEvent(self, event):
+        # update column proportions when widget is resized
+        try:
+            self._apply_cart_column_proportions()
+        except Exception:
+            pass
+        return super().resizeEvent(event)
