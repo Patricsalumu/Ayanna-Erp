@@ -5,12 +5,14 @@ from PyQt6.QtWidgets import (
     QSplitter, QTextEdit, QDoubleSpinBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QPixmap
+
 
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.database.database_manager import get_database_manager, User
 from ayanna_erp.database.database_manager import Entreprise
+import os
 
 
 class CatalogueWidget(QWidget):
@@ -344,7 +346,7 @@ class CatalogueWidget(QWidget):
                 if w:
                     w.setParent(None)
 
-        cols = 5
+        cols = 6
         for idx, prod in enumerate(products):
             card = self.create_product_card(prod)
             r = idx // cols; c = idx % cols
@@ -364,14 +366,14 @@ class CatalogueWidget(QWidget):
                 background-color: white;
                 border: 1px solid #E0E0E0;
                 border-radius: 8px;
-                padding: 8px;
+                padding: 2px;
             }
             QFrame:hover {
                 border-color: #1976D2;
                 background-color: #F3F9FF;
             }
         """)
-        card.setFixedSize(160, 120)
+        card.setFixedSize(120, 140)
 
         layout = QVBoxLayout(card)
         layout.setSpacing(6)
@@ -386,12 +388,77 @@ class CatalogueWidget(QWidget):
         top_row.addWidget(badge)
         layout.addLayout(top_row)
 
-        # Image placeholder
-        img = QLabel()
-        img.setFixedSize(120, 54)
-        img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img.setText("🧾")
-        layout.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
+        # # Image placeholder
+        # img = QLabel()
+        # img.setFixedSize(120, 54)
+        # img.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # img.setText("🧾")
+        # layout.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
+        
+        # Image produit avec haute résolution
+        image_label = QLabel()
+        image_label.setFixedSize(100, 120)  # Résolution améliorée
+        image_label.setStyleSheet("""
+            QLabel {
+                background-color: #F8F9FA;
+                border: 1px solid #E0E0E0;
+                border-radius: 6px;
+            }
+        """)
+        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        # Charger l'image du produit selon la logique spécifiée
+        image_loaded = False
+        if hasattr(product, 'image') and product.image and product.image.strip():
+            try:
+                # Le champ image contient le chemin relatif ou nom du fichier
+                image_filename = product.image.strip()
+                
+                # Construire le chemin complet de l'image (même logique que produit_index.py)
+                if os.path.isabs(image_filename):
+                    # Chemin absolu
+                    full_path = image_filename
+                else:
+                    # Chemin relatif depuis la racine du projet
+                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                    full_path = os.path.join(project_root, image_filename.replace("/", os.sep))
+                
+                if os.path.exists(full_path):
+                    # Charger l'image avec PyQt6
+                    pixmap = QPixmap(full_path)
+                    if not pixmap.isNull():
+                        # Redimensionner l'image pour s'adapter au label tout en gardant les proportions
+                        scaled_pixmap = pixmap.scaled(
+                            image_label.size(),  # Utiliser la taille du label comme dans produit_index.py
+                            Qt.AspectRatioMode.KeepAspectRatio,
+                            Qt.TransformationMode.SmoothTransformation  # Haute qualité
+                        )
+                        image_label.setPixmap(scaled_pixmap)
+                        image_loaded = True
+                        print(f"✅ Image chargée avec succès pour {product.name}: {full_path}")
+                    else:
+                        print(f"❌ Image corrompue: {full_path}")
+                else:
+                    print(f"❌ Image introuvable: {full_path}")
+                        
+            except Exception as e:
+                print(f"❌ Erreur chargement image '{product.image}': {e}")
+        
+        # Si pas d'image chargée, afficher une image par défaut moderne
+        if not image_loaded:
+            image_label.setText("📦\nProduit")
+            image_label.setStyleSheet("""
+                QLabel {
+                    background-color: #F8F9FA;
+                    border: 2px dashed #DEE2E6;
+                    border-radius: 6px;
+                    color: #6C757D;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+            """)
+        
+        layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignCenter)
 
         # Name
         name = getattr(product, 'name', 'Produit')
