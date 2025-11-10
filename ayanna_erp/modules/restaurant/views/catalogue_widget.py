@@ -314,9 +314,9 @@ class CatalogueWidget(QWidget):
                 session = self.controller.db.get_session()
                 from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
                 obj = session.query(RestauPanier).filter_by(id=self.panier.id).first()
-                if obj and getattr(obj, 'note', None):
+                if obj and getattr(obj, 'notes', None):
                     try:
-                        self.note_edit.setPlainText(str(obj.note))
+                        self.note_edit.setPlainText(str(obj.notes))
                     except Exception:
                         pass
                 # populate remise field and update total label
@@ -741,7 +741,8 @@ class CatalogueWidget(QWidget):
             return
         note = self.note_edit.toPlainText()
         try:
-            self.controller.set_panier_note(self.panier.id, note)
+            # use new API name set_panier_notes
+            self.controller.set_panier_notes(self.panier.id, note)
             QMessageBox.information(self, 'Succès', 'Note enregistrée')
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer la note: {e}")
@@ -959,28 +960,7 @@ class CatalogueWidget(QWidget):
                         reste = total_final - pay_amount
                         QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Reste: {int(reste)} {self._get_currency()}')
                     # --- Nouvel ajout: fermer le panier même en cas de paiement partiel ---
-                    try:
-                        session = self.vente_ctrl.db.get_session()
-                        from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier
-                        p_upd = session.query(RestauPanier).filter_by(id=self.panier.id).first()
-                        if p_upd:
-                            p_upd.status = 'valide'
-                            # mettez à jour la date si nécessaire
-                            try:
-                                p_upd.updated_at = p_upd.updated_at
-                            except Exception:
-                                pass
-                            session.commit()
-                        session.close()
-                    except Exception:
-                        try:
-                            session.rollback()
-                        except Exception:
-                            pass
-                        try:
-                            session.close()
-                        except Exception:
-                            pass
+                    # payment status is handled by VenteController.add_payment (payment_method)
                     # after payment, if panier has no products -> delete it and return to plan view
                     try:
                         items_after = self.controller.list_cart_items(self.panier.id) or []

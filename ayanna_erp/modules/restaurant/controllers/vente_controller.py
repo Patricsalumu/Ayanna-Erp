@@ -24,6 +24,7 @@ class VenteController:
                 client_id=client_id,
                 serveuse_id=serveuse_id,
                 user_id=user_id,
+                payment_method='non_paye',
                 status='en_cours',
                 subtotal=0.0,
                 remise_amount=0.0,
@@ -104,9 +105,20 @@ class VenteController:
             )
             session.add(pay)
             session.flush()
-            # Optionnel: si total payé >= total_final => status valide
+            # recalculer total payé et mettre à jour le statut de paiement dans payment_method
             total_paid = sum([p.amount for p in panier.payments])
-            if total_paid >= (panier.total_final or 0):
+            try:
+                total_final = float(panier.total_final or 0.0)
+            except Exception:
+                total_final = 0.0
+            if total_paid <= 0:
+                panier.payment_method = 'non_paye'
+            elif total_paid < total_final:
+                panier.payment_method = 'partiel'
+                panier.status = 'valide'
+            else:
+                panier.payment_method = 'paye'
+                # si réglé complètement, marquer la commande comme validée
                 panier.status = 'valide'
             panier.updated_at = datetime.utcnow()
             session.commit()

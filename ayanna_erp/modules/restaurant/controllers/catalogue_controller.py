@@ -127,13 +127,13 @@ class CatalogueController:
     def get_panier_totals(self, panier_id: int):
         return self.vente_ctrl.get_panier_total(panier_id)
 
-    def set_panier_note(self, panier_id: int, note: str):
+    def set_panier_notes(self, panier_id: int, notes: str):
         session = self.db.get_session()
         try:
             panier = session.query(RestauPanier).filter_by(id=panier_id).first()
             if not panier:
                 raise ValueError('Panier introuvable')
-            panier.note = note
+            panier.notes = notes
             panier.updated_at = datetime.utcnow()
             session.commit()
             return True
