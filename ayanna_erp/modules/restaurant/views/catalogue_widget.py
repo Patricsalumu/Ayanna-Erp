@@ -11,6 +11,7 @@ from PyQt6.QtGui import QFont, QPixmap
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.database.database_manager import get_database_manager, User
+from sqlalchemy import text
 from ayanna_erp.utils.formatting import format_amount, get_currency
 import os
 
@@ -510,7 +511,33 @@ class CatalogueWidget(QWidget):
 
         # ---- Info bulle ----
         price = float(getattr(product, 'price_unit', getattr(product, 'price', 0)))
-        card.setToolTip(f"{name}\nPrix: {format_amount(price)} {get_currency(self.entreprise_id)}")
+        # Attempt to resolve available stock in POS_4 for restaurant (best-effort)
+        avail_text = ''
+        try:
+            pid = getattr(product, 'id', None)
+            if pid is not None:
+                db = get_database_manager()
+                session = db.get_session()
+                try:
+                    row = session.execute(text("""
+                        SELECT spe.quantity FROM stock_produits_entrepot spe
+                        JOIN stock_warehouses w ON w.id = spe.warehouse_id
+                        WHERE spe.product_id = :pid AND w.code = 'POS_4' AND w.is_active = 1
+                        LIMIT 1
+                    """), {'pid': pid}).fetchone()
+                    available = int(row[0]) if row and row[0] is not None else 0
+                    avail_text = f"\nDisponible (POS): {available}"
+                except Exception:
+                    avail_text = ''
+                finally:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+        except Exception:
+            avail_text = ''
+
+        card.setToolTip(f"{name}\nPrix: {format_amount(price)} {get_currency(self.entreprise_id)}{avail_text}")
 
         # ---- bande de couleur de la catégorie (en bas de la carte) ----
         try:

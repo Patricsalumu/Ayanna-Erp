@@ -12,6 +12,7 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
 import bcrypt
+from contextlib import contextmanager
 
 
 
@@ -109,6 +110,28 @@ class DatabaseManager:
         if self.session:
             self.session.close()
             self.session = None
+
+    @contextmanager
+    def session_scope(self):
+        """Context manager that yields a new SessionLocal() and handles commit/rollback/close.
+
+        Use this for atomic operations that should not interfere with the shared session.
+        """
+        session = self.SessionLocal()
+        try:
+            yield session
+            session.commit()
+        except Exception:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
     
     def initialize_database(self):
         """Initialiser la base de données avec les tables et données par défaut"""
