@@ -1373,9 +1373,30 @@ class CatalogueWidget(QWidget):
                 tmpf = tempfile.NamedTemporaryFile(prefix='addition_', suffix='.pdf', delete=False)
                 tmpf.close()
                 filename = mgr.print_receipt_53mm(invoice_data, payments_list, getattr(self.current_user, 'name', ''), tmpf.name)
-                # try to open the PDF for the user (Windows)
+                # ask user if they want to open or print the PDF
                 try:
-                    os.startfile(filename)
+                    dlg = QMessageBox(self)
+                    dlg.setWindowTitle('Addition générée')
+                    dlg.setText('Addition générée. Que voulez-vous faire ?')
+                    open_btn = dlg.addButton('Ouvrir', QMessageBox.ButtonRole.AcceptRole)
+                    print_btn = dlg.addButton('Imprimer', QMessageBox.ButtonRole.ActionRole)
+                    cancel_btn = dlg.addButton('Annuler', QMessageBox.ButtonRole.RejectRole)
+                    dlg.exec()
+                    clicked = dlg.clickedButton()
+                    if clicked is open_btn:
+                        try:
+                            os.startfile(filename)
+                        except Exception:
+                            QMessageBox.information(self, 'Addition générée', f'Addition enregistrée: {filename}')
+                    elif clicked is print_btn:
+                        # attempt to print using the OS verb 'print' (Windows). Note: may send to default printer
+                        try:
+                            os.startfile(filename, 'print')
+                        except Exception:
+                            QMessageBox.information(self, 'Impression', 'Impossible de lancer l\'impression automatique. Le fichier est enregistré: ' + filename)
+                    else:
+                        # cancelled
+                        pass
                 except Exception:
                     QMessageBox.information(self, 'Addition générée', f'Addition enregistrée: {filename}')
             except Exception as e:
