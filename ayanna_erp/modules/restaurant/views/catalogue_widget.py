@@ -1029,9 +1029,28 @@ class CatalogueWidget(QWidget):
 
             # Summary
             try:
-                tbl_display = str(getattr(self.table_id, 'number', self.table_id))
+                # resolve table number and salle name from DB
+                db = get_database_manager()
+                session = db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauTable
+                tbl_obj = session.query(RestauTable).filter_by(id=self.table_id).first()
+                if tbl_obj:
+                    tbl_display = str(getattr(tbl_obj, 'number', self.table_id))
+                    try:
+                        salle_obj = getattr(tbl_obj, 'salle', None)
+                        salle_name = getattr(salle_obj, 'name', None) if salle_obj is not None else None
+                    except Exception:
+                        salle_name = None
+                else:
+                    tbl_display = str(self.table_id)
+                    salle_name = None
+                try:
+                    session.close()
+                except Exception:
+                    pass
             except Exception:
                 tbl_display = str(self.table_id)
+                salle_name = None
             client_name = '---'
             try:
                 if getattr(p, 'client_id', None):
@@ -1065,6 +1084,7 @@ class CatalogueWidget(QWidget):
             form = QFormLayout(summary_frame)
             form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
             form.addRow(QLabel('Table:'), QLabel(str(tbl_display)))
+            form.addRow(QLabel('Salle:'), QLabel(salle_name or '---'))
             form.addRow(QLabel('Client:'), QLabel(client_name))
             form.addRow(QLabel('Serveuse:'), QLabel(serveuse_name))
             form.addRow(QLabel('Sous-total:'), QLabel(f"{format_amount(subtotal)} {get_currency(self.entreprise_id)}"))
@@ -1078,7 +1098,7 @@ class CatalogueWidget(QWidget):
             amt_h.addWidget(QLabel('Montant reçu:'))
             amt_input = QDoubleSpinBox()
             amt_input.setPrefix('')
-            amt_input.setSuffix(f' {self._get_currency()}')
+            amt_input.setSuffix(f' {get_currency(self.entreprise_id)}')
             amt_input.setDecimals(2)
             amt_input.setMinimum(0.0)
             # allow entering an amount greater than total so we can compute monnaie
@@ -1293,7 +1313,7 @@ class CatalogueWidget(QWidget):
     def _update_total_label(self):
         try:
             if not self.panier:
-                self.total_label.setText(f"Total: 0 {self._get_currency()}")
+                self.total_label.setText(f"Total: 0 {get_currency(self.entreprise_id)}")
                 return
             p = None
             try:
