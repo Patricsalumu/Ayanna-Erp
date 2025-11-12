@@ -37,6 +37,9 @@ class CatalogueWidget(QWidget):
         self.controller = CatalogueController(entreprise_id=entreprise_id, pos_id=pos_id)
         self.vente_ctrl = VenteController(entreprise_id=entreprise_id)
 
+        # mapping category_id -> assigned color for visible categories (ensures consistency with filter buttons)
+        self._category_color_map = {}
+
         # state
         self.panier = None
         self.selected_line_id = None
@@ -369,17 +372,35 @@ class CatalogueWidget(QWidget):
         import os
 
         # ---- Déterminer la couleur de bordure selon la catégorie ----
-        cat_color_map = {
-            'Bière': '#F44336',
-            'Vin': '#9C27B0',
-            'Sucré': '#4CAF50',
-            'Whisky': '#3F51B5',
-            'Autres': '#FFEB3B',
-            'Champagne': '#FF4081',
-            'Cuisine': '#00BCD4'
-        }
-        category = getattr(product, 'category_name', 'Autres')
-        border_color = cat_color_map.get(category, '#E0E0E0')
+        # Use the central category color helper so buttons and cards match.
+        # If product doesn't expose category name, resolve it via category_id
+        category = None
+        cat_id = getattr(product, 'category_id', None) if hasattr(product, 'category_id') else None
+        try:
+            if getattr(product, 'category_name', None):
+                category = getattr(product, 'category_name')
+            elif cat_id:
+                # lookup in core_product_categories using the core model
+                db = get_database_manager()
+                session = db.get_session()
+                try:
+                    from ayanna_erp.modules.core.models.core_products import CoreProductCategory
+                    # Ensure we only pick categories for the current enterprise
+                    cat_obj = session.query(CoreProductCategory).filter_by(id=cat_id, entreprise_id=self.entreprise_id).first()
+                    if cat_obj:
+                        category = getattr(cat_obj, 'name', None)
+                finally:
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+        except Exception:
+            category = None
+
+        if not category:
+            category = 'Autres'
+
+        border_color = self._category_color(category, cat_id)
 
         # ---- Créer le cadre principal ----
         card = QFrame()
@@ -388,10 +409,10 @@ class CatalogueWidget(QWidget):
             QFrame {{
                 background-color: white;
                 border-radius: 10px;
+                /* no outer border as requested */
             }}
             QFrame:hover {{
-                border-color: #1976D2;
-                box-shadow: 0 0 8px rgba(0,0,0,0.1);
+                box-shadow: 0 0 8px rgba(0,0,0,0.06);
                 background-color: #F8FAFF;
             }}
         """)
@@ -439,7 +460,7 @@ class CatalogueWidget(QWidget):
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         image_label.setStyleSheet("""
             background-color: #F9FAFB;
-            border: 1px solid #E0E0E0;
+            border: none;
             border-radius: 6px;
         """)
 
@@ -482,7 +503,7 @@ class CatalogueWidget(QWidget):
         name_label.setWordWrap(True)
         name_label.setStyleSheet("""
             color: #212529;
-            font-weight: 600;
+            font-weight: 400;
             font-size: 12px;
         """)
         layout.addWidget(name_label)
@@ -493,17 +514,19 @@ class CatalogueWidget(QWidget):
 
         # ---- bande de couleur de la catégorie (en bas de la carte) ----
         try:
-            cat_name = getattr(product, 'category_name', 'Autres')
-            cat_color_map = {
-                'Bière': '#F44336',
-                'Vin': '#9C27B0',
-                'Sucré': '#4CAF50',
-                'Whisky': '#3F51B5',
-                'Autres': '#FFEB3B',
-                'Champagne': '#FF4081',
-                'Cuisine': '#00BCD4'
-            }
-            band_color = cat_color_map.get(cat_name, '#B0BEC5')
+            cat_name = getattr(product, 'category_name', None) or category
+            cat_id = getattr(product, 'category_id', None) if hasattr(product, 'category_id') else None
+            # prefer the color assigned in the category bar mapping so button and card match
+            band_color = None
+            try:
+                if cat_id is not None and cat_id in self._category_color_map:
+                    band_color = self._category_color_map.get(cat_id)
+                elif cat_name in self._category_color_map:
+                    band_color = self._category_color_map.get(cat_name)
+            except Exception:
+                band_color = None
+            if not band_color:
+                band_color = self._category_color(cat_name, cat_id)
             band = QWidget()
             band.setFixedHeight(8)
             band.setStyleSheet(f'background-color: {band_color}; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;')
@@ -596,16 +619,55 @@ class CatalogueWidget(QWidget):
         except Exception:
             cats = []
 
+    # Ensure each visible category gets a unique color from the palette.
+        palette = [
+            '#F44336', '#9C27B0', '#4CAF50', '#3F51B5', '#FF9800',
+            '#009688', '#FF4081', '#00BCD4', '#8BC34A', '#795548',
+            '#607D8B', '#CDDC39', '#E91E63', '#9E9E9E'
+        ]
+        used = set()
+        # reset mapping for this visible set
+        try:
+            self._category_color_map = {}
+        except Exception:
+            self._category_color_map = {}
+
         for c in cats:
             cname = getattr(c, 'name', 'Cat')
+            cid = getattr(c, 'id', None)
             btn = QPushButton(cname)
             btn.setCheckable(True)
-            # determine color for this category (use deterministic helper)
-            col = self._category_color(cname, getattr(c, 'id', None))
+            # preferred color from deterministic helper
+            preferred = self._category_color(cname, cid)
+            col = preferred
+            # avoid collisions for the visible set: if preferred already used, pick first free from palette
+            if col in used:
+                found = None
+                for p in palette:
+                    if p not in used:
+                        found = p
+                        break
+                if found:
+                    col = found
+                else:
+                    # fallback: keep preferred
+                    col = preferred
+            used.add(col)
+            # store mapping by id (preferred) or by name if id missing
+            try:
+                if cid is not None:
+                    self._category_color_map[int(cid)] = col
+                else:
+                    # fallback mapping by name
+                    self._category_color_map[cname] = col
+            except Exception:
+                try:
+                    self._category_color_map[cname] = col
+                except Exception:
+                    pass
             # set background color and ensure text contrast
-            # add padding and rounded corners for nicer look
             btn.setStyleSheet(f'background-color: {col}; color: white; font-weight:600; border-radius:6px; padding:6px 10px;')
-            btn.clicked.connect(lambda _checked, cid=getattr(c, 'id', None), b=btn: self._on_category_selected(cid, b))
+            btn.clicked.connect(lambda _checked, cid=cid, b=btn: self._on_category_selected(cid, b))
             self.category_bar.addWidget(btn)
 
         self.category_bar.addStretch()
