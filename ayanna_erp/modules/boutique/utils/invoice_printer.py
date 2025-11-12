@@ -108,14 +108,28 @@ class InvoicePrintManager:
         if self.entreprise_controller:
             return self.entreprise_controller.get_currency_symbol(self.enterprise_id)
         else:
-            return "$"  # Fallback
+            return "F"  # Fallback
 
     def format_amount(self, amount):
         """Formater un montant avec la devise de l'entreprise"""
         if self.entreprise_controller:
             return self.entreprise_controller.format_amount(amount, self.enterprise_id)
         else:
-            return f"{amount:.2f} €"  # Fallback
+            # Fallback: format with space as thousands separator and omit .00 when integer
+            try:
+                val = float(amount)
+            except Exception:
+                return str(amount)
+
+            # Round to 2 decimals, but drop decimals when .00
+            rounded = round(val, 2)
+            if rounded.is_integer():
+                s = f"{int(rounded):,}".replace(",", " ")
+            else:
+                s = f"{rounded:,.2f}".replace(",", " ")
+
+            currency = self.get_currency_symbol() or "F"
+            return f"{s} {currency}"
 
     def setup_custom_styles(self):
         """Configurer les styles personnalisés"""
@@ -239,6 +253,11 @@ class InvoicePrintManager:
             ['Adresse:', invoice_data.get('client_adresse', 'N/A')]
         ]
 
+        # Ajouter la ligne "Servi par" si une serveuse/comptoiriste est fournie
+        served_by = invoice_data.get('serveuse') or invoice_data.get('comptoiriste') or invoice_data.get('serveuse_name')
+        if served_by:
+            client_data.append(['Servi par:', served_by])
+
         client_table = Table(client_data, colWidths=[4*cm, 12*cm])
         client_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), HexColor('#ECF0F1')),
@@ -260,6 +279,29 @@ class InvoicePrintManager:
             ['Date de création:', invoice_data.get('created_at', 'N/A')],
             ['Statut:', invoice_data.get('status', 'N/A')]
         ]
+
+        # Ajouter informations restaurant (table / salle / serveuse / comptoiriste) si présentes
+        # Supporter plusieurs clés possibles pour compatibilité
+        def _pick(*keys):
+            for k in keys:
+                v = invoice_data.get(k)
+                if v:
+                    return v
+            return None
+
+        table_val = _pick('table', 'table_number', 'table_no')
+        salle_val = _pick('salle', 'salle_name', 'room')
+        serveuse_val = _pick('serveuse', 'serveur', 'waiter', 'serveur_name')
+        comptoiriste_val = _pick('comptoiriste', 'comptoir', 'clerk', 'cashier')
+
+        if table_val:
+            order_data.append(['Table:', str(table_val)])
+        if salle_val:
+            order_data.append(['Salle:', str(salle_val)])
+        if serveuse_val:
+            order_data.append(['Serveuse:', str(serveuse_val)])
+        if comptoiriste_val:
+            order_data.append(['Comptoiriste:', str(comptoiriste_val)])
 
         order_table = Table(order_data, colWidths=[4*cm, 12*cm])
         order_table.setStyle(TableStyle([
@@ -283,16 +325,14 @@ class InvoicePrintManager:
             for item in invoice_data['items']:
                 total_line = item['quantity'] * item['unit_price']
                 total_products += total_line
-                currency_symbol = self.get_currency_symbol()
                 products_data.append([
                     item['name'],
                     str(item['quantity']),
-                    f"{item['unit_price']:.2f} {currency_symbol}",
-                    f"{total_line:.2f} {currency_symbol}"
+                    self.format_amount(item['unit_price']),
+                    self.format_amount(total_line)
                 ])
 
-            currency_symbol = self.get_currency_symbol()
-            products_data.append(['', '', 'TOTAL PRODUITS:', f"{total_products:.2f} {currency_symbol}"])
+            products_data.append(['', '', 'TOTAL PRODUITS:', self.format_amount(total_products)])
 
             products_table = Table(products_data, colWidths=[8*cm, 2*cm, 3*cm, 3*cm])
             products_table.setStyle(TableStyle([
@@ -313,11 +353,11 @@ class InvoicePrintManager:
 
         currency_symbol = self.get_currency_symbol()
         financial_data = [
-            ['Sous-total HT:', f"{invoice_data.get('subtotal_ht', 0):.2f} {currency_symbol}"],
-            ['TVA:', f"{invoice_data.get('tax_amount', 0):.2f} {currency_symbol}"],
-            ['Total TTC:', f"{invoice_data.get('total_ttc', 0):.2f} {currency_symbol}"],
-            ['Remise:', f"-{invoice_data.get('discount_amount', 0):.2f} {currency_symbol}"],
-            ['NET À PAYER:', f"{invoice_data.get('total_net', 0):.2f} {currency_symbol}"]
+            ['Sous-total HT:', self.format_amount(invoice_data.get('subtotal_ht', 0))],
+            ['TVA:', self.format_amount(invoice_data.get('tax_amount', 0))],
+            ['Total TTC:', self.format_amount(invoice_data.get('total_ttc', 0))],
+            ['Remise:', f"-{self.format_amount(invoice_data.get('discount_amount', 0))}"],
+            ['NET À PAYER:', self.format_amount(invoice_data.get('total_net', 0))]
         ]
 
         financial_table = Table(financial_data, colWidths=[12*cm, 4*cm])
@@ -342,10 +382,9 @@ class InvoicePrintManager:
 
             for payment in invoice_data['payments']:
                 total_paid += payment['amount']
-                currency_symbol = self.get_currency_symbol()
                 payment_data.append([
                     payment['payment_date'].strftime('%d/%m/%Y %H:%M') if hasattr(payment['payment_date'], 'strftime') else str(payment['payment_date']),
-                    f"{payment['amount']:.2f} {currency_symbol}",
+                    self.format_amount(payment['amount']),
                     payment.get('payment_method', 'N/A'),
                     payment.get('user_name', 'N/A')
                 ])
@@ -353,9 +392,8 @@ class InvoicePrintManager:
             # Calculer le solde
             net_a_payer = invoice_data.get('total_net', 0)
             balance = net_a_payer - total_paid
-            currency_symbol = self.get_currency_symbol()
-            payment_data.append(['', '', 'TOTAL PAYÉ:', f"{total_paid:.2f} {currency_symbol}"])
-            payment_data.append(['', '', 'RESTE À PAYER:', f"{balance:.2f} {currency_symbol}"])
+            payment_data.append(['', '', 'TOTAL PAYÉ:', self.format_amount(total_paid)])
+            payment_data.append(['', '', 'RESTE À PAYER:', self.format_amount(balance)])
 
             payment_table = Table(payment_data, colWidths=[4*cm, 3*cm, 4*cm, 5*cm])
             payment_table.setStyle(TableStyle([
@@ -601,6 +639,41 @@ class InvoicePrintManager:
         date_text = f"Date: {order_date}"
         c.drawString(2*mm, y_position, date_text)
         y_position -= 2.5*mm
+
+        # Afficher table / salle / serveuse / comptoiriste exceptionnellement pour le module restaurant
+        def _pick_local(inv, *keys):
+            for k in keys:
+                v = inv.get(k)
+                if v:
+                    return v
+            return None
+
+        # Détection explicite du module restaurant : invoice_data peut contenir 'module' ou 'is_restaurant'
+        is_restaurant = False
+        try:
+            if str(invoice_data.get('module', '')).lower() == 'restaurant' or invoice_data.get('is_restaurant'):
+                is_restaurant = True
+        except Exception:
+            is_restaurant = False
+        serveuse_val = _pick_local(invoice_data, 'serveuse', 'serveur', 'waiter', 'serveur_name')
+        table_val = _pick_local(invoice_data, 'table', 'table_number', 'table_no')
+        salle_val = _pick_local(invoice_data, 'salle', 'salle_name', 'room')
+        comptoiriste_val = _pick_local(invoice_data, 'comptoiriste', 'comptoir', 'clerk', 'cashier')
+
+        # Afficher uniquement si c'est bien un ticket du module restaurant ou si la table est explicitement fournie
+        if is_restaurant or table_val:
+            if table_val:
+                c.drawString(2*mm, y_position, f"Table: {str(table_val)[:20]}")
+                y_position -= 2.5*mm
+            if salle_val:
+                c.drawString(2*mm, y_position, f"Salle: {str(salle_val)[:20]}")
+                y_position -= 2.5*mm
+            if serveuse_val:
+                c.drawString(2*mm, y_position, f"Serveuse: {str(serveuse_val)[:25]}")
+                y_position -= 2.5*mm
+            if comptoiriste_val:
+                c.drawString(2*mm, y_position, f"Comptoir: {str(comptoiriste_val)[:25]}")
+                y_position -= 2.5*mm
 
         # Ligne de séparation
         y_position -= 2*mm

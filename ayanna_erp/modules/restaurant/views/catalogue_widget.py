@@ -1239,36 +1239,148 @@ class CatalogueWidget(QWidget):
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
         try:
-            items = self.controller.list_cart_items(self.panier.id)
-            lines = []
-            total = 0.0
+            # Build invoice_data expected by InvoicePrintManager.print_receipt_53mm
+            items = self.controller.list_cart_items(self.panier.id) or []
+            invoice_items = []
+            subtotal = 0.0
             for it in items:
                 try:
                     prod = self.controller.get_product(getattr(it, 'product_id', None))
                     name = getattr(prod, 'name', str(getattr(it, 'product_id', '')))
                 except Exception:
                     name = str(getattr(it, 'product_id', ''))
-                qty = getattr(it, 'quantity', 0)
-                price = getattr(it, 'price', 0.0)
-                line_total = getattr(it, 'total', float(qty) * float(price))
-                total += float(line_total)
-                lines.append(f"{name}  x{int(qty)}  {format_amount(price)} {get_currency(self.entreprise_id)}  = {format_amount(line_total)} {get_currency(self.entreprise_id)}")
+                qty = int(getattr(it, 'quantity', 0) or 0)
+                unit_price = float(getattr(it, 'price', 0.0) or 0.0)
+                line_total = float(getattr(it, 'total', qty * unit_price) or (qty * unit_price))
+                subtotal += line_total
+                invoice_items.append({
+                    'name': name,
+                    'quantity': qty,
+                    'unit_price': unit_price,
+                    'total': line_total
+                })
 
-            txt = "\n".join(lines)
-            txt += f"\n\nTotal: {format_amount(total)} {get_currency(self.entreprise_id)}"
+            # payments list from DB
+            payments_list = []
+            try:
+                db = get_database_manager()
+                session = db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauPayment
+                from ayanna_erp.database.database_manager import User as DBUser
+                pays = session.query(RestauPayment).filter_by(panier_id=self.panier.id).all()
+                for p in pays:
+                    user_name = None
+                    try:
+                        if getattr(p, 'user_id', None):
+                            u = session.query(DBUser).filter_by(id=p.user_id).first()
+                            if u:
+                                user_name = getattr(u, 'name', None) or getattr(u, 'email', None)
+                    except Exception:
+                        user_name = None
+                    payments_list.append({
+                        'amount': float(getattr(p, 'amount', 0.0) or 0.0),
+                        'payment_method': getattr(p, 'payment_method', None),
+                        'payment_date': getattr(p, 'created_at', None),
+                        'user_name': user_name or ''
+                    })
+                try:
+                    session.close()
+                except Exception:
+                    pass
+            except Exception:
+                payments_list = []
 
-            # show in a dialog
-            dlg = QDialog(self)
-            dlg.setWindowTitle('Addition')
-            dlg_l = QVBoxLayout(dlg)
-            te = QTextEdit()
-            te.setReadOnly(True)
-            te.setPlainText(txt)
-            dlg_l.addWidget(te)
-            btn = QPushButton('Fermer')
-            btn.clicked.connect(dlg.accept)
-            dlg_l.addWidget(btn)
-            dlg.exec()
+            # invoice_data expected fields
+            # Resolve table / salle and serveuse names to include on prints
+            try:
+                db = get_database_manager()
+                session = db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauTable
+                tbl_obj = session.query(RestauTable).filter_by(id=self.table_id).first()
+                if tbl_obj:
+                    tbl_display = str(getattr(tbl_obj, 'number', self.table_id))
+                    try:
+                        salle_obj = getattr(tbl_obj, 'salle', None)
+                        salle_name = getattr(salle_obj, 'name', None) if salle_obj is not None else None
+                    except Exception:
+                        salle_name = None
+                else:
+                    tbl_display = str(self.table_id)
+                    salle_name = None
+                try:
+                    session.close()
+                except Exception:
+                    pass
+            except Exception:
+                tbl_display = str(self.table_id)
+                salle_name = None
+
+            # resolve serveuse from panier if present
+            serveuse_name = ''
+            try:
+                if getattr(self.panier, 'serveuse_id', None):
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.database.database_manager import User as DBUser
+                    u = session.query(DBUser).filter_by(id=self.panier.serveuse_id).first()
+                    if u:
+                        serveuse_name = getattr(u, 'name', None) or getattr(u, 'email', None) or ''
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+            except Exception:
+                serveuse_name = ''
+
+            # invoice_data expected fields
+            invoice_data = {
+                'module': 'restaurant',
+                'reference': f"PANIER-{self.panier.id}",
+                'client_nom': '',
+                'order_date': getattr(self.panier, 'created_at', None),
+                'items': invoice_items,
+                'subtotal_ht': subtotal,
+                'total_net': float(getattr(self.panier, 'total_final', subtotal) or subtotal),
+                'notes': getattr(self.panier, 'notes', '') or '',
+                # Restaurant-specific metadata for printing
+                'table': tbl_display,
+                'salle': salle_name,
+                'serveuse': serveuse_name,
+                'comptoiriste': getattr(self.current_user, 'name', '')
+            }
+
+            # try to fetch client name
+            try:
+                if getattr(self.panier, 'client_id', None):
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    c = session.query(ShopClient).filter_by(id=self.panier.client_id).first()
+                    if c:
+                        invoice_data['client_nom'] = (getattr(c, 'nom', '') or '') + ' ' + (getattr(c, 'prenom', '') or '')
+                    try:
+                        session.close()
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            # instantiate printer and produce a temporary PDF
+            try:
+                from ayanna_erp.modules.boutique.utils.invoice_printer import InvoicePrintManager
+                import tempfile
+                mgr = InvoicePrintManager(enterprise_id=self.entreprise_id)
+                tmpf = tempfile.NamedTemporaryFile(prefix='addition_', suffix='.pdf', delete=False)
+                tmpf.close()
+                filename = mgr.print_receipt_53mm(invoice_data, payments_list, getattr(self.current_user, 'name', ''), tmpf.name)
+                # try to open the PDF for the user (Windows)
+                try:
+                    os.startfile(filename)
+                except Exception:
+                    QMessageBox.information(self, 'Addition générée', f'Addition enregistrée: {filename}')
+            except Exception as e:
+                QMessageBox.critical(self, 'Erreur', f"Impossible d'imprimer l'addition: {e}")
+
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'afficher l'addition: {e}")
 
