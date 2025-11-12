@@ -356,143 +356,153 @@ class CatalogueWidget(QWidget):
         self.products_layout.setRowStretch((len(products) // cols) + 1, 1)
 
     def create_product_card(self, product):
-        """Créer une carte produit similaire à ModernSupermarketWidget.create_product_card
-        adaptée au catalogue de la table (simplifiée).
         """
+        Crée une carte produit visuellement proche du style Ayanna Cloud :
+        - Fond blanc, coins arrondis, bordure colorée selon la catégorie
+        - Image centrée avec fond clair
+        - Nom du produit centré
+        - Badge quantité/commande en haut à droite
+        """
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel, QHBoxLayout, QWidget, QMessageBox
+        from PyQt6.QtGui import QPixmap
+        import os
+
+        # ---- Déterminer la couleur de bordure selon la catégorie ----
+        cat_color_map = {
+            'Bière': '#F44336',
+            'Vin': '#9C27B0',
+            'Sucré': '#4CAF50',
+            'Whisky': '#3F51B5',
+            'Autres': '#FFEB3B',
+            'Champagne': '#FF4081',
+            'Cuisine': '#00BCD4'
+        }
+        category = getattr(product, 'category_name', 'Autres')
+        border_color = cat_color_map.get(category, '#E0E0E0')
+
+        # ---- Créer le cadre principal ----
         card = QFrame()
-        card.setFrameStyle(QFrame.Shape.StyledPanel)
-        card.setStyleSheet("""
-            QFrame {
+        card.setFixedSize(110, 135)
+        card.setStyleSheet(f"""
+            QFrame {{
                 background-color: white;
-                border: 1px solid #E0E0E0;
-                border-radius: 8px;
-                padding: 2px;
-            }
-            QFrame:hover {
+                border-radius: 10px;
+            }}
+            QFrame:hover {{
                 border-color: #1976D2;
-                background-color: #F3F9FF;
-            }
+                box-shadow: 0 0 8px rgba(0,0,0,0.1);
+                background-color: #F8FAFF;
+            }}
         """)
-        card.setFixedSize(120, 140)
 
         layout = QVBoxLayout(card)
-        layout.setSpacing(6)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(4)
 
-        # top row: badge on the right
-        top_row = QHBoxLayout()
-        top_row.addStretch()
-        badge = QLabel('0')
+        # ---- Ligne du haut (badge) ----
+        top_row = QWidget()
+        top_layout = QHBoxLayout(top_row)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.addStretch()
+
+        badge = QLabel('')
         badge.setObjectName('cart_badge')
-        badge.setFixedSize(28, 18)
-        badge.setStyleSheet('background-color:#E53935; color:white; border-radius:9px; padding:2px; font-size:11px;')
-        top_row.addWidget(badge)
-        layout.addLayout(top_row)
-
-        # # Image placeholder
-        # img = QLabel()
-        # img.setFixedSize(120, 54)
-        # img.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # img.setText("🧾")
-        # layout.addWidget(img, 0, Qt.AlignmentFlag.AlignHCenter)
-        
-        # Image produit avec haute résolution
-        image_label = QLabel()
-        image_label.setFixedSize(100, 120)  # Résolution améliorée
-        image_label.setStyleSheet("""
-            QLabel {
-                background-color: #F8F9FA;
-                border: 1px solid #E0E0E0;
-                border-radius: 6px;
-            }
+        badge.setFixedSize(24, 18)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet("""
+            background-color: #1976D2;
+            color: white;
+            border-radius: 9px;
+            font-size: 10px;
+            font-weight: bold;
+            padding: 0px 4px;
         """)
+        # show/hide badge according to current cart quantity for this product
+        try:
+            pid = getattr(product, 'id', None)
+            qty = int(self._get_cart_quantity_for_product(pid) or 0)
+            if qty and qty > 0:
+                badge.setText(str(int(qty)))
+                badge.show()
+            else:
+                badge.hide()
+        except Exception:
+            # safe fallback: hide badge
+            badge.hide()
+        top_layout.addWidget(badge)
+        layout.addWidget(top_row)
+
+        # ---- Image produit ----
+        image_label = QLabel()
+        image_label.setFixedSize(80, 70)
         image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Charger l'image du produit selon la logique spécifiée
+        image_label.setStyleSheet("""
+            background-color: #F9FAFB;
+            border: 1px solid #E0E0E0;
+            border-radius: 6px;
+        """)
+
         image_loaded = False
-        if hasattr(product, 'image') and product.image and product.image.strip():
+        if hasattr(product, 'image') and product.image:
             try:
-                # Le champ image contient le chemin relatif ou nom du fichier
                 image_filename = product.image.strip()
-                
-                # Construire le chemin complet de l'image (même logique que produit_index.py)
                 if os.path.isabs(image_filename):
-                    # Chemin absolu
                     full_path = image_filename
                 else:
-                    # Chemin relatif depuis la racine du projet
-                    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                    full_path = os.path.join(project_root, image_filename.replace("/", os.sep))
-                
+                    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+                    full_path = os.path.join(base_path, image_filename.replace("/", os.sep))
                 if os.path.exists(full_path):
-                    # Charger l'image avec PyQt6
                     pixmap = QPixmap(full_path)
                     if not pixmap.isNull():
-                        # Redimensionner l'image pour s'adapter au label tout en gardant les proportions
-                        scaled_pixmap = pixmap.scaled(
-                            image_label.size(),  # Utiliser la taille du label comme dans produit_index.py
-                            Qt.AspectRatioMode.KeepAspectRatio,
-                            Qt.TransformationMode.SmoothTransformation  # Haute qualité
-                        )
-                        image_label.setPixmap(scaled_pixmap)
+                        scaled = pixmap.scaled(image_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
+                                            Qt.TransformationMode.SmoothTransformation)
+                        image_label.setPixmap(scaled)
                         image_loaded = True
-                        print(f"✅ Image chargée avec succès pour {product.name}: {full_path}")
-                    else:
-                        print(f"❌ Image corrompue: {full_path}")
-                else:
-                    print(f"❌ Image introuvable: {full_path}")
-                        
             except Exception as e:
-                print(f"❌ Erreur chargement image '{product.image}': {e}")
-        
-        # Si pas d'image chargée, afficher une image par défaut moderne
-        if not image_loaded:
-            image_label.setText("📦\nProduit")
-            image_label.setStyleSheet("""
-                QLabel {
-                    background-color: #F8F9FA;
-                    border: 2px dashed #DEE2E6;
-                    border-radius: 6px;
-                    color: #6C757D;
-                    font-size: 12px;
-                    font-weight: bold;
-                }
-            """)
-        
-        layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignCenter)
+                print("Erreur image:", e)
 
-        # Name
+        if not image_loaded:
+            image_label.setText("🧾")
+            image_label.setStyleSheet("""
+                background-color: #F8F9FA;
+                border: 2px dashed #DEE2E6;
+                color: #9E9E9E;
+                border-radius: 6px;
+                font-size: 18px;
+            """)
+
+        layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        # ---- Nom du produit ----
         name = getattr(product, 'name', 'Produit')
-        name_label = QLabel(name[:30] + '...' if len(name) > 30 else name)
-        name_label.setWordWrap(True)
-        name_label.setStyleSheet("font-weight: bold; color: #212529;")
+        # keep the raw product name only (no counters appended)
+        name_label = QLabel(name if len(name) < 20 else name[:18] + '…')
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name_label.setWordWrap(True)
+        name_label.setStyleSheet("""
+            color: #212529;
+            font-weight: 600;
+            font-size: 12px;
+        """)
         layout.addWidget(name_label)
 
-        # Entire card is clickable to add product; price/button removed per request
-        price = float(getattr(product, 'price_unit', getattr(product, 'price', 0) or 0))
-        card.setToolTip(f"{getattr(product,'name','')} - {int(price)} {self._get_currency()}")
+        # ---- Info bulle ----
+        price = float(getattr(product, 'price_unit', getattr(product, 'price', 0)))
+        card.setToolTip(f"{name}\nPrix: {int(price)} {self._get_currency()}")
 
-        # clickable behaviour
+        # ---- Clic sur la carte ----
         def _on_click(prod_id=getattr(product, 'id', None)):
             try:
                 self.add_product(prod_id)
-                # update badges by reloading products
                 self._update_badges()
             except Exception as e:
                 QMessageBox.critical(self, 'Erreur', str(e))
 
-        # attach click handler
-        def _mouse_press(event):
-            _on_click()
-
-        card.mousePressEvent = _mouse_press
-
-        # set initial badge value if panier exists
+        card.mousePressEvent = lambda event: _on_click()
+        # store product id on card so badges can be updated in-place
         try:
-            qty_in_cart = self._get_cart_quantity_for_product(getattr(product, 'id', None))
-            badge.setText(str(int(qty_in_cart)))
-            if int(qty_in_cart) <= 0:
-                badge.setVisible(False)
+            card.setProperty('product_id', getattr(product, 'id', None))
         except Exception:
             pass
 
@@ -512,17 +522,37 @@ class CatalogueWidget(QWidget):
             return 0
 
     def _update_badges(self):
-        # iterate product cards and update badge labels
-        for i in range(self.products_layout.count()):
-            it = self.products_layout.itemAt(i)
-            w = it.widget()
-            if not w:
-                continue
-            # try to find badge child
-            badge = w.findChild(QLabel, 'cart_badge')
-            # infer product id from tooltip via 'id' not stored; safer to reload all products
-        # simplest: reload products to refresh badges
-        self.load_products()
+        # iterate product cards and update badge labels in-place (avoid full reload)
+        try:
+            for i in range(self.products_layout.count()):
+                it = self.products_layout.itemAt(i)
+                if not it:
+                    continue
+                w = it.widget()
+                if not w:
+                    continue
+                badge = w.findChild(QLabel, 'cart_badge')
+                if not badge:
+                    continue
+                try:
+                    pid = w.property('product_id') if hasattr(w, 'property') else None
+                    qty = int(self._get_cart_quantity_for_product(pid) or 0)
+                    if qty and qty > 0:
+                        badge.setText(str(int(qty)))
+                        badge.show()
+                    else:
+                        badge.hide()
+                except Exception:
+                    try:
+                        badge.hide()
+                    except Exception:
+                        pass
+        except Exception:
+            # fallback: if anything goes wrong, do a full reload
+            try:
+                self.load_products()
+            except Exception:
+                pass
 
     def _populate_category_buttons(self):
         # Clear existing buttons

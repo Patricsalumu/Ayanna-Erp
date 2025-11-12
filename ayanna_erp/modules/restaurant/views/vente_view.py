@@ -33,35 +33,69 @@ class TableButton(QPushButton):
         self.apply_style()
 
     def apply_style(self, occupied=False, selected=False):
-        border_free = "#28a745"
-        bg_free = "#ffffff"
-        bg_occ = "#28a74522"
-        border_occ = "#28a745"
-        border_select = "#1e7e34"
+        # Couleurs cohérentes avec ton image Ayanna Cloud
+        color_border_free = "#28a745"
+        color_border_selected = "#1e7e34"
+        color_bg_free = "#ffffff"
+        color_bg_occupied = "#28a745"   # fond vert vif quand occupée
+        color_text = "#222222"
 
         shape = (getattr(self.table_obj, "shape", "square") or "").lower()
-        w = self.width()
-        h = self.height()
+        radius = min(self.width(), self.height()) // 2 if shape in ("round", "circle") else 10
 
-        radius = min(w, h) // 2 if shape in ("round", "circle") else 6
-
-        bg = bg_occ if occupied else bg_free
-        border = border_select if selected else (border_occ if occupied else border_free)
+        # Choix des couleurs selon l’état
+        bg_color = color_bg_occupied if occupied else color_bg_free
+        border_color = color_border_selected if selected else color_border_free
+        font_weight = "bold" if selected else "600"
 
         self.setStyleSheet(f"""
-            background-color: {bg};
-            border: 3px solid {border};
-            border-radius: {radius}px;
-            font-size: 18px;
-            font-weight: bold;
+            QPushButton {{
+                background-color: {bg_color};
+                border: 3px solid {border_color};
+                border-radius: {radius}px;
+                color: {color_text};
+                font-size: 20px;
+                font-weight: {font_weight};
+            }}
+            QPushButton:hover {{
+                border-color: #1e7e34;
+            }}
         """)
 
-        # Badge montant (si occupée)
-        if occupied:
-            montant = occupied if isinstance(occupied, str) else ""
-            # self.setText(f"{self.table_obj.number}\n<font color='#e53935'><b>{montant}</b></font>")
-        else:
-            self.setText(str(self.table_obj.number))
+        # Texte numéro de table centré
+        self.setText(str(self.table_obj.number))
+
+        # === Badge montant (ex: 6 000 F) ===
+        try:
+            montant_text = ''
+            if occupied:
+                montant_text = str(occupied)
+
+            if not hasattr(self, '_amount_badge') or self._amount_badge is None:
+                self._amount_badge = QLabel(self)
+                self._amount_badge.setObjectName('table_amount_badge')
+                self._amount_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self._amount_badge.setStyleSheet("""
+                    background-color: #E53935;
+                    color: white;
+                    border-radius: 9px;
+                    padding: 1px 6px;
+                    font-size: 11px;
+                    font-weight: bold;
+                """)
+
+            if montant_text:
+                self._amount_badge.setText(montant_text)
+                self._amount_badge.adjustSize()
+                bw = self._amount_badge.width()
+                bh = self._amount_badge.height()
+                self._amount_badge.move(self.width() - bw - 4, 4)
+                self._amount_badge.show()
+            else:
+                self._amount_badge.hide()
+        except Exception:
+            pass
+
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
@@ -107,7 +141,8 @@ class VenteView(QWidget):
         self.plan_frame.setMinimumHeight(500)
         self.plan_frame.setStyleSheet("""
             background-color: #f7f7f7;
-            border-radius: 8px;
+            border-radius: 10px;
+            padding: 20px;
         """)
         plan_layout.addWidget(self.plan_frame)
         self.stack.addWidget(self.plan_page)
@@ -196,6 +231,7 @@ class VenteView(QWidget):
 
             btn.show()
             self.table_buttons[t.id] = btn
+        btn.setStyleSheet(btn.styleSheet() + "margin: 10px;")
 
     def ensure_first_salle_loaded(self):
         """Sélectionne la première salle disponible si aucune salle n'est active."""
