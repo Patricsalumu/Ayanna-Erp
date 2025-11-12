@@ -9,6 +9,8 @@ from PyQt6.QtGui import QColor
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.modules.restaurant.views.catalogue_widget import CatalogueWidget
+from ayanna_erp.database.database_manager import get_database_manager, Entreprise
+from ayanna_erp.utils.formatting import format_amount, get_currency
 
 
 # ----------------------------------------------------------------------
@@ -69,7 +71,16 @@ class TableButton(QPushButton):
         try:
             montant_text = ''
             if occupied:
-                montant_text = str(occupied)
+                # if numeric, format using centralized helper
+                try:
+                    if isinstance(occupied, (int, float)):
+                        currency = get_currency(getattr(self.parent_view, 'entreprise_id', None))
+                        montant_text = f"{format_amount(occupied)} {currency}"
+                    else:
+                        # assume string already formatted
+                        montant_text = str(occupied)
+                except Exception:
+                    montant_text = str(occupied)
 
             if not hasattr(self, '_amount_badge') or self._amount_badge is None:
                 self._amount_badge = QLabel(self)
@@ -225,7 +236,11 @@ class VenteView(QWidget):
 
             if panier:
                 total, _ = self.vente_ctrl.get_panier_total(panier.id)
-                btn.apply_style(occupied=f"{int(total)} F")
+                try:
+                    # pass numeric total so apply_style formats it
+                    btn.apply_style(occupied=float(total))
+                except Exception:
+                    btn.apply_style(occupied=total)
             else:
                 btn.apply_style(occupied=False)
 
@@ -255,20 +270,23 @@ class VenteView(QWidget):
             if panier:
                 total, _ = self.vente_ctrl.get_panier_total(panier.id)
 
-            self.active_table_btn.apply_style(
-                occupied=(f"{int(total)} F" if total else False),
-                selected=False
-            )
+            try:
+                self.active_table_btn.apply_style(
+                    occupied=(float(total) if total else False),
+                    selected=False
+                )
+            except Exception:
+                self.active_table_btn.apply_style(occupied=(total if total else False), selected=False)
 
         panier = self.vente_ctrl.get_open_panier_for_table(table_button.table_id)
         total = None
         if panier:
             total, _ = self.vente_ctrl.get_panier_total(panier.id)
 
-        table_button.apply_style(
-            occupied=(f"{int(total)} F" if total else False),
-            selected=True
-        )
+        try:
+            table_button.apply_style(occupied=(float(total) if total else False), selected=True)
+        except Exception:
+            table_button.apply_style(occupied=(total if total else False), selected=True)
         self.active_table_btn = table_button
 
     def open_table_panel(self, table_id):

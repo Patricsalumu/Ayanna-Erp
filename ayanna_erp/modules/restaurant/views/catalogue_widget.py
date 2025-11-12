@@ -11,7 +11,7 @@ from PyQt6.QtGui import QFont, QPixmap
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.database.database_manager import get_database_manager, User
-from ayanna_erp.database.database_manager import Entreprise
+from ayanna_erp.utils.formatting import format_amount, get_currency
 import os
 
 
@@ -489,7 +489,27 @@ class CatalogueWidget(QWidget):
 
         # ---- Info bulle ----
         price = float(getattr(product, 'price_unit', getattr(product, 'price', 0)))
-        card.setToolTip(f"{name}\nPrix: {int(price)} {self._get_currency()}")
+        card.setToolTip(f"{name}\nPrix: {format_amount(price)} {get_currency(self.entreprise_id)}")
+
+        # ---- bande de couleur de la catégorie (en bas de la carte) ----
+        try:
+            cat_name = getattr(product, 'category_name', 'Autres')
+            cat_color_map = {
+                'Bière': '#F44336',
+                'Vin': '#9C27B0',
+                'Sucré': '#4CAF50',
+                'Whisky': '#3F51B5',
+                'Autres': '#FFEB3B',
+                'Champagne': '#FF4081',
+                'Cuisine': '#00BCD4'
+            }
+            band_color = cat_color_map.get(cat_name, '#B0BEC5')
+            band = QWidget()
+            band.setFixedHeight(8)
+            band.setStyleSheet(f'background-color: {band_color}; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px;')
+            layout.addWidget(band)
+        except Exception:
+            pass
 
         # ---- Clic sur la carte ----
         def _on_click(prod_id=getattr(product, 'id', None)):
@@ -565,6 +585,8 @@ class CatalogueWidget(QWidget):
         all_btn = QPushButton('Tous')
         all_btn.setCheckable(True)
         all_btn.setChecked(True if self.selected_category is None else False)
+        # style 'Tous' with neutral color
+        all_btn.setStyleSheet('background-color:#ECEFF1; color:#212121; border-radius:6px; padding:6px 10px;')
         all_btn.clicked.connect(lambda _: self._on_category_selected(None, all_btn))
         self.category_bar.addWidget(all_btn)
 
@@ -575,8 +597,14 @@ class CatalogueWidget(QWidget):
             cats = []
 
         for c in cats:
-            btn = QPushButton(getattr(c, 'name', 'Cat'))
+            cname = getattr(c, 'name', 'Cat')
+            btn = QPushButton(cname)
             btn.setCheckable(True)
+            # determine color for this category (use deterministic helper)
+            col = self._category_color(cname, getattr(c, 'id', None))
+            # set background color and ensure text contrast
+            # add padding and rounded corners for nicer look
+            btn.setStyleSheet(f'background-color: {col}; color: white; font-weight:600; border-radius:6px; padding:6px 10px;')
             btn.clicked.connect(lambda _checked, cid=getattr(c, 'id', None), b=btn: self._on_category_selected(cid, b))
             self.category_bar.addWidget(btn)
 
@@ -646,9 +674,9 @@ class CatalogueWidget(QWidget):
             qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
             self.cart_table.setItem(i, 2, qty_item)
             # price per unit
-            price_item = QTableWidgetItem(str(getattr(it, 'price', 0.0)))
+            price_item = QTableWidgetItem(format_amount(getattr(it, 'price', 0.0)))
             self.cart_table.setItem(i, 3, price_item)
-            total_item = QTableWidgetItem(str(getattr(it, 'total')))
+            total_item = QTableWidgetItem(format_amount(getattr(it, 'total', 0.0)))
             self.cart_table.setItem(i, 4, total_item)
 
         # restore selection if possible
@@ -977,9 +1005,9 @@ class CatalogueWidget(QWidget):
             form.addRow(QLabel('Table:'), QLabel(str(tbl_display)))
             form.addRow(QLabel('Client:'), QLabel(client_name))
             form.addRow(QLabel('Serveuse:'), QLabel(serveuse_name))
-            form.addRow(QLabel('Sous-total:'), QLabel(f"{int(subtotal)} {self._get_currency()}"))
-            form.addRow(QLabel('Remise:'), QLabel(f"{int(remise)} {self._get_currency()}"))
-            form.addRow(QLabel('<b>Total à payer:</b>'), QLabel(f"<b>{int(total_final)} {self._get_currency()}</b>"))
+            form.addRow(QLabel('Sous-total:'), QLabel(f"{format_amount(subtotal)} {get_currency(self.entreprise_id)}"))
+            form.addRow(QLabel('Remise:'), QLabel(f"{format_amount(remise)} {get_currency(self.entreprise_id)}"))
+            form.addRow(QLabel('<b>Total à payer:</b>'), QLabel(f"<b>{format_amount(total_final)} {get_currency(self.entreprise_id)}</b>"))
             dlg_l.addWidget(summary_frame)
 
             # Amount received input (with change/remainder label)
@@ -1024,10 +1052,10 @@ class CatalogueWidget(QWidget):
                     v = float(amt_input.value()) if val is None else float(val)
                     if v >= total_final:
                         monnaie = v - total_final
-                        change_lbl.setText(f"Monnaie: {int(monnaie)} {self._get_currency()}")
+                        change_lbl.setText(f"Monnaie: {format_amount(monnaie)} {get_currency(self.entreprise_id)}")
                     else:
                         reste = total_final - v
-                        change_lbl.setText(f"Reste: {int(reste)} {self._get_currency()}")
+                        change_lbl.setText(f"Reste: {format_amount(reste)} {get_currency(self.entreprise_id)}")
                 except Exception:
                     change_lbl.setText('')
 
@@ -1048,14 +1076,14 @@ class CatalogueWidget(QWidget):
                         method = 'Espèces'
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
                         monnaie = amt - total_final
-                        QMessageBox.information(dlg, 'Succès', f'Paiement de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Monnaie: {int(monnaie)} {self._get_currency()}')
+                        QMessageBox.information(dlg, 'Succès', f'Paiement de {format_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Monnaie: {format_amount(monnaie)} {get_currency(self.entreprise_id)}')
                     else:
                         # partial payment -> credit
                         pay_amount = float(amt)
                         method = 'Crédit'
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
                         reste = total_final - pay_amount
-                        QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {int(pay_amount)} {self._get_currency()} enregistré ({method}). Reste: {int(reste)} {self._get_currency()}')
+                        QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {format_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Reste: {format_amount(reste)} {get_currency(self.entreprise_id)}')
                     # --- Nouvel ajout: fermer le panier même en cas de paiement partiel ---
                     # payment status is handled by VenteController.add_payment (payment_method)
                     # after payment, if panier has no products -> delete it and return to plan view
@@ -1142,10 +1170,10 @@ class CatalogueWidget(QWidget):
                 price = getattr(it, 'price', 0.0)
                 line_total = getattr(it, 'total', float(qty) * float(price))
                 total += float(line_total)
-                lines.append(f"{name}  x{int(qty)}  {int(price)} {self._get_currency()}  = {int(line_total)} {self._get_currency()}")
+                lines.append(f"{name}  x{int(qty)}  {format_amount(price)} {get_currency(self.entreprise_id)}  = {format_amount(line_total)} {get_currency(self.entreprise_id)}")
 
             txt = "\n".join(lines)
-            txt += f"\n\nTotal: {int(total)} {self._get_currency()}"
+            txt += f"\n\nTotal: {format_amount(total)} {get_currency(self.entreprise_id)}"
 
             # show in a dialog
             dlg = QDialog(self)
@@ -1213,7 +1241,7 @@ class CatalogueWidget(QWidget):
             subtotal = float(getattr(p, 'subtotal', 0.0) or 0.0)
             remise = float(getattr(p, 'remise_amount', 0.0) or 0.0)
             total_final = float(getattr(p, 'total_final', subtotal - remise))
-            self.total_label.setText(f"Total: {int(total_final)} {self._get_currency()}")
+            self.total_label.setText(f"Total: {format_amount(total_final)} {get_currency(self.entreprise_id)}")
         except Exception:
             pass
 
@@ -1268,17 +1296,50 @@ class CatalogueWidget(QWidget):
             except Exception:
                 pass
 
-    def _get_currency(self):
+    # currency/format helpers moved to ayanna_erp.utils.formatting (format_amount, get_currency)
+
+    def _category_color(self, category_name: str = None, category_id: int = None):
+        """Return a deterministic color for a category.
+
+        Preference order: known name mapping -> color palette by id or name hash.
+        This avoids many categories having the same fallback color.
+        """
         try:
-            db = get_database_manager()
-            session = db.get_session()
-            ent = session.query(Entreprise).filter_by(id=self.entreprise_id).first()
-            session.close()
-            if ent and getattr(ent, 'currency', None):
-                return getattr(ent, 'currency')
+            # explicit mapping for well-known categories
+            known = {
+                'Bière': '#F44336',
+                'Vin': '#9C27B0',
+                'Sucré': '#4CAF50',
+                'Whisky': '#3F51B5',
+                'Autres': '#FFEB3B',
+                'Champagne': '#FF4081',
+                'Cuisine': '#00BCD4'
+            }
+            if category_name:
+                # normalize for lookup (case-insensitive)
+                name = str(category_name).strip()
+                lname = name.lower()
+                # check known mapping case-insensitively
+                for k, v in known.items():
+                    if k.lower() == lname:
+                        return v
+
+            # palette of distinct colors for fallback
+            palette = [
+                '#F44336', '#9C27B0', '#4CAF50', '#3F51B5', '#FF9800',
+                '#009688', '#FF4081', '#00BCD4', '#8BC34A', '#795548',
+                '#607D8B', '#CDDC39', '#E91E63', '#9E9E9E'
+            ]
+            key = None
+            if category_id is not None:
+                key = int(category_id)
+            elif category_name:
+                key = abs(hash(category_name))
+            if key is None:
+                return palette[0]
+            return palette[int(key) % len(palette)]
         except Exception:
-            pass
-        return 'F'
+            return '#B0BEC5'
 
     def _apply_cart_column_proportions(self):
         """Apply proportional widths to cart columns: Produit 45%, Qté 10%, Prix 15%, Total 30%."""
