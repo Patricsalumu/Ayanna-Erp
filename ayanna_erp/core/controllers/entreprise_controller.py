@@ -304,14 +304,29 @@ class EntrepriseController(QObject):
             if enterprise_id is None:
                 session_enterprise_id = SessionManager.get_current_enterprise_id()
                 enterprise_id = session_enterprise_id if session_enterprise_id else self._active_enterprise_id
-                
+
+            # Convertir en float puis arrondir à 2 décimales
+            val = float(amount or 0)
+            rounded = round(val, 2)
+
+            # Si montant entier après arrondi, afficher sans décimales
+            if rounded.is_integer():
+                int_val = int(rounded)
+                # formatage avec séparateur espace tous les 3 chiffres
+                formatted = f"{int_val:,}".replace(",", " ")
+            else:
+                # Afficher avec 2 décimales, mais utiliser espace comme séparateur de milliers
+                formatted = f"{rounded:,.2f}".replace(",", " ")
+
             if show_symbol:
                 symbol = self.get_currency_symbol(enterprise_id)
-                return f"{amount:.2f} {symbol}"
-            else:
-                return f"{amount:.2f}"
-        except:
-            return f"{amount:.2f} €"  # Fallback
+                return f"{formatted} {symbol}"
+            return formatted
+        except Exception:
+            try:
+                return f"{int(round(float(amount or 0))):,}".replace(",", " ") + f" {self.get_currency_symbol()}"
+            except Exception:
+                return str(amount)
     
     def get_all_enterprises(self):
         """

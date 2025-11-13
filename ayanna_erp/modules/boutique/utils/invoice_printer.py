@@ -452,7 +452,7 @@ class InvoicePrintManager:
         return filename
 
     def print_receipt_53mm(self, invoice_data, payments_list, user_name, filename):
-        print('DEBUGG : Je suis appele debug print_receipt_53mm')
+        # Debug prints removed in production
         """Imprimer un reçu de paiement sur format 53mm avec détail de tous les paiements"""
         # Taille du ticket 53mm de large (format imprimante thermique)
         TICKET_WIDTH = 53 * mm
@@ -687,6 +687,21 @@ class InvoicePrintManager:
 
         # Lister chaque article
         if invoice_data.get('items'):
+            # helper to format amounts for 53mm (lowercase currency suffix)
+            def _fmt_ticket_amount(val):
+                try:
+                    s = self.format_amount(val)
+                    if isinstance(s, str) and ' ' in s:
+                        head, tail = s.rsplit(' ', 1)
+                        return f"{head} {tail.lower()}"
+                    return s
+                except Exception:
+                    try:
+                        return str(val)
+                    except Exception:
+                        return ''
+
+            subtotal_articles = 0
             for item in invoice_data['items']:
                 # Nom de l'article (tronqué si nécessaire)
                 item_name = item.get('name', 'N/A')[:30]
@@ -697,11 +712,23 @@ class InvoicePrintManager:
                 # Quantité x Prix = Total
                 quantity = item.get('quantity', 0)
                 unit_price = item.get('unit_price', 0)
-                total_line = quantity * unit_price
+                try:
+                    total_line = quantity * unit_price
+                except Exception:
+                    total_line = 0
+                subtotal_articles += total_line
                 # Utiliser format_amount pour un affichage uniforme
-                item_detail = f"{int(quantity)} x {self.format_amount(unit_price)} = {self.format_amount(total_line)}"
+                item_detail = f"{int(quantity)} x {_fmt_ticket_amount(unit_price)} = {_fmt_ticket_amount(total_line)}"
                 c.drawString(5*mm, y_position, item_detail)
                 y_position -= 2.5*mm
+
+            # Afficher le sous-total des articles juste après la liste
+            try:
+                c.setFont('Helvetica-Bold', 6)
+                c.drawString(3*mm, y_position, f"Sous-total articles: {_fmt_ticket_amount(subtotal_articles)}")
+                y_position -= 3.5*mm
+            except Exception:
+                pass
 
         # Ligne de séparation avant les paiements
         y_position -= 2*mm
@@ -726,8 +753,11 @@ class InvoicePrintManager:
                 # Montant (formaté)
                 c.setFont('Helvetica', 6)
                 amount = payment.get('amount', 0)
-                total_paid += amount
-                amount_text = self.format_amount(amount)
+                try:
+                    total_paid += amount
+                except Exception:
+                    pass
+                amount_text = _fmt_ticket_amount(amount)
                 c.drawString(3*mm, y_position, amount_text)
                 y_position -= 2*mm
 
@@ -777,28 +807,28 @@ class InvoicePrintManager:
         balance = net_a_payer - total_paid
 
         # Sous total (avant remise)
-        sous_total_text = f"Sous total: {self.format_amount(sous_total_val)}"
+        sous_total_text = f"Sous total: {_fmt_ticket_amount(sous_total_val)}"
         c.drawString(2*mm, y_position, sous_total_text)
         y_position -= 3.5*mm
 
         # Remise
-        remise_text = f"Remise: {self.format_amount(remise_val)}"
+        remise_text = f"Remise: {_fmt_ticket_amount(remise_val)}"
         c.drawString(2*mm, y_position, remise_text)
         y_position -= 3.5*mm
 
         # Net à payer (après remise)
-        total_text = f"Net à payer: {self.format_amount(net_a_payer)}"
+        total_text = f"Net à payer: {_fmt_ticket_amount(net_a_payer)}"
         c.drawString(2*mm, y_position, total_text)
         y_position -= 3.5*mm
 
         # Total payé
-        paid_text = f"Paye: {self.format_amount(total_paid)}"
+        paid_text = f"Paye: {_fmt_ticket_amount(total_paid)}"
         c.drawString(2*mm, y_position, paid_text)
         y_position -= 3.5*mm
 
         # Reste à payer
         c.setFont('Helvetica-Bold', 7)
-        balance_text = f"Reste: {self.format_amount(balance)}"
+        balance_text = f"Reste: {_fmt_ticket_amount(balance)}"
         c.drawString(2*mm, y_position, balance_text)
         y_position -= 3*mm
 

@@ -40,6 +40,18 @@ class CommandesIndexWidget(QWidget):
         
         self.init_ui()
         self.load_commandes()
+
+    def format_money(self, amount):
+        """Formatage uniforme des montants avec espace milliers et suffixe de devise en minuscules."""
+        try:
+            from ayanna_erp.utils.formatting import format_amount as _fmt
+            symbol = (self.entreprise_controller.get_currency_symbol() or '').lower()
+            return f"{_fmt(amount)} {symbol}"
+        except Exception:
+            try:
+                return f"{int(round(float(amount))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
+            except Exception:
+                return str(amount)
         
     def get_currency_symbol(self):
         """Récupère le symbole de devise depuis l'entreprise"""
@@ -148,9 +160,13 @@ class CommandesIndexWidget(QWidget):
         export_btn = QPushButton("📊 Exporter")
         export_btn.clicked.connect(self.export_commandes)
         export_btn.setStyleSheet("QPushButton { padding: 8px 15px; }")
+        export_products_btn = QPushButton("📦 Export produits")
+        export_products_btn.clicked.connect(self.export_products_sold)
+        export_products_btn.setStyleSheet("QPushButton { padding: 8px 15px; }")
         
         actions_layout.addWidget(refresh_btn)
         actions_layout.addWidget(export_btn)
+        actions_layout.addWidget(export_products_btn)
         actions_layout.addStretch()
         
         filters_layout.addLayout(actions_layout, 2, 0, 1, 5)
@@ -257,6 +273,10 @@ class CommandesIndexWidget(QWidget):
         self.detail_numero = QLabel("-")
         self.detail_date = QLabel("-")
         self.detail_client = QLabel("-")
+        # Champs spécifiques au module Restaurant
+        self.detail_table = QLabel("-")
+        self.detail_salle = QLabel("-")
+        self.detail_serveuse = QLabel("-")
         self.detail_sous_total = QLabel("-")
         self.detail_remise = QLabel("-")
         self.detail_total = QLabel("-")
@@ -267,6 +287,10 @@ class CommandesIndexWidget(QWidget):
         info_layout.addRow("N° Commande:", self.detail_numero)
         info_layout.addRow("Date:", self.detail_date)
         info_layout.addRow("Client:", self.detail_client)
+        # Ajouter les informations restaurant si nécessaire
+        info_layout.addRow("Table:", self.detail_table)
+        info_layout.addRow("Salle:", self.detail_salle)
+        info_layout.addRow("Serveuse:", self.detail_serveuse)
         info_layout.addRow("Sous-total:", self.detail_sous_total)
         info_layout.addRow("Remise:", self.detail_remise)
         info_layout.addRow("Total:", self.detail_total)
@@ -456,20 +480,20 @@ class CommandesIndexWidget(QWidget):
             self.commandes_table.setItem(row, 3, QTableWidgetItem(items_text))
 
             # Sous-total
-            self.commandes_table.setItem(row, 4, QTableWidgetItem(f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}"))
+            self.commandes_table.setItem(row, 4, QTableWidgetItem(self.format_money(commande.get('subtotal', 0))))
 
             # Remise
-            self.commandes_table.setItem(row, 5, QTableWidgetItem(f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}"))
+            self.commandes_table.setItem(row, 5, QTableWidgetItem(self.format_money(commande.get('remise_amount', 0))))
 
             # Total
-            total_item = QTableWidgetItem(f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}")
+            total_item = QTableWidgetItem(self.format_money(commande.get('total_final', 0)))
             if commande.get('payment_method') == 'Crédit':
                 total_item.setBackground(QColor("#ffecb3"))
             self.commandes_table.setItem(row, 6, total_item)
 
             # Payé (montant déjà payé)
             montant_paye = commande.get('montant_paye', 0)
-            paye_item = QTableWidgetItem(f"{montant_paye:.0f} {self.get_currency_symbol()}")
+            paye_item = QTableWidgetItem(self.format_money(montant_paye))
             if montant_paye >= commande.get('total_final', 0):
                 paye_item.setBackground(QColor("#c8e6c9"))  # Vert pour soldé
             elif montant_paye > 0:
@@ -493,8 +517,8 @@ class CommandesIndexWidget(QWidget):
         # Mise à jour des widgets de stats
         if hasattr(self, 'stat_widgets'):
             self.stat_widgets.get('commandes_aujourd\'hui', QLabel()).setText(str(stats['commandes_aujourd_hui']))
-            self.stat_widgets.get('total_ca', QLabel()).setText(f"{stats['total_ca']:.0f} {self.get_currency_symbol()}")
-            self.stat_widgets.get('créances', QLabel()).setText(f"{stats['total_creances']:.0f} {self.get_currency_symbol()}")
+            self.stat_widgets.get('total_ca', QLabel()).setText(self.format_money(stats['total_ca']))
+            self.stat_widgets.get('créances', QLabel()).setText(self.format_money(stats['total_creances']))
             
         self.update_period_stats(commandes)
         
@@ -548,6 +572,7 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             print(f"❌ Erreur filter_commandes: {e}")
         
     def on_commande_selected(self):
+        print("DEBUGG : Sélection de commande détectée")
         """Gérer la sélection d'une commande dans le tableau"""
         selected_rows = self.commandes_table.selectionModel().selectedRows()
         if not selected_rows:
@@ -556,6 +581,7 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             
         row = selected_rows[0].row()
         commande_id = self.commandes_table.item(row, 0).text()
+        print(f"DEBUGG : Commande sélectionnée ID = {commande_id}")
         
         # Récupérer les détails de la commande
         try:
@@ -589,16 +615,34 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
         self.detail_date.setText(date_str)
         
         self.detail_client.setText(str(commande.get('client_name', '-')))
-        self.detail_sous_total.setText(f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}")
-        self.detail_remise.setText(f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}")
-        self.detail_total.setText(f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}")
+        # Si commande restaurant et client non renseigné, afficher fallback
+        if commande.get('module') == 'restaurant' and not commande.get('client_name'):
+            client_id = commande.get('client_id') or commande.get('client') or None
+            if client_id:
+                self.detail_client.setText(f"Client #{client_id}")
+            else:
+                self.detail_client.setText("Client restaurant")
+        # Afficher les métadonnées Restaurant si présentes
+        if commande.get('module') == 'restaurant':
+            self.detail_table.setText(str(commande.get('table_number') or commande.get('table') or '-'))
+            self.detail_salle.setText(str(commande.get('salle_name') or commande.get('salle') or '-'))
+            # serveuse peut être fournie sous serveuse_name ou waiter_name
+            self.detail_serveuse.setText(str(commande.get('serveuse_name') or commande.get('serveuse') or commande.get('waiter_name') or '-'))
+        else:
+            # Cacher/mettre par défaut pour les commandes boutique
+            self.detail_table.setText('-')
+            self.detail_salle.setText('-')
+            self.detail_serveuse.setText('-')
+        self.detail_sous_total.setText(self.format_money(commande.get('subtotal', 0)))
+        self.detail_remise.setText(self.format_money(commande.get('remise_amount', 0)))
+        self.detail_total.setText(self.format_money(commande.get('total_final', 0)))
         
         montant_paye = commande.get('montant_paye', 0)
         total_final = commande.get('total_final', 0)
         restant = total_final - montant_paye
         
-        self.detail_paye.setText(f"{montant_paye:.0f} {self.get_currency_symbol()}")
-        self.detail_restant.setText(f"{restant:.0f} {self.get_currency_symbol()}")
+        self.detail_paye.setText(self.format_money(montant_paye))
+        self.detail_restant.setText(self.format_money(restant))
         
         # Statut de paiement
         if montant_paye >= total_final:
@@ -683,6 +727,10 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
         self.detail_statut.setText("-")
         self.detail_statut.setStyleSheet("")
         self.products_list.setText("Sélectionnez une commande pour voir les détails")
+        # Vider champs restaurant
+        self.detail_table.setText("-")
+        self.detail_salle.setText("-")
+        self.detail_serveuse.setText("-")
         
         # Vider les notes
         self.detail_notes.setText("Aucune note")
@@ -769,14 +817,22 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
                 QMessageBox.warning(self, "Erreur", f"Le montant saisi ({amount:.0f} {self.get_currency_symbol()}) dépasse le restant dû ({montant_restant:.0f} {self.get_currency_symbol()}).")
                 return
             
-            # Utiliser le contrôleur pour traiter le paiement avec logique comptable
-            success, message = self.commande_controller.process_commande_payment(
-                commande_id=commande_details['id'],
-                payment_method=payment_method,
-                amount=amount,
-                pos_id=self.boutique_controller.pos_id,
-                current_user=self.current_user
-            )
+            # Utiliser le contrôleur approprié selon le module (restaurant vs boutique)
+            if commande_details.get('module') == 'restaurant':
+                success, message = self.commande_controller.process_restaurant_payment(
+                    panier_id=commande_details['id'],
+                    payment_method=payment_method,
+                    amount=amount,
+                    current_user=self.current_user
+                )
+            else:
+                success, message = self.commande_controller.process_commande_payment(
+                    commande_id=commande_details['id'],
+                    payment_method=payment_method,
+                    amount=amount,
+                    pos_id=self.boutique_controller.pos_id,
+                    current_user=self.current_user
+                )
             
             if not success:
                 QMessageBox.critical(self, "Erreur", message)
@@ -833,6 +889,13 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
                     'user_name': 'Utilisateur'
                 }]
             }
+            # Indiquer le module source pour guider l'impression (restaurant vs boutique)
+            invoice_data['module'] = commande_details.get('module', 'boutique')
+            # Transmettre les métadonnées restaurant si disponibles (pour impression 53mm)
+            invoice_data['table'] = commande_details.get('table_number') or commande_details.get('table')
+            invoice_data['salle'] = commande_details.get('salle_name') or commande_details.get('salle')
+            invoice_data['serveuse'] = commande_details.get('serveuse_name') or commande_details.get('serveuse') or commande_details.get('waiter_name')
+            invoice_data['comptoiriste'] = commande_details.get('comptoiriste') or commande_details.get('comptoir')
             
             # Construire la liste des items à partir des détails produits/services
             # Pour simplifier, on utilise les détails textuels existants
@@ -900,15 +963,31 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             preview_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
             options_layout.addWidget(preview_label)
 
-            # Aperçu simplifié
-            notes_preview = f" ({invoice_data['notes'][:50]}...)" if len(invoice_data['notes']) > 50 else f" ({invoice_data['notes']})" if invoice_data['notes'] else ""
-            preview_text = f"""
-N° Commande: {invoice_data['reference']}
-Client: {invoice_data['client_nom']}
-Total: {invoice_data['total_ttc']:.0f} {self.get_currency_symbol()}
-Paiement: {invoice_data['payments'][0]['payment_method']}
+            # Aperçu simplifié (sécuriser notes qui peuvent être None)
+            notes_raw = invoice_data.get('notes')
+            notes = str(notes_raw) if notes_raw is not None else ''
+            if len(notes) > 50:
+                notes_preview = f" ({notes[:50]}...)"
+            elif notes:
+                notes_preview = f" ({notes})"
+            else:
+                notes_preview = ""
+                # Sécuriser l'accès aux paiements (liste attendue)
+                payments_list_preview = invoice_data.get('payments') or []
+                payment_method_preview = ''
+                if payments_list_preview and isinstance(payments_list_preview, list):
+                    try:
+                        payment_method_preview = payments_list_preview[0].get('payment_method', '')
+                    except Exception:
+                        payment_method_preview = ''
+
+                preview_text = f"""
+N° Commande: {invoice_data.get('reference', '')}
+Client: {invoice_data.get('client_nom', '')}
+Total: {invoice_data.get('total_ttc', 0):.0f} {self.get_currency_symbol()}
+Paiement: {payment_method_preview}
 Notes: {notes_preview}
-            """.strip()
+                """.strip()
 
             preview_display = QTextEdit()
             preview_display.setPlainText(preview_text)
@@ -1006,17 +1085,25 @@ Notes: {notes_preview}
             )
             
             if reply == QMessageBox.StandardButton.Yes:
-                # Appeler la méthode d'annulation du contrôleur de vente
-                success, message = self.vente_controller.cancel_sale(self.selected_commande_id)
-                
-                if success:
-                    QMessageBox.information(self, "Succès", message)
-                    # Recharger les données
-                    self.load_commandes()
-                    # Vider les détails
-                    self.clear_details()
-                else:
-                    QMessageBox.critical(self, "Erreur", f"Échec de l'annulation: {message}")
+                # Déterminer le module et appeler la méthode d'annulation appropriée
+                try:
+                    détails = self.commande_controller.get_commande_details(self.selected_commande_id)
+                    if détails and détails.get('module') == 'restaurant':
+                        success, message = self.commande_controller.cancel_restaurant_commande(détails['id'], self.current_user)
+                    else:
+                        success, message = self.vente_controller.cancel_sale(self.selected_commande_id)
+
+                    if success:
+                        QMessageBox.information(self, "Succès", message)
+                        # Recharger les données
+                        self.load_commandes()
+                        # Vider les détails
+                        self.clear_details()
+                    else:
+                        QMessageBox.critical(self, "Erreur", f"Échec de l'annulation: {message}")
+                except Exception as e:
+                    QMessageBox.critical(self, "Erreur", f"Erreur lors de l'annulation: {e}")
+                    print(f"❌ Erreur on_cancel_commande inner: {e}")
                     
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'annulation: {e}")
@@ -1125,6 +1212,38 @@ Notes: {notes_preview}
             QMessageBox.critical(dialog, "Erreur", f"Erreur lors de l'impression: {e}")
             print(f"❌ Erreur _print_commande_invoice: {e}")
             
+    def export_products_sold(self):
+        """Exporter le récapitulatif produits/services vendus pour la période sélectionnée."""
+        try:
+            date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
+            date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
+
+            if not date_debut or not date_fin:
+                QMessageBox.warning(self, "Dates manquantes", "Veuillez sélectionner une période valide.")
+                return
+
+            path = self.commande_controller.export_products_summary(date_debut, date_fin, include_services=True)
+            if path and os.path.exists(path):
+                try:
+                    if os.name == 'nt':
+                        os.startfile(path)
+                    else:
+                        import subprocess, sys
+                        if sys.platform == 'darwin':
+                            subprocess.run(['open', path], check=True)
+                        else:
+                            subprocess.run(['xdg-open', path], check=True)
+
+                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{path}")
+                except Exception:
+                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{path}\n(ouvre manuellement si nécessaire)")
+            else:
+                QMessageBox.warning(self, "Erreur", "Impossible de générer l'export produits.")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {e}")
+            print(f"❌ Erreur export_products_sold: {e}")
+
     def export_commandes(self):
         """Exporter les commandes en PDF professionnel"""
         try:
@@ -1319,11 +1438,30 @@ Notes: {notes_preview}
             
             # Statistiques générales (utiliser la source DB pour cohérence)
             stats = self.commande_controller.get_period_commandes_stats(date_debut, date_fin)
+            # helper local pour formatage avec espaces milliers + devise en minuscules
+            try:
+                from ayanna_erp.utils.formatting import format_amount as _fmt
+                currency_lower = self.get_currency_symbol().lower()
+                def _fmt_local(val):
+                    try:
+                        return f"{_fmt(val)} {currency_lower}"
+                    except Exception:
+                        try:
+                            return f"{int(round(float(val))):,}".replace(',', ' ') + f" {currency_lower}"
+                        except Exception:
+                            return str(val)
+            except Exception:
+                def _fmt_local(val):
+                    try:
+                        return f"{int(round(float(val))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
+                    except Exception:
+                        return str(val)
+
             stats_data = [
                 ['Statistiques générales', ''],
-                ['Total CA:', f"{stats.get('total_ca',0):.0f} {self.get_currency_symbol()}"],
-                ['Total payés:', f"{stats.get('total_paid',0):.0f} {self.get_currency_symbol()}"],
-                ['Total non payés:', f"{stats.get('total_unpaid',0):.0f} {self.get_currency_symbol()}"],
+                ['Total CA:', _fmt_local(stats.get('total_ca', 0))],
+                ['Total payés:', _fmt_local(stats.get('total_paid', 0))],
+                ['Total non payés:', _fmt_local(stats.get('total_unpaid', 0))],
                 ['Créances (nb):', f"{stats.get('nb_creances',0)}"],
                 ['Commandes:', f"{stats.get('nb_commandes',0)}"]
             ]
@@ -1369,10 +1507,10 @@ Notes: {notes_preview}
                     date_str,
                     str(commande.get('client_name', '')),
                     produits_formatted,
-                    f"{commande.get('subtotal', 0):.0f} {self.get_currency_symbol()}",
-                    f"{commande.get('remise_amount', 0):.0f} {self.get_currency_symbol()}",
-                    f"{commande.get('total_final', 0):.0f} {self.get_currency_symbol()}",
-                    f"{commande.get('montant_paye', 0):.0f} {self.get_currency_symbol()}",
+                    _fmt_local(commande.get('subtotal', 0)),
+                    _fmt_local(commande.get('remise_amount', 0)),
+                    _fmt_local(commande.get('total_final', 0)),
+                    _fmt_local(commande.get('montant_paye', 0)),
                     (commande.get('status') or '').capitalize()
                 ]
                 table_data.append(row)

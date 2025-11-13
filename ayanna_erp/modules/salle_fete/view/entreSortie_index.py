@@ -23,7 +23,8 @@ import json
 from ..controller.entre_sortie_controller import EntreSortieController
 from ..controller.paiement_controller import PaiementController
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
-from ayanna_erp.modules.boutique.model.models import ShopExpense, ShopPayment, ShopPanier, ShopClient
+from ayanna_erp.modules.boutique.model.models import ShopPayment, ShopPanier, ShopClient
+from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier, RestauPayment, RestauProduitPanier
 from ayanna_erp.modules.achats.models.achats_models import AchatDepense
 
 
@@ -72,7 +73,7 @@ class DepenseDialog(QDialog):
         
         # Montant
         self.montant_spinbox = QDoubleSpinBox()
-        self.montant_spinbox.setRange(0.01, 999999.99)
+        self.montant_spinbox.setRange(0.01, 99999999.99)
         self.montant_spinbox.setDecimals(2)
         self.montant_spinbox.setSuffix(f" {self.get_currency_symbol()}")
         form_layout.addRow("Montant *:", self.montant_spinbox)
@@ -667,6 +668,49 @@ class EntreeSortieIndex(QWidget):
                     
             except Exception as e:
                 print(f"Erreur lors du chargement des paiements boutique: {e}")
+                
+                
+            # Charger les entrées (paiements) depuis restau_payments
+            try:
+                from ayanna_erp.database.database_manager import DatabaseManager
+                db_manager = DatabaseManager()
+                session = db_manager.get_session()
+                
+                # Récupérer les paiements de boutique pour la date sélectionnée
+                restau_payments = session.query(RestauPayment)\
+                    .join(RestauPanier)\
+                    .filter(
+                        # ShopPanier.pos_id == pos_id,
+                        RestauPayment.created_at.between(start_datetime, end_datetime),
+                        RestauPanier.status.in_(['valide', 'en_cours'])
+                    )\
+                    .all()
+                
+                for payment in restau_payments:
+                    # Récupérer le nom du client
+                    client_name = "Client anonyme"
+                    if payment.panier.client_id:
+                        # client_name = f"{payment.panier.client.nom or ''} {payment.panier.client.prenom or ''}".strip()
+                        if not client_name:
+                            client_name = f"Client #{payment.panier.client.id}"
+                    
+                    entry = {
+                        'id': f'RESTAU_PAY_{payment.id}',
+                        'datetime': payment.created_at,
+                        'type': 'Entrée',
+                        'libelle': f'[VENTE] Encaissement Panier - {payment.panier_id} - {client_name}',
+                        'categorie': 'RESTAU_BAR',
+                        'montant_entree': float(payment.amount),
+                        'montant_sortie': 0.0,
+                        'utilisateur': 'Système',  # Pas d'info utilisateur pour les paiements boutique
+                        'description': f'Panier #{payment.panier.id or payment.panier.id}'
+                    }
+                    self.journal_data.append(entry)
+                    
+                session.close()
+                    
+            except Exception as e:
+                print(f"Erreur lors du chargement des paiements restaurant: {e}")
             
             # Trier par date/heure décroissante
             self.journal_data.sort(key=lambda x: x['datetime'], reverse=True)
