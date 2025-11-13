@@ -233,7 +233,10 @@ class CommandeController:
                     if payment_filter and payment_filter != "Tous":
                         restau_conditions.append("rp.payment_method = :payment_method")
                     if search_term:
-                        restau_conditions.append("(CAST(rp.id AS TEXT) LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search)")
+                        # rechercher par id panier, nom client ou produit dans les lignes restau
+                        restau_conditions.append(
+                            "(CAST(rp.id AS TEXT) LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search OR EXISTS (SELECT 1 FROM restau_produit_panier rpp LEFT JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = rp.id AND (cp.name LIKE :search OR CAST(rpp.product_id AS TEXT) LIKE :search)))"
+                        )
 
                     if restau_conditions:
                         restau_base += " WHERE " + " AND ".join(restau_conditions)
