@@ -117,6 +117,7 @@ class CommandeController:
                         "EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = sp.id AND cp.name LIKE :search)",
                         # Recherche dans les services
                         "EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = sp.id AND ss.name LIKE :search)"
+                        
                     ]
                     conditions.append("(" + " OR ".join(search_conditions) + ")")
                     params['search'] = f"%{search_term}%"
@@ -266,6 +267,16 @@ class CommandeController:
                     restau_query = text(restau_base)
                     restau_rows = session.execute(restau_query, params).fetchall()
                     for r in restau_rows:
+                        # Si created_at absent ou null dans la table, forcer l'horloge machine maintenant
+                        try:
+                            if not getattr(r, 'created_at', None):
+                                now = datetime.now()
+                                session.execute(text("UPDATE restau_paniers SET created_at = :now, updated_at = :now WHERE id = :id"), {'now': now, 'id': r.id})
+                                # recharger la valeur locale pour affichage
+                                r = session.execute(text("SELECT * FROM restau_paniers WHERE id = :id"), {'id': r.id}).fetchone()
+                        except Exception:
+                            # si la mise à jour échoue (schéma différent), continuer sans interrompre
+                            pass
                         prod = r.produits or ''
                         serv = r.services or ''
                         if prod and serv:
@@ -315,17 +326,24 @@ class CommandeController:
         Returns:
             Dictionnaire des statistiques
         """
+        # Si la liste est vide, renvoyer des zéros
         if not commandes:
             return {
                 'total_ca': 0,
                 'total_creances': 0,
                 'commandes_aujourd_hui': 0,
                 'nb_commandes': 0,
-                'panier_moyen': 0
+                'panier_moyen': 0,
+                'commandes_payees': 0,
+                'commandes_non_payees': 0,
+                'commandes_partielles': 0
             }
 
-        total_ca = sum(c['total_final'] for c in commandes)
-        total_creances = sum(c['total_final'] for c in commandes if c['payment_method'] == 'Crédit')
+        # total du CA (somme des total_final)
+        total_ca = sum(float(c.get('total_final', 0) or 0) for c in commandes)
+
+        # Calculer les créances = somme de (total_final - montant_paye) pour les paniers où paid < total
+        total_creances = 0.0
 
         # Calculer les statistiques de paiement
         commandes_payees = 0
@@ -333,15 +351,23 @@ class CommandeController:
         commandes_partielles = 0
 
         for c in commandes:
-            montant_paye = c.get('montant_paye', 0)
-            total_final = c.get('total_final', 0)
+            montant_paye = float(c.get('montant_paye', 0) or 0)
+            total_final = float(c.get('total_final', 0) or 0)
 
-            if montant_paye >= total_final:
+            # créance partielle sur cette commande
+            if total_final > montant_paye:
+                total_creances += (total_final - montant_paye)
+
+            # classifier paiement
+            if montant_paye >= total_final and total_final > 0:
                 commandes_payees += 1
-            elif montant_paye > 0:
+            elif montant_paye > 0 and montant_paye < total_final:
                 commandes_partielles += 1
             else:
-                commandes_non_payees += 1
+                # montant_paye == 0 OR total_final == 0
+                # considérer comme non payée si total_final > 0
+                if total_final > 0:
+                    commandes_non_payees += 1
 
         # Calculer les commandes d'aujourd'hui
         commandes_aujourd_hui = 0
@@ -363,7 +389,7 @@ class CommandeController:
                     pass  # Ignorer les dates mal formatées
 
         nb_commandes = len(commandes)
-        panier_moyen = total_ca / nb_commandes if nb_commandes > 0 else 0
+        panier_moyen = (total_ca / nb_commandes) if nb_commandes > 0 else 0
 
         return {
             'total_ca': total_ca,
@@ -400,72 +426,79 @@ class CommandeController:
                 d2 = datetime.combine(date_fin, time.max)
 
             with self.db_manager.get_session() as session:
-                # Récupérer commandes valides dans la période
-                q_cmd = text("""
-                    SELECT id, COALESCE(total_final,0) as total_final
-                    FROM shop_paniers
-                    WHERE created_at >= :d1 AND created_at <= :d2
-                    AND LOWER(COALESCE(status,'')) <> 'cancelled'
+                # Calculer CA total (shop + restau) en excluant les statuts annulés
+                q_ca = text("""
+                    SELECT
+                      COALESCE((SELECT SUM(total_final) FROM shop_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) <> 'cancelled'),0)
+                      + COALESCE((SELECT SUM(total_final) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé')),0)
+                      as total_ca
                 """)
-                res = session.execute(q_cmd, {'d1': d1, 'd2': d2})
-                rows = res.fetchall()
-                if not rows:
-                    return {
-                        'total_ca': 0,
-                        'total_paid': 0,
-                        'total_unpaid': 0,
-                        'total_creances': 0,
-                        'nb_commandes': 0,
-                        'panier_moyen': 0,
-                    }
+                ca_row = session.execute(q_ca, {'d1': d1, 'd2': d2}).fetchone()
+                total_ca = float(ca_row.total_ca or 0)
 
-                total_ca = sum((r.total_final or 0) for r in rows)
-
-                # Total payé : somme des paiements liés aux commandes sélectionnées (via join sur date)
+                # Total payé : sommes des paiements shop + restau pour paniers valides
                 q_paid = text("""
-                    SELECT COALESCE(SUM(sp.amount),0) as total_paid
-                    FROM shop_payments sp
-                    JOIN shop_paniers p ON sp.panier_id = p.id
-                    WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                    AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                    SELECT
+                      COALESCE((SELECT SUM(sp.amount) FROM shop_payments sp JOIN shop_paniers p ON sp.panier_id = p.id WHERE p.created_at >= :d1 AND p.created_at <= :d2 AND LOWER(COALESCE(p.status,'')) <> 'cancelled'),0)
+                      + COALESCE((SELECT SUM(rp.amount) FROM restau_payments rp JOIN restau_paniers r ON rp.panier_id = r.id WHERE r.created_at >= :d1 AND r.created_at <= :d2 AND LOWER(COALESCE(r.status,'')) NOT IN ('annule','annulé')),0)
+                      as total_paid
                 """)
                 paid_row = session.execute(q_paid, {'d1': d1, 'd2': d2}).fetchone()
-                total_paid = paid_row.total_paid if paid_row and paid_row.total_paid is not None else 0
+                total_paid = float(paid_row.total_paid or 0)
 
-                # Total créances : sommes des (total_final - montant_paye) pour commandes où montant_paye < total_final
+                # Total créances : somme des (total_final - montant_paye) pour les paniers (shop + restau) où montant_paye < total_final
                 q_creances = text("""
-                    SELECT COALESCE(SUM(p.total_final - COALESCE(p.montant_paye,0)),0) as total_creances
+                    SELECT COALESCE(SUM(t.total_final - COALESCE(t.montant_paye,0)),0) as total_creances
                     FROM (
                         SELECT pp.id, COALESCE(pp.total_final,0) as total_final,
                                (SELECT COALESCE(SUM(sp.amount),0) FROM shop_payments sp WHERE sp.panier_id = pp.id) as montant_paye
                         FROM shop_paniers pp
                         WHERE pp.created_at >= :d1 AND pp.created_at <= :d2
                         AND LOWER(COALESCE(pp.status,'')) <> 'cancelled'
-                    ) p
-                    WHERE COALESCE(p.montant_paye,0) < COALESCE(p.total_final,0)
+                        UNION ALL
+                        SELECT rp.id, COALESCE(rp.total_final,0) as total_final,
+                               (SELECT COALESCE(SUM(rpay.amount),0) FROM restau_payments rpay WHERE rpay.panier_id = rp.id) as montant_paye
+                        FROM restau_paniers rp
+                        WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé')
+                    ) t
+                    WHERE COALESCE(t.montant_paye,0) < COALESCE(t.total_final,0)
                 """)
                 cre_row = session.execute(q_creances, {'d1': d1, 'd2': d2}).fetchone()
-                total_creances = cre_row.total_creances if cre_row and cre_row.total_creances is not None else 0
+                total_creances = float(cre_row.total_creances or 0)
 
-                # Nombre de créances (nombre de commandes where montant_paye < total_final)
+                # Nombre de créances (nombre de commandes où montant_paye < total_final)
                 q_nb_creances = text("""
-                    SELECT COUNT(1) as nb_creances
+                    SELECT COALESCE(SUM(case when COALESCE(t.montant_paye,0) < COALESCE(t.total_final,0) then 1 else 0 end),0) as nb_creances
                     FROM (
-                        SELECT pp.id,
-                               (SELECT COALESCE(SUM(sp.amount),0) FROM shop_payments sp WHERE sp.panier_id = pp.id) as montant_paye,
-                               COALESCE(pp.total_final,0) as total_final
+                        SELECT pp.id, COALESCE(pp.total_final,0) as total_final,
+                               (SELECT COALESCE(SUM(sp.amount),0) FROM shop_payments sp WHERE sp.panier_id = pp.id) as montant_paye
                         FROM shop_paniers pp
                         WHERE pp.created_at >= :d1 AND pp.created_at <= :d2
                         AND LOWER(COALESCE(pp.status,'')) <> 'cancelled'
+                        UNION ALL
+                        SELECT rp.id, COALESCE(rp.total_final,0) as total_final,
+                               (SELECT COALESCE(SUM(rpay.amount),0) FROM restau_payments rpay WHERE rpay.panier_id = rp.id) as montant_paye
+                        FROM restau_paniers rp
+                        WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé')
                     ) t
-                    WHERE COALESCE(t.montant_paye,0) < COALESCE(t.total_final,0)
                 """)
                 nb_cre_row = session.execute(q_nb_creances, {'d1': d1, 'd2': d2}).fetchone()
                 nb_creances = int(nb_cre_row.nb_creances) if nb_cre_row and nb_cre_row.nb_creances is not None else 0
 
                 total_unpaid = total_ca - total_paid
 
-                nb_commandes = len(rows)
+                # Nombre total de commandes (shop + restau)
+                q_nb_cmd = text("""
+                    SELECT
+                      COALESCE((SELECT COUNT(1) FROM shop_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) <> 'cancelled'),0)
+                      + COALESCE((SELECT COUNT(1) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé')),0)
+                      as nb_commandes
+                """)
+                nb_row = session.execute(q_nb_cmd, {'d1': d1, 'd2': d2}).fetchone()
+                nb_commandes = int(nb_row.nb_commandes) if nb_row and nb_row.nb_commandes is not None else 0
+
                 panier_moyen = (total_ca / nb_commandes) if nb_commandes > 0 else 0
 
                 return {
@@ -747,6 +780,161 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
             print(f"❌ Erreur export_products_summary: {e}")
             return ''
 
+    def get_products_summary(self, date_debut, date_fin, include_services: bool = True):
+        """
+        Retourne la liste des produits/services vendus (rows_out) pour la période donnée.
+        Même logique qu'export_products_summary mais renvoie les lignes au lieu d'écrire un CSV.
+        """
+        from datetime import datetime as _dt
+        # Normaliser bornes
+        if isinstance(date_debut, _dt):
+            d1 = date_debut
+        else:
+            d1 = datetime.combine(date_debut, datetime.min.time())
+        if isinstance(date_fin, _dt):
+            d2 = date_fin
+        else:
+            d2 = datetime.combine(date_fin, datetime.max.time())
+
+        try:
+            with self.db_manager.get_session() as session:
+                # Rassembler ventes produits (boutique)
+                q_products = text("""
+                    SELECT cp.id as product_id, cp.name as product_name,
+                           COALESCE(SUM(spp.quantity),0) as sold_qty,
+                           COALESCE(MAX(cp.price_unit),0) as unit_price
+                    FROM shop_paniers_products spp
+                    LEFT JOIN shop_paniers p ON spp.panier_id = p.id
+                    LEFT JOIN core_products cp ON spp.product_id = cp.id
+                    WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                    AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                    GROUP BY cp.id, cp.name
+                """)
+                prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
+
+                # Ventes restaurant
+                q_restau = text("""
+                    SELECT cp.id as product_id, cp.name as product_name,
+                           COALESCE(SUM(rpp.quantity),0) as sold_qty,
+                           COALESCE(MAX(cp.price_unit),0) as unit_price
+                    FROM restau_produit_panier rpp
+                    LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
+                    LEFT JOIN core_products cp ON rpp.product_id = cp.id
+                    WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                    AND LOWER(COALESCE(rp.status,'')) <> 'annule'
+                    GROUP BY cp.id, cp.name
+                """)
+                restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
+
+                # Services (shop)
+                service_map = []
+                if include_services:
+                    q_services = text("""
+                        SELECT ss.id as service_id, ss.name as service_name,
+                               COALESCE(SUM(sps.quantity),0) as sold_qty,
+                               COALESCE(MAX(ss.price),0) as unit_price
+                        FROM shop_paniers_services sps
+                        LEFT JOIN shop_paniers p ON sps.panier_id = p.id
+                        LEFT JOIN shop_services ss ON sps.service_id = ss.id
+                        WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                        AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                        GROUP BY ss.id, ss.name
+                    """)
+                    service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
+
+                # Agréger produits (boutique + restaurant)
+                items = {}
+                for r in prod_rows:
+                    pid = f"P-{r.product_id}"
+                    items[pid] = {
+                        'name': r.product_name,
+                        'sold': float(r.sold_qty or 0),
+                        'unit_price': float(r.unit_price or 0),
+                        'product_id': r.product_id,
+                        'is_service': False
+                    }
+                for r in restau_rows:
+                    pid = f"P-{r.product_id}"
+                    if pid in items:
+                        items[pid]['sold'] += float(r.sold_qty or 0)
+                    else:
+                        items[pid] = {
+                            'name': r.product_name,
+                            'sold': float(r.sold_qty or 0),
+                            'unit_price': float(r.unit_price or 0),
+                            'product_id': r.product_id,
+                            'is_service': False
+                        }
+                # Services
+                for s in service_map:
+                    sid = f"S-{s.service_id}"
+                    items[sid] = {
+                        'name': s.service_name,
+                        'sold': float(s.sold_qty or 0),
+                        'unit_price': float(s.unit_price or 0),
+                        'service_id': s.service_id,
+                        'is_service': True
+                    }
+
+                # Pour chaque produit/service, calculer quantités stock via stock_mouvements
+                rows_out = []
+                for idx, (key, it) in enumerate(items.items(), start=1):
+                    if it.get('is_service'):
+                        # Pas de stock pour les services
+                        initial_q = 0.0
+                        added_q = 0.0
+                        purchases_q = 0.0
+                    else:
+                        pid = it.get('product_id')
+                        # quantité initiale = somme des mouvements avant d1
+                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
+                        try:
+                            r_init = session.execute(q_init, {'pid': pid, 'd1': d1}).fetchone()
+                            initial_q = float(r_init.qty or 0)
+                        except Exception:
+                            initial_q = 0.0
+
+                        # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
+                        q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')")
+                        try:
+                            r_added = session.execute(q_added, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            added_q = float(r_added.qty or 0)
+                        except Exception:
+                            added_q = 0.0
+
+                        # achats/transferts (ENTREE or TRANSFERT)
+                        q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')")
+                        try:
+                            r_purch = session.execute(q_purch, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            purchases_q = float(r_purch.qty or 0)
+                        except Exception:
+                            purchases_q = 0.0
+
+                    sold = float(it.get('sold', 0.0))
+                    total_initial_plus = initial_q + added_q
+                    reste = total_initial_plus - sold
+                    unit_price = float(it.get('unit_price', 0.0))
+                    total_amount = sold * unit_price
+
+                    rows_out.append({
+                        'no': idx,
+                        'name': it['name'],
+                        'initial_quantity': initial_q,
+                        'quantity_added': added_q,
+                        'purchases_transfers': purchases_q,
+                        'total_initial_plus_added': total_initial_plus,
+                        'reste': reste,
+                        'sold': sold,
+                        'unit_price': unit_price,
+                        'total': total_amount
+                    })
+
+                return rows_out
+
+        except Exception as e:
+            print(f"❌ Erreur get_products_summary: {e}")
+            return []
+
     def get_commande_details(self, commande_id: Union[int, str]) -> Optional[Dict[str, Any]]:
         # debug entry removed
         """
@@ -829,6 +1017,16 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         r_res = session.execute(r_query, {'commande_id': commande_id}).fetchone()
                         if not r_res:
                             return None
+
+                        # if created_at is missing in db, set it to machine time
+                        try:
+                            if not getattr(r_res, 'created_at', None):
+                                now = datetime.now()
+                                session.execute(text("UPDATE restau_paniers SET created_at = :now, updated_at = :now WHERE id = :id"), {'now': now, 'id': r_res.id})
+                                session.flush()
+                                r_res = session.execute(r_query, {'commande_id': commande_id}).fetchone()
+                        except Exception:
+                            pass
 
                         r_dict = dict(r_res._asdict())
 
@@ -1338,6 +1536,101 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         # Si les tables de stock ne sont pas présentes, ignorer la restauration
                         pass
 
+                    # 3) Inverser également les journaux de vente et de stock créés lors de la finalisation de la vente
+                    try:
+                        # journal de vente (type 'vente', reference PANIER-{id})
+                        sale_j = session.execute(text("SELECT id, montant FROM compta_journaux WHERE reference = :ref AND type_operation = 'vente' LIMIT 1"), {'ref': f"PANIER-{panier_id}"}).fetchone()
+                        if sale_j:
+                            orig_jid = sale_j.id if hasattr(sale_j, 'id') else sale_j[0]
+                            montant_sale = sale_j.montant if hasattr(sale_j, 'montant') else (sale_j[1] if len(sale_j) > 1 else 0)
+                            session.execute(text("""
+                                INSERT INTO compta_journaux
+                                (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification)
+                                VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                            """), {
+                                'date_operation': datetime.now(),
+                                'libelle': f"Annulation vente PANIER-{panier_id}",
+                                'montant': montant_sale or 0,
+                                'type_operation': 'annulation',
+                                'reference': f"ANN-PANIER-{panier_id}-VENTE",
+                                'description': f"Annulation vente restaurant - panier {panier_id}",
+                                'enterprise_id': 1,
+                                'user_id': getattr(current_user, 'id', 1),
+                                'date_creation': datetime.now(),
+                                'date_modification': datetime.now()
+                            })
+                            session.flush()
+                            new_jid = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+
+                            # inverser les écritures du journal original
+                            entries = session.execute(text("SELECT compte_comptable_id, debit, credit, ordre, libelle FROM compta_ecritures WHERE journal_id = :jid ORDER BY ordre"), {'jid': orig_jid}).fetchall()
+                            ordre = 1
+                            for e in entries:
+                                compte_id = e.compte_comptable_id if hasattr(e, 'compte_comptable_id') else e[0]
+                                debit = e.debit if hasattr(e, 'debit') else e[1]
+                                credit = e.credit if hasattr(e, 'credit') else e[2]
+                                libelle = e.libelle if hasattr(e, 'libelle') else (e[4] if len(e) > 4 else '')
+                                session.execute(text("""
+                                    INSERT INTO compta_ecritures (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                                    VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                                """), {
+                                    'journal_id': new_jid,
+                                    'compte_id': compte_id,
+                                    'debit': credit or 0,
+                                    'credit': debit or 0,
+                                    'ordre': ordre,
+                                    'libelle': f"Annulation - {libelle}",
+                                    'date_creation': datetime.now()
+                                })
+                                ordre += 1
+
+                        # journal stock (type 'stock', reference PANIER-{id})
+                        stock_j = session.execute(text("SELECT id, montant FROM compta_journaux WHERE reference = :ref AND type_operation = 'stock' LIMIT 1"), {'ref': f"PANIER-{panier_id}"}).fetchone()
+                        if stock_j:
+                            orig_jid = stock_j.id if hasattr(stock_j, 'id') else stock_j[0]
+                            montant_stock = stock_j.montant if hasattr(stock_j, 'montant') else (stock_j[1] if len(stock_j) > 1 else 0)
+                            session.execute(text("""
+                                INSERT INTO compta_journaux
+                                (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification)
+                                VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                            """), {
+                                'date_operation': datetime.now(),
+                                'libelle': f"Annulation sortie stock PANIER-{panier_id}",
+                                'montant': montant_stock or 0,
+                                'type_operation': 'annulation',
+                                'reference': f"ANN-PANIER-{panier_id}-STOCK",
+                                'description': f"Annulation sortie stock restaurant - panier {panier_id}",
+                                'enterprise_id': 1,
+                                'user_id': getattr(current_user, 'id', 1),
+                                'date_creation': datetime.now(),
+                                'date_modification': datetime.now()
+                            })
+                            session.flush()
+                            new_jid = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+
+                            entries = session.execute(text("SELECT compte_comptable_id, debit, credit, ordre, libelle FROM compta_ecritures WHERE journal_id = :jid ORDER BY ordre"), {'jid': orig_jid}).fetchall()
+                            ordre = 1
+                            for e in entries:
+                                compte_id = e.compte_comptable_id if hasattr(e, 'compte_comptable_id') else e[0]
+                                debit = e.debit if hasattr(e, 'debit') else e[1]
+                                credit = e.credit if hasattr(e, 'credit') else e[2]
+                                libelle = e.libelle if hasattr(e, 'libelle') else (e[4] if len(e) > 4 else '')
+                                session.execute(text("""
+                                    INSERT INTO compta_ecritures (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                                    VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                                """), {
+                                    'journal_id': new_jid,
+                                    'compte_id': compte_id,
+                                    'debit': credit or 0,
+                                    'credit': debit or 0,
+                                    'ordre': ordre,
+                                    'libelle': f"Annulation - {libelle}",
+                                    'date_creation': datetime.now()
+                                })
+                                ordre += 1
+                    except Exception as e:
+                        # Si les tables comptables n'existent pas ou autre erreur, on ignore l'annulation comptable additionnelle
+                        print(f"⚠️ Impossible d'inverser journaux vente/stock pour panier {panier_id}: {e}")
                 # Mettre à jour le statut du panier (quel que soit l'état précédent)
                 session.execute(text("UPDATE restau_paniers SET status = :st WHERE id = :pid"), {'st': 'cancelled', 'pid': panier_id})
                 return True, "Commande restaurant annulée avec succès."

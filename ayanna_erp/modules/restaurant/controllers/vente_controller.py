@@ -25,11 +25,13 @@ class VenteController:
                 client_id=client_id,
                 serveuse_id=serveuse_id,
                 user_id=user_id,
-                payment_method='non_paye',
+                payment_method='Crédit',
                 status='en_cours',
                 subtotal=0.0,
                 remise_amount=0.0,
-                total_final=0.0
+                total_final=0.0,
+                created_at=datetime.now(),
+                updated_at=datetime.now()
             )
             session.add(panier)
             session.flush()
@@ -63,6 +65,13 @@ class VenteController:
                 total=total
             )
             session.add(ligne)
+            # forcer les timestamps locaux sur la ligne de panier
+            try:
+                ligne.created_at = datetime.now()
+                ligne.updated_at = datetime.now()
+            except Exception:
+                # si le modèle n'expose pas ces champs, on ignore
+                pass
             # Recalculer totaux
             session.flush()
             subtotal = sum([p.total for p in panier.produits])
@@ -117,6 +126,12 @@ class VenteController:
                 payment_method=payment_method,
                 user_id=user_id
             )
+            # assurer que la date enregistrée vient de l'horloge locale
+            try:
+                pay.created_at = datetime.now()
+            except Exception:
+                # modèle sans attribut created_at -> ignorer
+                pass
             session.add(pay)
             session.flush()
             # capture id now so we can re-query safely after commit if needed
@@ -128,12 +143,12 @@ class VenteController:
             except Exception:
                 total_final = 0.0
             if total_paid <= 0:
-                panier.payment_method = 'non_paye'
+                panier.payment_method = 'Crédit'
             elif total_paid < total_final:
-                panier.payment_method = 'partiel'
+                panier.payment_method = 'Crédit'
                 panier.status = 'valide'
             else:
-                panier.payment_method = 'paye'
+                panier.payment_method = 'Espèces'
                 # si réglé complètement, marquer la commande comme validée
                 panier.status = 'valide'
             panier.updated_at = datetime.now()
@@ -550,13 +565,13 @@ class VenteController:
             # Mettre à jour le statut du panier
             try:
                 if float(amount_received or 0.0) <= 0:
-                    panier.payment_method = 'non_paye'
+                    panier.payment_method = 'Crédit'
                     panier.status = 'valide'
                 elif float(amount_received) < float(panier.total_final or 0.0):
-                    panier.payment_method = 'partiel'
+                    panier.payment_method = 'Crédit'
                     panier.status = 'valide'
                 else:
-                    panier.payment_method = 'paye'
+                    panier.payment_method = 'Espèces'
                     panier.status = 'valide'
                 panier.updated_at = datetime.now()
                 session.commit()

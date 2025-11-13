@@ -118,14 +118,15 @@ class CommandesIndexWidget(QWidget):
         """)
         
         filters_layout = QGridLayout(filters_group)
-        
+
         # Filtre par dates
         filters_layout.addWidget(QLabel("Du :"), 0, 0)
-        self.date_debut = QDateEdit(QDate.currentDate().addDays(-30))
+        # Par défaut, afficher uniquement les commandes du jour : date_debut == date_fin == aujourd'hui
+        self.date_debut = QDateEdit(QDate.currentDate())
         self.date_debut.setCalendarPopup(True)
         self.date_debut.dateChanged.connect(self.filter_commandes)
         filters_layout.addWidget(self.date_debut, 0, 1)
-        
+
         filters_layout.addWidget(QLabel("Au :"), 0, 2)
         self.date_fin = QDateEdit(QDate.currentDate())
         self.date_fin.setCalendarPopup(True)
@@ -535,11 +536,10 @@ class CommandesIndexWidget(QWidget):
             stats_text = f"""
 Période: {self.date_debut.date().toString('dd/MM/yyyy')} - {self.date_fin.date().toString('dd/MM/yyyy')}
 Commandes: {stats.get('nb_commandes', 0)}
+Total non payés: {stats.get('total_unpaid', 0):.0f} {self.get_currency_symbol()}
 Chiffre d'affaires: {stats.get('total_ca', 0):.0f} {self.get_currency_symbol()}
 Total payés: {stats.get('total_paid', 0):.0f} {self.get_currency_symbol()}
-Total non payés: {stats.get('total_unpaid', 0):.0f} {self.get_currency_symbol()}
 Créances: {stats.get('nb_creances', 0)}
-Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             """
             self.stats_text.setText(stats_text.strip())
         except Exception as e:
@@ -572,7 +572,6 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
             print(f"❌ Erreur filter_commandes: {e}")
         
     def on_commande_selected(self):
-        print("DEBUGG : Sélection de commande détectée")
         """Gérer la sélection d'une commande dans le tableau"""
         selected_rows = self.commandes_table.selectionModel().selectedRows()
         if not selected_rows:
@@ -702,6 +701,12 @@ Panier moyen: {stats.get('panier_moyen', 0):.0f} {self.get_currency_symbol()}
         # Gérer le bouton d'annulation selon le statut
         status = commande.get('status', '')
         if status == 'cancelled':
+            self.cancel_button.setEnabled(False)
+            self.cancel_button.setText("❌ Déjà annulée")
+            # Désactiver aussi les autres boutons pour une commande annulée
+            self.pay_button.setEnabled(False)
+            self.pay_button.setText("💳 Annulée")
+        elif status == 'annule':
             self.cancel_button.setEnabled(False)
             self.cancel_button.setText("❌ Déjà annulée")
             # Désactiver aussi les autres boutons pour une commande annulée
@@ -1069,6 +1074,9 @@ Notes: {notes_preview}
             if status == 'cancelled':
                 QMessageBox.information(self, "Déjà annulée", "Cette commande est déjà annulée.")
                 return
+            if status == 'annule':
+                QMessageBox.information(self, "Déjà annulée", "Cette commande est déjà annulée.")
+                return
             
             # Demander confirmation
             numero_commande = commande_details.get('numero_commande', f"CMD-{self.selected_commande_id}")
@@ -1222,23 +1230,30 @@ Notes: {notes_preview}
                 QMessageBox.warning(self, "Dates manquantes", "Veuillez sélectionner une période valide.")
                 return
 
-            path = self.commande_controller.export_products_summary(date_debut, date_fin, include_services=True)
-            if path and os.path.exists(path):
+            # Récupérer le résumé produits depuis le contrôleur (liste de dicts)
+            products = self.commande_controller.get_products_summary(date_debut, date_fin, include_services=True)
+            if not products:
+                QMessageBox.warning(self, "Aucune donnée", "Aucun produit/service vendu pour la période sélectionnée.")
+                return
+
+            # Générer un PDF professionnel pour les produits vendus
+            pdf_path = self._generate_products_pdf(products, date_debut, date_fin)
+            if pdf_path and os.path.exists(pdf_path):
                 try:
                     if os.name == 'nt':
-                        os.startfile(path)
+                        os.startfile(pdf_path)
                     else:
                         import subprocess, sys
                         if sys.platform == 'darwin':
-                            subprocess.run(['open', path], check=True)
+                            subprocess.run(['open', pdf_path], check=True)
                         else:
-                            subprocess.run(['xdg-open', path], check=True)
+                            subprocess.run(['xdg-open', pdf_path], check=True)
 
-                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{path}")
+                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{pdf_path}")
                 except Exception:
-                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{path}\n(ouvre manuellement si nécessaire)")
+                    QMessageBox.information(self, "Export réussi", f"Export produits généré:\n{pdf_path}\n(ouvre manuellement si nécessaire)")
             else:
-                QMessageBox.warning(self, "Erreur", "Impossible de générer l'export produits.")
+                QMessageBox.warning(self, "Erreur", "Impossible de générer l'export produits (PDF).")
 
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export: {e}")
@@ -1271,7 +1286,7 @@ Notes: {notes_preview}
             if pdf_filename and os.path.exists(pdf_filename):
                 # Ouvrir directement le fichier (pas le dossier)
                 try:
-                    import os, sys, subprocess
+                    import sys, subprocess
                     opened = False
                     if os.name == 'nt':
                         try:
@@ -1316,7 +1331,7 @@ Notes: {notes_preview}
     def _generate_commandes_pdf(self, commandes, date_debut, date_fin, search_term, payment_filter):
         """Générer un PDF professionnel d'export des commandes"""
         try:
-            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.pagesizes import A4
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.lib.units import inch, cm
             from reportlab.lib.colors import HexColor, black, white, gray
@@ -1332,8 +1347,8 @@ Notes: {notes_preview}
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = os.path.join(export_dir, f"export_commandes_{timestamp}.pdf")
 
-            # Créer le document PDF
-            doc = SimpleDocTemplate(filename, pagesize=landscape(A4))
+            # Créer le document PDF (A4 portrait)
+            doc = SimpleDocTemplate(filename, pagesize=A4)
             elements = []
             
             # Styles personnalisés
@@ -1479,9 +1494,9 @@ Notes: {notes_preview}
             elements.append(stats_table)
             elements.append(Spacer(1, 0.5*cm))
             
-            # Tableau des commandes
+            # Tableau des commandes (sans colonne Produits/Services)
             table_data = [
-                ['N° Commande', 'Date/Heure', 'Client', 'Produits/Services', 'Sous-total', 'Remise', 'Total', 'Payé', 'Status']
+                ['N° Commande', 'Date/Heure', 'Client', 'Sous-total', 'Remise', 'Total', 'Payé', 'Status']
             ]
             
             for commande in commandes:
@@ -1499,14 +1514,10 @@ Notes: {notes_preview}
                         date_str = created_at.strftime("%d/%m/%Y\n%H:%M")
 
                 # Formatage des produits/services avec retours à la ligne
-                produits_raw = str(commande.get('produits', ''))
-                produits_formatted = self._format_produits_services(produits_raw)
-
                 row = [
                     str(commande.get('numero_commande') or f"CMD-{commande.get('id')}"),
                     date_str,
                     str(commande.get('client_name', '')),
-                    produits_formatted,
                     _fmt_local(commande.get('subtotal', 0)),
                     _fmt_local(commande.get('remise_amount', 0)),
                     _fmt_local(commande.get('total_final', 0)),
@@ -1515,8 +1526,8 @@ Notes: {notes_preview}
                 ]
                 table_data.append(row)
             
-            # Créer le tableau avec des largeurs appropriées
-            col_widths = [3*cm, 2*cm, 3*cm, 6.5*cm, 1.6*cm, 1.6*cm, 1.6*cm, 1.6*cm, 1.2*cm]
+            # Créer le tableau avec des largeurs appropriées (sans produits)
+            col_widths = [3*cm, 2*cm, 4*cm, 2*cm, 2*cm, 2*cm, 2*cm, 1.5*cm]
             commandes_table = Table(table_data, colWidths=col_widths, repeatRows=1)
             
             # Style du tableau
@@ -1624,6 +1635,132 @@ Notes: {notes_preview}
 
         # Joindre avec des retours à la ligne
         return '\n'.join(formatted_items)
+
+    def _generate_products_pdf(self, products, date_debut, date_fin):
+        """Générer un PDF A4 portrait listant les produits/services vendus
+
+        products: liste de dicts renvoyée par CommandeController.get_products_summary
+        """
+        try:
+            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import cm
+            from reportlab.lib.colors import HexColor, black, white
+            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+            from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+
+            export_dir = os.path.join(os.getcwd(), "exports_products")
+            os.makedirs(export_dir, exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = os.path.join(export_dir, f"export_produits_{timestamp}.pdf")
+
+            doc = SimpleDocTemplate(filename, pagesize=A4)
+            elements = []
+
+            styles = getSampleStyleSheet()
+            styles.add(ParagraphStyle(name='CompanyTitle', fontSize=16, fontName='Helvetica-Bold', alignment=TA_LEFT))
+            styles.add(ParagraphStyle(name='ReportTitle', fontSize=14, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=10))
+            styles.add(ParagraphStyle(name='NormalText', fontSize=9, fontName='Helvetica'))
+
+            enterprise_controller = EntrepriseController()
+            company_info = enterprise_controller.get_company_info_for_pdf(1)
+
+            temp_logo = None
+            logo_path = None
+            header_data = []
+            if company_info.get('logo'):
+                try:
+                    import tempfile
+                    temp_logo = tempfile.NamedTemporaryFile(suffix='.jpg', delete=False)
+                    temp_logo.write(company_info['logo'])
+                    logo_path = temp_logo.name
+                    temp_logo.close()
+                    logo = Image(logo_path, width=2*cm, height=2*cm)
+                    header_data.append([logo, Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText'])])
+                except Exception as e:
+                    print(f"Erreur logo produits PDF: {e}")
+                    header_data.append([Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText']), ''])
+            else:
+                header_data.append([Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText']), ''])
+
+            header_table = Table(header_data, colWidths=[3*cm, 14*cm])
+            header_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+            elements.append(header_table)
+            elements.append(Spacer(1, 0.3*cm))
+
+            elements.append(Paragraph("RAPPORT PRODUITS / SERVICES VENDUS", styles['ReportTitle']))
+            elements.append(Paragraph(f"Période: {date_debut.strftime('%d/%m/%Y')} - {date_fin.strftime('%d/%m/%Y')}", styles['NormalText']))
+            elements.append(Spacer(1, 0.3*cm))
+
+            # Formatter les montants
+            try:
+                from ayanna_erp.utils.formatting import format_amount as _fmt
+                currency_lower = self.get_currency_symbol().lower()
+                def _fmt_local(v):
+                    try:
+                        return f"{_fmt(v)} {currency_lower}"
+                    except Exception:
+                        try:
+                            return f"{int(round(float(v))):,}".replace(',', ' ') + f" {currency_lower}"
+                        except Exception:
+                            return str(v)
+            except Exception:
+                def _fmt_local(v):
+                    try:
+                        return f"{int(round(float(v))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
+                    except Exception:
+                        return str(v)
+
+            # Table header
+            table_data = [['No', 'Nom', 'Initial', 'Ajouté', 'Achats/Transferts', 'Total Initial+Ajouté', 'Reste', 'Vendu', 'Prix Unitaire', 'Total']]
+            for row in products:
+                table_data.append([
+                    row.get('no', ''),
+                    row.get('name', ''),
+                    f"{row.get('initial_quantity', 0):.3f}",
+                    f"{row.get('quantity_added', 0):.3f}",
+                    f"{row.get('purchases_transfers', 0):.3f}",
+                    f"{row.get('total_initial_plus_added', 0):.3f}",
+                    f"{row.get('reste', 0):.3f}",
+                    f"{row.get('sold', 0):.3f}",
+                    _fmt_local(row.get('unit_price', 0)),
+                    _fmt_local(row.get('total', 0)),
+                ])
+
+            # Column widths (adjustement pour A4 portrait)
+            col_widths = [1.2*cm, 7*cm, 1.6*cm, 1.6*cm, 2.2*cm, 2.2*cm, 1.6*cm, 1.6*cm, 2*cm, 2*cm]
+            tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+            tbl_style = TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), HexColor('#34495E')),
+                ('TEXTCOLOR', (0,0), (-1,0), white),
+                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0,0), (-1,0), 9),
+                ('ALIGN', (0,0), (0,-1), 'CENTER'),
+                ('ALIGN', (2,0), (8,-1), 'RIGHT'),
+                ('GRID', (0,0), (-1,-1), 0.4, black),
+                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ])
+            tbl.setStyle(tbl_style)
+            elements.append(tbl)
+
+            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Paragraph(f"Rapport généré par Ayanna ERP le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['NormalText']))
+
+            doc.build(elements)
+
+            return filename
+        except Exception as e:
+            print(f"❌ Erreur génération PDF produits: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception:
+                    pass
     
     def refresh_data(self):
         """Actualiser les données (interface publique)"""
