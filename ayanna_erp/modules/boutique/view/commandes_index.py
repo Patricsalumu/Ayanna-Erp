@@ -208,6 +208,13 @@ class CommandesIndexWidget(QWidget):
                 border: 1px solid #ddd;
             }
         """)
+        # Désactiver l'édition directe dans le tableau des commandes
+        try:
+            self.commandes_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        except Exception:
+            # Fallback pour différentes versions de PyQt
+            from PyQt6.QtWidgets import QAbstractItemView
+            self.commandes_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         
         # Connecter les signaux
         self.commandes_table.itemSelectionChanged.connect(self.on_commande_selected)
@@ -1453,22 +1460,19 @@ Notes: {notes_preview}
             
             # Statistiques générales (utiliser la source DB pour cohérence)
             stats = self.commande_controller.get_period_commandes_stats(date_debut, date_fin)
-            # helper local pour formatage avec espaces milliers + devise en minuscules
+            # helper local: use centralized formatter for PDF exports
             try:
-                from ayanna_erp.utils.formatting import format_amount as _fmt
-                currency_lower = self.get_currency_symbol().lower()
+                from ayanna_erp.utils.formatting import format_amount_for_pdf as _fmt_pdf
+                currency_lower = self.get_currency_symbol()
                 def _fmt_local(val):
                     try:
-                        return f"{_fmt(val)} {currency_lower}"
+                        return _fmt_pdf(val, currency_lower)
                     except Exception:
-                        try:
-                            return f"{int(round(float(val))):,}".replace(',', ' ') + f" {currency_lower}"
-                        except Exception:
-                            return str(val)
+                        return str(val)
             except Exception:
                 def _fmt_local(val):
                     try:
-                        return f"{int(round(float(val))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
+                        return str(val)
                     except Exception:
                         return str(val)
 
@@ -1514,7 +1518,7 @@ Notes: {notes_preview}
                         date_str = created_at.strftime("%d/%m/%Y\n%H:%M")
 
                 # Formatage des produits/services avec retours à la ligne
-                row = [
+                    row = [
                     str(commande.get('numero_commande') or f"CMD-{commande.get('id')}"),
                     date_str,
                     str(commande.get('client_name', '')),
@@ -1693,22 +1697,19 @@ Notes: {notes_preview}
             elements.append(Paragraph(f"Période: {date_debut.strftime('%d/%m/%Y')} - {date_fin.strftime('%d/%m/%Y')}", styles['NormalText']))
             elements.append(Spacer(1, 0.3*cm))
 
-            # Formatter les montants
+            # Formatter les montants: utiliser le helper centralisé format_amount_for_pdf
             try:
-                from ayanna_erp.utils.formatting import format_amount as _fmt
-                currency_lower = self.get_currency_symbol().lower()
+                from ayanna_erp.utils.formatting import format_amount_for_pdf as _fmt_pdf
+                currency_symbol = self.get_currency_symbol()
                 def _fmt_local(v):
                     try:
-                        return f"{_fmt(v)} {currency_lower}"
+                        return _fmt_pdf(v, currency_symbol)
                     except Exception:
-                        try:
-                            return f"{int(round(float(v))):,}".replace(',', ' ') + f" {currency_lower}"
-                        except Exception:
-                            return str(v)
+                        return str(v)
             except Exception:
                 def _fmt_local(v):
                     try:
-                        return f"{int(round(float(v))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
+                        return str(v)
                     except Exception:
                         return str(v)
 
