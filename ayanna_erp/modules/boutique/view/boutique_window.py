@@ -120,7 +120,7 @@ class BoutiqueWindow(QMainWindow):
             self.modern_shop_widget.sale_completed.connect(self.on_sale_completed)
             
             # Onglet Commandes - Suivi et gestion des commandes
-            self.commandes_widget = CommandesIndexWidget(self.boutique_controller, self.current_user)
+            self.commandes_widget = CommandesIndexWidget(self.boutique_controller, self.current_user, module='boutique')
             self.tab_widget.addTab(self.commandes_widget, "📋 Commandes")
             
             # Onglet Catégories - Gestion des catégories

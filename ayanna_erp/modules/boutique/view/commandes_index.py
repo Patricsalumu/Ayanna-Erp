@@ -23,11 +23,13 @@ class CommandesIndexWidget(QWidget):
     # Signaux
     commande_selected = pyqtSignal(int)  # ID de la commande sélectionnée
     
-    def __init__(self, boutique_controller, current_user, parent=None):
+    def __init__(self, boutique_controller, current_user, module=None, parent=None):
         super().__init__(parent)
         self.boutique_controller = boutique_controller
         self.current_user = current_user
         self.parent_window = parent
+        # module can be 'boutique' or 'restaurant' or None
+        self.module = module
         
         # Initialiser le contrôleur des commandes
         self.commande_controller = CommandeController()
@@ -1238,7 +1240,11 @@ Notes: {notes_preview}
                 return
 
             # Récupérer le résumé produits depuis le contrôleur (liste de dicts)
-            products = self.commande_controller.get_products_summary(date_debut, date_fin, include_services=True)
+            products = self.commande_controller.get_products_summary(
+                date_debut, date_fin, include_services=True,
+                module=getattr(self, 'module', None),
+                pos_id=getattr(self.boutique_controller, 'pos_id', None)
+            )
             if not products:
                 QMessageBox.warning(self, "Aucune donnée", "Aucun produit/service vendu pour la période sélectionnée.")
                 return

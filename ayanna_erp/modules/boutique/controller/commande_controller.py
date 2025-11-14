@@ -783,7 +783,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
             print(f"❌ Erreur export_products_summary: {e}")
             return ''
 
-    def get_products_summary(self, date_debut, date_fin, include_services: bool = True):
+    def get_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = None, pos_id: int = None):
         """
         Retourne la liste des produits/services vendus (rows_out) pour la période donnée.
         Même logique qu'export_products_summary mais renvoie les lignes au lieu d'écrire un CSV.
@@ -879,6 +879,32 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'is_service': True
                     }
 
+                # Si on a un pos_id (ou un module connu), tenter de résoudre l'entrepôt ciblé
+                warehouse_id = None
+                try:
+                    if pos_id:
+                        from ayanna_erp.modules.core.controllers.product_controller import CoreProductController
+                        from ayanna_erp.modules.stock.models import StockWarehouse
+                        core_ctrl = CoreProductController(pos_id)
+                        pos_code = getattr(core_ctrl, 'pos_code', None)
+                        if pos_code:
+                            wh = session.query(StockWarehouse).filter_by(code=pos_code).first()
+                            if wh:
+                                warehouse_id = wh.id
+                    elif module:
+                        # Heuristiques: si module == 'restaurant' -> pos_id 4
+                        if module == 'restaurant':
+                            from ayanna_erp.modules.core.controllers.product_controller import CoreProductController
+                            from ayanna_erp.modules.stock.models import StockWarehouse
+                            core_ctrl = CoreProductController(4)
+                            pos_code = getattr(core_ctrl, 'pos_code', None)
+                            if pos_code:
+                                wh = session.query(StockWarehouse).filter_by(code=pos_code).first()
+                                if wh:
+                                    warehouse_id = wh.id
+                except Exception:
+                    warehouse_id = None
+
                 # Pour chaque produit/service, calculer quantités stock via stock_mouvements
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
@@ -890,25 +916,34 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     else:
                         pid = it.get('product_id')
                         # quantité initiale = somme des mouvements avant d1
-                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
+                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
                         try:
-                            r_init = session.execute(q_init, {'pid': pid, 'd1': d1}).fetchone()
+                            params_init = {'pid': pid, 'd1': d1}
+                            if warehouse_id:
+                                params_init['wid'] = warehouse_id
+                            r_init = session.execute(q_init, params_init).fetchone()
                             initial_q = float(r_init.qty or 0)
                         except Exception:
                             initial_q = 0.0
 
                         # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
-                        q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')")
+                        q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
                         try:
-                            r_added = session.execute(q_added, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            params_added = {'pid': pid, 'd1': d1, 'd2': d2}
+                            if warehouse_id:
+                                params_added['wid'] = warehouse_id
+                            r_added = session.execute(q_added, params_added).fetchone()
                             added_q = float(r_added.qty or 0)
                         except Exception:
                             added_q = 0.0
 
                         # achats/transferts (ENTREE or TRANSFERT)
-                        q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')")
+                        q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
                         try:
-                            r_purch = session.execute(q_purch, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            params_purch = {'pid': pid, 'd1': d1, 'd2': d2}
+                            if warehouse_id:
+                                params_purch['wid'] = warehouse_id
+                            r_purch = session.execute(q_purch, params_purch).fetchone()
                             purchases_q = float(r_purch.qty or 0)
                         except Exception:
                             purchases_q = 0.0

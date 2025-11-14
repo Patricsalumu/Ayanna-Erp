@@ -148,7 +148,7 @@ class RestaurantWindow(QMainWindow):
     
     def setup_orders_tab(self):
         """Onglet Commandes — utiliser la vue de commandes du module"""
-        commandes_view = CommandesIndexWidget(self.boutique_controller, 1)
+        commandes_view = CommandesIndexWidget(self.boutique_controller, 1, module='restaurant')
         self.tab_widget.addTab(commandes_view, "📝 Commandes")
     
     def setup_clients_tab(self):
