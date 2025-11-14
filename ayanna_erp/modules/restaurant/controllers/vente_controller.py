@@ -144,6 +144,7 @@ class VenteController:
                 total_final = 0.0
             if total_paid <= 0:
                 panier.payment_method = 'Crédit'
+                panier.status = 'valide'
             elif total_paid < total_final:
                 panier.payment_method = 'Crédit'
                 panier.status = 'valide'
@@ -314,9 +315,9 @@ class VenteController:
             compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id = cfg
 
             # Prevent duplicate processing: if a sale journal for this panier already exists, skip
-            existing = session.execute(text("SELECT COUNT(1) FROM compta_journaux WHERE reference = :ref AND type_operation = 'vente'"), {'ref': f"PANIER-{panier.id}"}).fetchone()
+            existing = session.execute(text("SELECT COUNT(1) FROM compta_journaux WHERE reference = :ref AND type_operation = 'vente'"), {'ref': f"CMD-{panier.id}"}).fetchone()
             if existing and existing[0] and int(existing[0]) > 0:
-                return True, f"Vente PANIER-{panier.id} déjà traitée"
+                return True, f"Vente CMD-{panier.id} déjà traitée"
 
             # 1) Journal de vente
             total_amount = float(panier.total_final or 0.0)
@@ -330,11 +331,11 @@ class VenteController:
                 """),
                 {
                     'date_operation': datetime.now(),
-                    'libelle': f"Vente - PANIER-{panier.id}",
+                    'libelle': f"Vente - CMD-{panier.id}",
                     'montant': total_amount,
                     'type_operation': 'vente',
-                    'reference': f"PANIER-{panier.id}",
-                    'description': f"Vente restaurant - {len(lignes)} articles",
+                    'reference': f"CMD-{panier.id}",
+                    'description': f"Vente - {len(lignes)} articles",
                     'enterprise_id': self.entreprise_id,
                     'user_id': uid,
                     'date_creation': datetime.now(),
@@ -385,7 +386,7 @@ class VenteController:
                         'debit': total_amount,
                         'credit': 0,
                         'ordre': ordre,
-                        'libelle': f"Client - Vente PANIER-{panier.id}",
+                        'libelle': f"Client - Vente CMD-{panier.id}",
                         'date_creation': datetime.now()
                     }
                 )
@@ -408,7 +409,7 @@ class VenteController:
                         'debit': remise_val,
                         'credit': 0,
                         'ordre': ordre,
-                        'libelle': f"Remise PANIER-{panier.id}",
+                        'libelle': f"Remise CMD-{panier.id}",
                         'date_creation': datetime.now()
                     }
                 )
@@ -427,11 +428,11 @@ class VenteController:
                 """),
                 {
                     'date_operation': datetime.now(),
-                    'libelle': f"Sortie stock - PANIER-{panier.id}",
+                    'libelle': f"Sortie stock - CMD-{panier.id}",
                     'montant': total_amount,
                     'type_operation': 'stock',
-                    'reference': f"PANIER-{panier.id}",
-                    'description': f"Sortie stock restaurant - {len(lignes)} articles",
+                    'reference': f"CMD-{panier.id}",
+                    'description': f"Sortie stock  - {len(lignes)} articles",
                     'enterprise_id': self.entreprise_id,
                     'user_id': uid,
                     'date_creation': datetime.now(),
@@ -440,7 +441,6 @@ class VenteController:
             )
             session.flush()
             journal_stock_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
-            print(f"DEBUG: Created stock journal {journal_stock_id} for panier {panier.id}")
 
             ordre_stock = 1
             for ligne in lignes:
@@ -490,7 +490,7 @@ class VenteController:
 
                 # Mettre à jour le stock réel dans l'entrepôt POS_4
                 try:
-                    self._update_pos_stock_restaurant(session, getattr(ligne, 'product_id', None), int(qty), getattr(ligne, 'price', 0.0), item_total, f"PANIER-{panier.id}")
+                    self._update_pos_stock_restaurant(session, getattr(ligne, 'product_id', None), int(qty), getattr(ligne, 'price', 0.0), item_total, f"CMD-{panier.id}")
                 except Exception as e:
                     print(f"DEBUG: Erreur mise à jour stock pour produit {getattr(ligne, 'product_id', None)}: {e}")
 
@@ -506,10 +506,10 @@ class VenteController:
                     """),
                     {
                         'date_operation': datetime.now(),
-                        'libelle': f"Paiement PANIER-{panier.id}",
+                        'libelle': f"Paiement CMD-{panier.id}",
                         'montant': float(amount_received),
                         'type_operation': 'paiement',
-                        'reference': f"PANIER-{panier.id}",
+                        'reference': f"CMD-{panier.id}",
                         'description': f"Encaissement vente - {payment_method}",
                         'enterprise_id': self.entreprise_id,
                         'user_id': uid,
@@ -519,7 +519,6 @@ class VenteController:
                 )
                 session.flush()
                 journal_pay_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
-                print(f"DEBUG: Created payment journal {journal_pay_id} for panier {panier.id}")
 
                 # Débit caisse
                 session.execute(text(
@@ -534,12 +533,11 @@ class VenteController:
                         'debit': float(amount_received),
                         'credit': 0,
                         'ordre': 1,
-                        'libelle': f"Encaissement {payment_method} PANIER-{panier.id}",
+                        'libelle': f"Encaissement {payment_method} CMD-{panier.id}",
                         'date_creation': datetime.now()
                     }
                 )
                 session.flush()
-                print(f"DEBUG: Created debit (caisse) entry amount {amount_received} in journal {journal_pay_id}")
 
                 # Crédit client
                 if compte_client_id:
@@ -555,16 +553,17 @@ class VenteController:
                             'debit': 0,
                             'credit': float(amount_received),
                             'ordre': 2,
-                            'libelle': f"Règlement client PANIER-{panier.id}",
+                            'libelle': f"Règlement client CMD-{panier.id}",
                             'date_creation': datetime.now()
                         }
                     )
                     session.flush()
-                    print(f"DEBUG: Created credit (client) entry amount {amount_received} in journal {journal_pay_id}")
 
             # Mettre à jour le statut du panier
             try:
-                if float(amount_received or 0.0) <= 0:
+                print(f'DEBUG : Test si montant recu est de 0')
+                print(f"Montant brut {amount_received} et {float(amount_received)}")
+                if float(amount_received or 0.0) <= 0.0:
                     panier.payment_method = 'Crédit'
                     panier.status = 'valide'
                 elif float(amount_received) < float(panier.total_final or 0.0):
@@ -575,9 +574,9 @@ class VenteController:
                     panier.status = 'valide'
                 panier.updated_at = datetime.now()
                 session.commit()
-            except Exception:
+            except Exception as e:
                 session.rollback()
-                raise
+                print(f"Erreur mise a jour status panier: {e}")
 
             return True, f"Vente finalisée et écritures créées pour panier {panier.id}"
         except Exception as e:

@@ -320,6 +320,11 @@ class EntrepriseController(QObject):
 
             if show_symbol:
                 symbol = self.get_currency_symbol(enterprise_id)
+                try:
+                    if any(ch.isalpha() for ch in str(symbol)):
+                        symbol = str(symbol).lower()
+                except Exception:
+                    pass
                 return f"{formatted} {symbol}"
             return formatted
         except Exception:
@@ -371,7 +376,7 @@ class EntrepriseController(QObject):
         """
         try:
             session = self.get_session()
-            
+
             enterprise = Entreprise(
                 name=data.get('name', ''),
                 address=data.get('address', ''),
@@ -383,7 +388,7 @@ class EntrepriseController(QObject):
                 slogan=data.get('slogan', ''),
                 currency=data.get('currency', 'USD')
             )
-            
+
             session.add(enterprise)
             session.flush()  # Pour obtenir l'ID sans commiter encore
             

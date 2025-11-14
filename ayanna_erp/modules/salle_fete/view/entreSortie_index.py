@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox,
                             QGroupBox, QGridLayout, QListWidget, QSplitter,
                             QFrame, QScrollArea, QFormLayout, QCheckBox,
-                            QDateTimeEdit, QHeaderView, QDateEdit, QDialog)
+                            QDateTimeEdit, QHeaderView, QDateEdit, QDialog, QInputDialog)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QDateTime, QDate
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QAction
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
@@ -23,6 +23,7 @@ import json
 from ..controller.entre_sortie_controller import EntreSortieController
 from ..controller.paiement_controller import PaiementController
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ayanna_erp.utils.formatting import format_amount_for_pdf
 from ayanna_erp.modules.boutique.model.models import ShopPayment, ShopPanier, ShopClient
 from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier, RestauPayment, RestauProduitPanier
 from ayanna_erp.modules.achats.models.achats_models import AchatDepense
@@ -57,7 +58,18 @@ class DepenseDialog(QDialog):
         try:
             return self.entreprise_controller.format_amount(amount)
         except:
-            return f"{amount:.2f} €"  # Fallback
+            try:
+                cur = self.get_currency_symbol()
+                v = float(amount)
+                if abs(v - int(v)) < 1e-9:
+                    s = f"{int(v):,}".replace(',', ' ')
+                else:
+                    s = f"{v:,.2f}".replace(',', ' ').rstrip('0').rstrip('.')
+                if any(ch.isalpha() for ch in str(cur)):
+                    cur = str(cur).lower()
+                return f"{s} {cur}".strip()
+            except Exception:
+                return str(amount)
     
     def setup_ui(self):
         layout = QVBoxLayout(self)
@@ -241,7 +253,18 @@ class EntreeSortieIndex(QWidget):
         try:
             return self.entreprise_controller.format_amount(amount)
         except:
-            return f"{amount:.2f} €"  # Fallback
+            try:
+                cur = self.get_currency_symbol()
+                v = float(amount)
+                if abs(v - int(v)) < 1e-9:
+                    s = f"{int(v):,}".replace(',', ' ')
+                else:
+                    s = f"{v:,.2f}".replace(',', ' ').rstrip('0').rstrip('.')
+                if any(ch.isalpha() for ch in str(cur)):
+                    cur = str(cur).lower()
+                return f"{s} {cur}".strip()
+            except Exception:
+                return str(amount)
     
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
@@ -314,6 +337,23 @@ class EntreeSortieIndex(QWidget):
         
         toolbar_layout.addWidget(self.add_depense_btn)
         toolbar_layout.addWidget(self.export_pdf_btn)
+        # Bouton Rafraîchir
+        self.refresh_btn = QPushButton("🔄 Rafraîchir")
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2ECC71;
+                color: white;
+                border: none;
+                padding: 12px 18px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #27AE60;
+            }
+        """)
+        toolbar_layout.addWidget(self.refresh_btn)
         toolbar_layout.addStretch()
         
         layout.addLayout(toolbar_layout)
@@ -398,6 +438,8 @@ class EntreeSortieIndex(QWidget):
         # Configuration du tableau
         self.journal_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.journal_table.setAlternatingRowColors(True)
+        # Interdire l'édition directe (annulation de l'édition inline)
+        self.journal_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.journal_table.setStyleSheet("""
             QTableWidget {
                 border: 1px solid #BDC3C7;
@@ -488,10 +530,67 @@ class EntreeSortieIndex(QWidget):
         # === CONNEXIONS SIGNAUX ===
         self.add_depense_btn.clicked.connect(self.show_depense_dialog)
         self.export_pdf_btn.clicked.connect(self.export_to_pdf)
+        self.refresh_btn.clicked.connect(self.load_journal_data)
+        # Double-clic -> annulation si c'est une dépense interne (EXP_...)
+        self.journal_table.cellDoubleClicked.connect(self.on_journal_row_double_clicked)
         self.date_debut_filter.dateChanged.connect(self.filter_journal)
         self.date_fin_filter.dateChanged.connect(self.filter_journal)
         self.type_filter.currentTextChanged.connect(self.filter_journal)
         self.search_edit.textChanged.connect(self.filter_journal)
+
+    def on_journal_row_double_clicked(self, row, column):
+        """
+        Gestion du double-clic sur une ligne du journal :
+        - Si l'id commence par 'EXP_<id>' -> proposer annulation via EntreSortieController.cancel_expense
+        - Sinon, rien (ou future extension)
+        """
+        try:
+            # Récupérer la ligne affichée (appliquer les filtres actuels)
+            filtered = self.get_filtered_data()
+            if row < 0 or row >= len(filtered):
+                return
+            entry = filtered[row]
+            entry_id = entry.get('id')
+
+            # Ne traiter que les dépenses internes (EventExpense) identifiées par EXP_<id>
+            if not entry_id or not str(entry_id).startswith('EXP_'):
+                return
+
+            try:
+                expense_id = int(str(entry_id).split('_', 1)[1])
+            except Exception:
+                return
+
+            # Confirmation
+            # Demander la raison d'annulation (optionnelle)
+            ok = False
+            reason = ''
+            reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
+            if not ok:
+                # Utilisateur a annulé la saisie -> on demande une confirmation simple
+                reply = QMessageBox.question(self, 'Annuler la dépense',
+                                             f"Voulez-vous annuler la dépense #{expense_id} ?\nCette opération créera une écriture d'annulation.",
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
+
+            # Déterminer user_id (si current_user est un objet avec attribut id)
+            user_id = None
+            try:
+                user_id = getattr(self.current_user, 'id', None) or int(self.current_user)
+            except Exception:
+                user_id = 1
+
+            result = self.expense_controller.cancel_expense(expense_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
+            if result:
+                QMessageBox.information(self, 'Annulation effectuée', f"La dépense #{expense_id} a été annulée et les écritures inverses enregistrées.")
+                # Recharger le journal
+                self.load_journal_data()
+            else:
+                QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la dépense #{expense_id}. Voir logs.")
+
+        except Exception as e:
+            print(f"Erreur lors du double-clic journal: {e}")
     
     def load_journal_data(self):
         """
@@ -655,7 +754,7 @@ class EntreeSortieIndex(QWidget):
                         'id': f'SHOP_PAY_{payment.id}',
                         'datetime': payment.payment_date,
                         'type': 'Entrée',
-                        'libelle': f'[VENTE] Encaissement Facture - {payment.reference} - {client_name}',
+                        'libelle': f'[VENTE] Encaissement Facture - {payment.reference}',
                         'categorie': 'VENTE',
                         'montant_entree': float(payment.amount),
                         'montant_sortie': 0.0,
@@ -749,7 +848,7 @@ class EntreeSortieIndex(QWidget):
             
             # Montant Entrée
             if entry['montant_entree'] > 0:
-                entree_item = QTableWidgetItem(f"{entry['montant_entree']:.2f}")
+                entree_item = QTableWidgetItem(self.format_amount(entry['montant_entree']))
                 entree_item.setForeground(Qt.GlobalColor.darkGreen)
                 entree_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             else:
@@ -759,7 +858,7 @@ class EntreeSortieIndex(QWidget):
             
             # Montant Sortie
             if entry['montant_sortie'] > 0:
-                sortie_item = QTableWidgetItem(f"{entry['montant_sortie']:.2f}")
+                sortie_item = QTableWidgetItem(self.format_amount(entry['montant_sortie']))
                 sortie_item.setForeground(Qt.GlobalColor.darkRed)
                 sortie_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             else:
@@ -812,14 +911,14 @@ class EntreeSortieIndex(QWidget):
         solde = total_entrees - total_sorties
         
         currency_symbol = self.get_currency_symbol()
-        
-        # Mettre à jour les labels
-        self.total_entrees_label.setText(f"Total Entrées: {total_entrees:.2f} {currency_symbol}")
-        self.total_sorties_label.setText(f"Total Sorties: {total_sorties:.2f} {currency_symbol}")
-        
+
+        # Mettre à jour les labels (utiliser le formateur central pour l'affichage)
+        self.total_entrees_label.setText(f"Total Entrées: {self.format_amount(total_entrees)}")
+        self.total_sorties_label.setText(f"Total Sorties: {self.format_amount(total_sorties)}")
+
         # Couleur du solde selon le signe
         if solde >= 0:
-            self.solde_label.setText(f"Solde: +{solde:.2f} {currency_symbol}")
+            self.solde_label.setText(f"Solde: +{self.format_amount(solde)}")
             self.solde_label.setStyleSheet("""
                 QLabel {
                     background-color: #27AE60;
@@ -831,7 +930,7 @@ class EntreeSortieIndex(QWidget):
                 }
             """)
         else:
-            self.solde_label.setText(f"Solde: {solde:.2f} {currency_symbol}")
+            self.solde_label.setText(f"Solde: {self.format_amount(solde)}")
             self.solde_label.setStyleSheet("""
                 QLabel {
                     background-color: #E67E22;
@@ -1051,11 +1150,12 @@ class EntreeSortieIndex(QWidget):
                     solde = total_entrees - total_sorties
 
                     currency_symbol = self.get_currency_symbol()
+
                     stats_data = [
                         ['Résumé de la période', ''],
-                        ['Total Entrées:', f"{total_entrees:.2f} {currency_symbol}"],
-                        ['Total Sorties:', f"{total_sorties:.2f} {currency_symbol}"],
-                        ['Solde:', f"{solde:.2f} {currency_symbol}"]
+                        ['Total Entrées:', format_amount_for_pdf(total_entrees, currency=currency_symbol)],
+                        ['Total Sorties:', format_amount_for_pdf(total_sorties, currency=currency_symbol)],
+                        ['Solde:', format_amount_for_pdf(solde, currency=currency_symbol)]
                     ]
 
                     stats_table = Table(stats_data, colWidths=[6*cm, 6*cm])
@@ -1079,11 +1179,11 @@ class EntreeSortieIndex(QWidget):
                     for entry in filtered_data:
                         # Formatage des montants avec couleurs conditionnelles
                         if entry['montant_entree'] > 0:
-                            entree_str = f"{entry['montant_entree']:.2f}"
+                            entree_str = format_amount_for_pdf(entry['montant_entree'], currency=currency_symbol)
                             sortie_str = "-"
                         elif entry['montant_sortie'] > 0:
                             entree_str = "-"
-                            sortie_str = f"{entry['montant_sortie']:.2f}"
+                            sortie_str = format_amount_for_pdf(entry['montant_sortie'], currency=currency_symbol)
                         else:
                             entree_str = "-"
                             sortie_str = "-"

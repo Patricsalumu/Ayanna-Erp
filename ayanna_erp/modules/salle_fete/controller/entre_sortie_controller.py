@@ -21,6 +21,7 @@ class EntreSortieController(QObject):
     expense_added = pyqtSignal(object)
     expense_updated = pyqtSignal(object)
     expense_deleted = pyqtSignal(int)
+    expense_cancelled = pyqtSignal(object)
     expenses_loaded = pyqtSignal(list)
     error_occurred = pyqtSignal(str)
     
@@ -286,6 +287,122 @@ class EntreSortieController(QObject):
             self.error_occurred.emit(error_msg)
             return False
             
+        finally:
+            db_manager.close_session()
+
+    def cancel_expense(self, expense_id, user_id=1, reason=None):
+        """
+        Annuler une dépense en créant :
+         - une écriture inverse dans event_expenses (montant négatif, type 'Annulation')
+         - un journal d'annulation et des écritures comptables inverses dans compta_journaux / compta_ecritures
+
+        Règle comptable appliquée : créditer les comptes qui ont été débités et débiter les comptes qui ont été crédités.
+        """
+        try:
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaEcritures as EcritureComptable,
+                ComptaJournaux as JournalComptable,
+            )
+
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+
+            # Récupérer la dépense originale
+            expense = session.query(EventExpense).filter(
+                EventExpense.id == expense_id,
+                EventExpense.pos_id == self.pos_id
+            ).first()
+
+            if not expense:
+                msg = f"Dépense {expense_id} introuvable pour le POS {self.pos_id}"
+                self.error_occurred.emit(msg)
+                return None
+
+            # Créer une dépense inverse dans event_expenses (montant négatif)
+            # Construire la description selon: "raison - (description de la dépense annulée)"
+            if reason and str(reason).strip():
+                inverse_description = f"{reason.strip()} - ({expense.description or ''})"
+            else:
+                inverse_description = f"Annulation - ({expense.description or ''})"
+
+            inverse = EventExpense(
+                pos_id=expense.pos_id,
+                reservation_id=expense.reservation_id,
+                expense_type=f"Annulation - {expense.expense_type}",
+                description=inverse_description,
+                amount=-float(expense.amount),
+                expense_date=datetime.now(),
+                supplier=expense.supplier,
+                invoice_number=expense.invoice_number,
+                payment_method="Annulation",
+                account_id=expense.account_id,
+                created_by=user_id,
+                created_at=datetime.now()
+            )
+            session.add(inverse)
+            session.flush()
+
+            # Tenter de retrouver le journal lié à cette dépense (par référence)
+            ref = f"EXP-{expense.id}"
+            orig_journal = session.query(JournalComptable).filter(JournalComptable.reference == ref).first()
+
+            # Créer un journal d'annulation
+            journal_rev = JournalComptable(
+                enterprise_id=orig_journal.enterprise_id if orig_journal and getattr(orig_journal, 'enterprise_id', None) else 1,
+                libelle=f"Annulation: {orig_journal.libelle if orig_journal else 'Dépense'} - {reason or ''}",
+                montant=abs(expense.amount),
+                type_operation="annulation",
+                reference=f"REV-EXP-{expense.id}",
+                description=f"Annulation écriture liée à la dépense ID {expense.id} - {reason or ''}",
+                user_id=user_id,
+                date_operation=datetime.now()
+            )
+            session.add(journal_rev)
+            session.flush()
+
+            # Si un journal original existe, inverser ses écritures
+            if orig_journal:
+                # Charger les écritures originales
+                original_lines = session.query(EcritureComptable).filter(
+                    EcritureComptable.journal_id == orig_journal.id
+                ).order_by(EcritureComptable.ordre).all()
+
+                for line in original_lines:
+                    # Inverser débit/credit
+                    if float(line.debit or 0) > 0:
+                        new_debit = 0
+                        new_credit = float(line.debit)
+                        new_ordre = 2
+                    else:
+                        new_debit = float(line.credit or 0)
+                        new_credit = 0
+                        new_ordre = 1
+
+                    rev_line = EcritureComptable(
+                        journal_id=journal_rev.id,
+                        compte_comptable_id=line.compte_comptable_id,
+                        debit=new_debit,
+                        credit=new_credit,
+                        ordre=new_ordre,
+                        libelle=f"Annulation - {line.libelle or ''}".strip()
+                    )
+                    session.add(rev_line)
+
+            session.commit()
+            session.refresh(inverse)
+
+            # Émettre signal
+            self.expense_cancelled.emit(inverse)
+            print(f"♻️ Dépense {expense.id} annulée, inversion comptable créée (journal {journal_rev.id})")
+            return inverse
+
+        except Exception as e:
+            session.rollback()
+            msg = f"Erreur lors de l'annulation de la dépense: {e}"
+            print(f"❌ {msg}")
+            self.error_occurred.emit(msg)
+            return None
+
         finally:
             db_manager.close_session()
             

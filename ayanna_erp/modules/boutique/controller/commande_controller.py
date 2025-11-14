@@ -1256,7 +1256,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             'date_operation': datetime.now(),
                             'libelle': f"Paiement commande {numero_commande}",
                             'montant': amount,
-                            'type_operation': 'entree',
+                            'type_operation': 'paiement',
                             'reference': f"PAI-{numero_commande}",
                             'description': f"Paiement commande - {payment_method}",
                             'enterprise_id': 1,  # TODO: Récupérer dynamiquement
@@ -1352,18 +1352,18 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     compte_client_id = config_row[1]
                     if compte_caisse_id and compte_client_id:
                         # journal
-                        numero = f"REST-{panier_id}"
+                        numero = f"-{panier_id}"
                         session.execute(text("""
                             INSERT INTO compta_journaux
                             (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification)
                             VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification)
                         """), {
                             'date_operation': datetime.now(),
-                            'libelle': f"Paiement restaurant {numero}",
+                            'libelle': f"Paiement CMD {numero}",
                             'montant': amount,
-                            'type_operation': 'entree',
+                            'type_operation': 'paiement',
                             'reference': f"PAI-{numero}",
-                            'description': f"Paiement restaurant - {payment_method}",
+                            'description': f"Paiement - {payment_method}",
                             'enterprise_id': 1,
                             'user_id': getattr(current_user, 'id', 1),
                             'date_creation': datetime.now(),
@@ -1380,7 +1380,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             'debit': amount,
                             'credit': 0,
                             'ordre': 1,
-                            'libelle': f"Paiement restaurant {numero}",
+                            'libelle': f"Paiement CMD {numero}",
                             'date_creation': datetime.now()
                         })
                         session.execute(text("""
