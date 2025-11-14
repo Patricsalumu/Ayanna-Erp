@@ -336,11 +336,6 @@ class ModernSupermarketWidget(QWidget):
         # Bouton ajouter
         add_btn = QPushButton("➕ Ajouter")
         add_btn.setStyleSheet("background-color:#2196F3; color:white; border:none; border-radius:4px; padding:6px; font-weight:bold;")
-        # Capturer l'id et la source; récupérer l'objet en session au moment de l'ajout
-        # Passer explicitement l'id du service (plus robuste que l'objet lui-même)
-        # Le signal clicked émet un bool (checked). Si la lambda n'a pas de param
-        # positionnel, ce bool écrase le premier param par défaut (svc_id).
-        # Ajouter un param placeholder `_checked` pour absorber cet argument.
         add_btn.clicked.connect(lambda _checked, svc_id=getattr(service, 'id', None), svc_name=getattr(service, 'name', None) or getattr(service, 'nom', None), src=source: self.add_service_to_cart_by_id(svc_id, src, svc_name))
         card_layout.addWidget(add_btn)
 

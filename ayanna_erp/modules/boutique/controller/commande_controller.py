@@ -433,7 +433,7 @@ class CommandeController:
                 q_ca = text("""
                     SELECT
                       COALESCE((SELECT SUM(total_final) FROM shop_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) <> 'cancelled'),0)
-                      + COALESCE((SELECT SUM(total_final) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé')),0)
+                      + COALESCE((SELECT SUM(total_final) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé', 'cancelled')),0)
                       as total_ca
                 """)
                 ca_row = session.execute(q_ca, {'d1': d1, 'd2': d2}).fetchone()
@@ -443,7 +443,7 @@ class CommandeController:
                 q_paid = text("""
                     SELECT
                       COALESCE((SELECT SUM(sp.amount) FROM shop_payments sp JOIN shop_paniers p ON sp.panier_id = p.id WHERE p.created_at >= :d1 AND p.created_at <= :d2 AND LOWER(COALESCE(p.status,'')) <> 'cancelled'),0)
-                      + COALESCE((SELECT SUM(rp.amount) FROM restau_payments rp JOIN restau_paniers r ON rp.panier_id = r.id WHERE r.created_at >= :d1 AND r.created_at <= :d2 AND LOWER(COALESCE(r.status,'')) NOT IN ('annule','annulé')),0)
+                      + COALESCE((SELECT SUM(rp.amount) FROM restau_payments rp JOIN restau_paniers r ON rp.panier_id = r.id WHERE r.created_at >= :d1 AND r.created_at <= :d2 AND LOWER(COALESCE(r.status,'')) NOT IN ('annule','annulé', 'cancelled')),0)
                       as total_paid
                 """)
                 paid_row = session.execute(q_paid, {'d1': d1, 'd2': d2}).fetchone()
@@ -463,7 +463,7 @@ class CommandeController:
                                (SELECT COALESCE(SUM(rpay.amount),0) FROM restau_payments rpay WHERE rpay.panier_id = rp.id) as montant_paye
                         FROM restau_paniers rp
                         WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
-                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé')
+                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé', 'cancelled')
                     ) t
                     WHERE COALESCE(t.montant_paye,0) < COALESCE(t.total_final,0)
                 """)
@@ -484,7 +484,7 @@ class CommandeController:
                                (SELECT COALESCE(SUM(rpay.amount),0) FROM restau_payments rpay WHERE rpay.panier_id = rp.id) as montant_paye
                         FROM restau_paniers rp
                         WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
-                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé')
+                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule','annulé', 'cancelled')
                     ) t
                 """)
                 nb_cre_row = session.execute(q_nb_creances, {'d1': d1, 'd2': d2}).fetchone()
@@ -496,7 +496,7 @@ class CommandeController:
                 q_nb_cmd = text("""
                     SELECT
                       COALESCE((SELECT COUNT(1) FROM shop_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) <> 'cancelled'),0)
-                      + COALESCE((SELECT COUNT(1) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé')),0)
+                      + COALESCE((SELECT COUNT(1) FROM restau_paniers WHERE created_at >= :d1 AND created_at <= :d2 AND LOWER(COALESCE(status,'')) NOT IN ('annule','annulé', 'cancelled')),0)
                       as nb_commandes
                 """)
                 nb_row = session.execute(q_nb_cmd, {'d1': d1, 'd2': d2}).fetchone()

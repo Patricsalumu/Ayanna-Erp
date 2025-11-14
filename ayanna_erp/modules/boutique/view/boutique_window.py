@@ -4,17 +4,14 @@ Gestionnaire des onglets - chaque onglet est dans son propre fichier
 Architecture MVC avec contrôleurs pour la gestion de la base de données
 """
 
-import sys
-import os
+
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QTabWidget, QMessageBox, QProgressDialog)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QFont, QPixmap, QIcon
 
 # Import du contrôleur principal
 from ..controller.boutique_controller import BoutiqueController
 
 # Import des différents onglets
-from .panier_index import PanierIndex
 from .modern_supermarket_widget import ModernSupermarketWidget
 from .produit_index import ProduitIndex
 from modules.salle_fete.view.service_index import ServiceIndex
@@ -22,7 +19,6 @@ from modules.salle_fete.view.entreSortie_index import EntreeSortieIndex
 from .categorie_index import CategorieIndex
 from .client_index import ClientIndex
 from .commandes_index import CommandesIndexWidget
-from .rapport_index import RapportIndexWidget
 
 
 class BoutiqueWindow(QMainWindow):
@@ -93,7 +89,7 @@ class BoutiqueWindow(QMainWindow):
                 min-width: 120px;
             }
             QTabBar::tab:selected {
-                background-color: #27AE60;
+                background-color: #2196F3;
                 color: white;
             }
             QTabBar::tab:hover:!selected {

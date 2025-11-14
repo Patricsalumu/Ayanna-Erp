@@ -536,10 +536,11 @@ class CommandesIndexWidget(QWidget):
             stats_text = f"""
 Période: {self.date_debut.date().toString('dd/MM/yyyy')} - {self.date_fin.date().toString('dd/MM/yyyy')}
 Commandes: {stats.get('nb_commandes', 0)}
-Total non payés: {stats.get('total_unpaid', 0):.0f} {self.get_currency_symbol()}
+Commandes Non Payées: {stats.get('nb_creances', 0)}
 Chiffre d'affaires: {stats.get('total_ca', 0):.0f} {self.get_currency_symbol()}
-Total payés: {stats.get('total_paid', 0):.0f} {self.get_currency_symbol()}
-Créances: {stats.get('nb_creances', 0)}
+Montant Créances: {stats.get('total_unpaid', 0):.0f} {self.get_currency_symbol()}
+Montant Espèces: {stats.get('total_paid', 0):.0f} {self.get_currency_symbol()}
+
             """
             self.stats_text.setText(stats_text.strip())
         except Exception as e:
@@ -580,7 +581,6 @@ Créances: {stats.get('nb_creances', 0)}
             
         row = selected_rows[0].row()
         commande_id = self.commandes_table.item(row, 0).text()
-        print(f"DEBUGG : Commande sélectionnée ID = {commande_id}")
         
         # Récupérer les détails de la commande
         try:
