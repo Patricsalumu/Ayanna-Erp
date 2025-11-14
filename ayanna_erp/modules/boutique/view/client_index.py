@@ -13,9 +13,18 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from ayanna_erp.database.database_manager import DatabaseManager
+from datetime import datetime
 from sqlalchemy import func
 from ..model.models import ShopClient, ShopPanier, ShopPayment
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+# Inclure les paniers/restau pour tenir compte des ventes restaurant
+try:
+    from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier, RestauPayment
+except Exception:
+    # Import optionnel : si le module restaurant n'existe pas dans l'installation actuelle,
+    # on définira des alias None et on gérera l'absence plus bas.
+    RestauPanier = None
+    RestauPayment = None
 
 class ClientIndex(QWidget):
     """Widget de gestion des clients"""
@@ -245,44 +254,115 @@ class ClientIndex(QWidget):
                 
                 # Calculer les statistiques spécifiques au client
                 # Total commandes payées
-                total_commandes = session.query(ShopPanier).filter(
+                # Total commandes payées (boutique + restauration)
+                shop_paid_count = session.query(ShopPanier).filter(
                     ShopPanier.client_id == client.id,
                     ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending'])
                 ).count()
-                
-                # Total dépensé (somme des montants des paniers payés)
-                total_depense = session.query(func.sum(ShopPanier.total_final)).filter(
+                # Intégrer les paniers restaurant pour le client (paiés / non-réglés)
+                restau_paid_count = 0
+                total_depense_shop = session.query(func.sum(ShopPanier.total_final)).filter(
                     ShopPanier.client_id == client.id,
                     ShopPanier.status.in_(['validé', 'payé', 'completed', 'pending'])
                 ).scalar() or 0.0
+
+                total_depense_restau = 0.0
+                restau_non_regles = []
+                try:
+                    if RestauPanier is not None:
+                        restaus = session.query(RestauPanier).filter(RestauPanier.client_id == client.id).all()
+                        for rp in restaus:
+                            # Somme des paiements pour ce panier
+                            payments_sum = 0.0
+                            if RestauPayment is not None:
+                                try:
+                                    payments_sum = session.query(func.sum(RestauPayment.amount)).filter(RestauPayment.panier_id == getattr(rp, 'id', None)).scalar() or 0.0
+                                except Exception:
+                                    # Fallback: utiliser la relation payments si elle est chargée
+                                    try:
+                                        payments_sum = sum([float(p.amount or 0) for p in getattr(rp, 'payments', [])])
+                                    except Exception:
+                                        payments_sum = 0.0
+
+                            total_rp = float(getattr(rp, 'total_final', getattr(rp, 'total', 0)) or 0.0)
+
+                            # Considérer payé si le statut est 'valide' ou si les paiements couvrent le total
+                            if str(getattr(rp, 'status', '')).lower() == 'valide' or payments_sum >= total_rp:
+                                restau_paid_count += 1
+                                total_depense_restau += total_rp
+                            else:
+                                # Si annulé, ignorer
+                                if str(getattr(rp, 'status', '')).lower() == 'annule':
+                                    continue
+                                # Panier non réglé partiellement ou totalement
+                                restau_non_regles.append((rp, total_rp - payments_sum if total_rp - payments_sum > 0 else 0.0))
+                except Exception:
+                    # En cas d'erreur d'accès au module restau, ignorer
+                    restau_paid_count = 0
+                    total_depense_restau = 0.0
+
+                total_commandes = shop_paid_count + restau_paid_count
+                total_depense = float(total_depense_shop or 0.0) + float(total_depense_restau or 0.0)
                 
                 # Commandes non réglées
-                paniers_non_regles = session.query(ShopPanier).filter(
+                # Paniers non réglés (boutique + restau)
+                paniers_non_regles_shop = session.query(ShopPanier).filter(
                     ShopPanier.client_id == client.id,
                     ShopPanier.status.not_in(['validé', 'payé', 'completed', 'cancelled'])
                 ).all()
-                
-                commandes_non_reglees = len(paniers_non_regles)
-                
-                # Montant non réglé (total dû)
+                commandes_non_reglees = len(paniers_non_regles_shop) + len(restau_non_regles)
+
+                # Montant non réglé (total dû) pour boutique
                 montant_non_regle = 0.0
-                for panier in paniers_non_regles:
+                for panier in paniers_non_regles_shop:
                     montant_paye = session.query(func.sum(ShopPayment.amount)).filter(
                         ShopPayment.panier_id == panier.id
                     ).scalar() or 0.0
-                    montant_du = float(panier.total_final or 0) - float(montant_paye)
+                    montant_du = float(getattr(panier, 'total_final', getattr(panier, 'total', 0)) or 0) - float(montant_paye)
                     if montant_du > 0:
                         montant_non_regle += montant_du
+
+                # Ajouter les montants non réglés RESTAU calculés précédemment
+                for _rp, due in restau_non_regles:
+                    montant_non_regle += due
                 
                 # Dernière commande
-                derniere_commande = session.query(ShopPanier).filter(
-                    ShopPanier.client_id == client.id
-                ).order_by(ShopPanier.created_at.desc()).first()
-                
-                # 5 dernières commandes
-                dernieres_commandes = session.query(ShopPanier).filter(
-                    ShopPanier.client_id == client.id
-                ).order_by(ShopPanier.created_at.desc()).limit(5).all()
+                # Dernière commande (boutique ou restau)
+                try:
+                    last_shop = session.query(ShopPanier).filter(ShopPanier.client_id == client.id).order_by(ShopPanier.created_at.desc()).first()
+                except Exception:
+                    last_shop = None
+                last_restau = None
+                if RestauPanier is not None:
+                    try:
+                        last_restau = session.query(RestauPanier).filter(RestauPanier.client_id == client.id).order_by(RestauPanier.created_at.desc()).first()
+                    except Exception:
+                        last_restau = None
+
+                # Choisir la plus récente
+                if last_shop and last_restau:
+                    derniere_commande = last_shop if getattr(last_shop, 'created_at', datetime.min) >= getattr(last_restau, 'created_at', datetime.min) else last_restau
+                else:
+                    derniere_commande = last_shop or last_restau
+
+                # 5 dernières commandes combinées
+                try:
+                    dernieres_shop = session.query(ShopPanier).filter(ShopPanier.client_id == client.id).order_by(ShopPanier.created_at.desc()).limit(5).all()
+                except Exception:
+                    dernieres_shop = []
+                dernieres_restau = []
+                if RestauPanier is not None:
+                    try:
+                        dernieres_restau = session.query(RestauPanier).filter(RestauPanier.client_id == client.id).order_by(RestauPanier.created_at.desc()).limit(5).all()
+                    except Exception:
+                        dernieres_restau = []
+
+                # Fusionner et trier par date
+                combined = []
+                combined.extend(dernieres_shop)
+                combined.extend(dernieres_restau)
+                combined.sort(key=lambda p: getattr(p, 'created_at', datetime.min), reverse=True)
+                dernieres_commandes = combined[:5]
                 
                 # Affichage des détails du client
                 details = f"<h3>📋 Informations du client</h3>"
@@ -304,25 +384,50 @@ class ClientIndex(QWidget):
                 # Statistiques financières
                 details += f"<h3>💰 Statistiques financières</h3>"
                 details += f"<b>🛒 Total commandes :</b> {total_commandes}<br>"
-                details += f"<b>💵 Total dépensé :</b> {total_depense:.2f} {self.get_currency_symbol()}<br>"
+                try:
+                    total_depense_str = self.enterprise_controller.format_amount(total_depense)
+                except Exception:
+                    total_depense_str = f"{total_depense:.2f} {self.get_currency_symbol()}"
+                try:
+                    montant_non_regle_str = self.enterprise_controller.format_amount(montant_non_regle)
+                except Exception:
+                    montant_non_regle_str = f"{montant_non_regle:.2f} {self.get_currency_symbol()}"
+
+                details += f"<b>💵 Total dépensé :</b> {total_depense_str}<br>"
                 details += f"<b>⚠️ Commandes non réglées :</b> {commandes_non_reglees}<br>"
-                details += f"<b>💳 Montant dû :</b> {montant_non_regle:.2f} {self.get_currency_symbol()}<br>"
+                details += f"<b>💳 Montant dû :</b> {montant_non_regle_str}<br>"
                 
                 # Dernière commande
                 if derniere_commande:
                     details += f"<h3>🕒 Dernière commande</h3>"
-                    details += f"<b>Référence :</b> {derniere_commande.numero_commande or 'N/A'}<br>"
-                    details += f"<b>Date :</b> {derniere_commande.created_at.strftime('%d/%m/%Y %H:%M')}<br>"
-                    details += f"<b>Montant :</b> {derniere_commande.total_final:.2f} {self.get_currency_symbol()}<br>"
-                    details += f"<b>Statut :</b> {derniere_commande.status}<br>"
+                    ref = getattr(derniere_commande, 'numero_commande', None) or getattr(derniere_commande, 'reference', None)
+                    if not ref:
+                        pid = getattr(derniere_commande, 'id', None)
+                        ref = f"CMD-{pid}" if pid is not None else 'N/A'
+                    created = getattr(derniere_commande, 'created_at', None)
+                    date_str = created.strftime('%d/%m/%Y %H:%M') if created else 'N/A'
+                    montant_val = getattr(derniere_commande, 'total_final', getattr(derniere_commande, 'total', 0)) or 0.0
+                    status_val = getattr(derniere_commande, 'status', '')
+                    details += f"<b>Référence :</b> {ref}<br>"
+                    details += f"<b>Date :</b> {date_str}<br>"
+                    details += f"<b>Montant :</b> {float(montant_val):.2f} {self.get_currency_symbol()}<br>"
+                    details += f"<b>Statut :</b> {status_val}<br>"
                 
                 # 5 dernières commandes
                 if dernieres_commandes:
                     details += f"<h3>📜 5 dernières commandes</h3>"
                     for i, cmd in enumerate(dernieres_commandes, 1):
-                        details += f"<b>{i}. {cmd.numero_commande or 'N/A'}</b> - "
-                        details += f"{cmd.created_at.strftime('%d/%m/%Y')} - "
-                        details += f"{cmd.total_final:.2f} {self.get_currency_symbol()} - {cmd.status}<br>"
+                        ref = getattr(cmd, 'numero_commande', None) or getattr(cmd, 'reference', None)
+                        if not ref:
+                            pid = getattr(cmd, 'id', None)
+                            ref = f"CMD-{pid}" if pid is not None else 'N/A'
+                        created = getattr(cmd, 'created_at', None)
+                        date_only = created.strftime('%d/%m/%Y') if created else 'N/A'
+                        montant_val = getattr(cmd, 'total_final', getattr(cmd, 'total', 0)) or 0.0
+                        status_val = getattr(cmd, 'status', '')
+                        details += f"<b>{i}. {ref}</b> - "
+                        details += f"{date_only} - "
+                        details += f"{float(montant_val):.2f} {self.get_currency_symbol()} - {status_val}<br>"
                 
                 self.detail_text.setHtml(details)
                 
@@ -446,9 +551,24 @@ class ClientIndex(QWidget):
                 total_clients = len(clients)
                 self.total_clients_label.setText(str(total_clients))
                 
-                # Statistiques des paniers/commandes
-                paniers = session.query(ShopPanier).filter(ShopPanier.pos_id == getattr(self.boutique_controller, 'pos_id', 1)).all()
-                total_commandes = len([p for p in paniers if p.status in ['validé', 'payé', 'completed', 'pending']])
+                # Statistiques des paniers/commandes (boutique + restauration si disponible)
+                pos_filter = getattr(self.boutique_controller, 'pos_id', 1)
+                paniers = session.query(ShopPanier).filter(ShopPanier.pos_id == pos_filter).all()
+                shop_count = len([p for p in paniers if p.status in ['validé', 'payé', 'completed', 'pending']])
+
+                restau_count = 0
+                if RestauPanier is not None:
+                    try:
+                        # Appliquer pos_id filter si le modèle l'expose
+                        if hasattr(RestauPanier, 'pos_id'):
+                            restau_q = session.query(RestauPanier).filter(RestauPanier.pos_id == pos_filter)
+                        else:
+                            restau_q = session.query(RestauPanier)
+                        restau_count = restau_q.filter(RestauPanier.status.in_(['valide', 'en_cours', 'payé', 'completed'])).count()
+                    except Exception:
+                        restau_count = 0
+
+                total_commandes = shop_count + restau_count
                 self.total_commandes_label.setText(str(total_commandes))
                 
                 # Calculer les montants
@@ -456,28 +576,60 @@ class ClientIndex(QWidget):
                 paniers_non_regles = 0
                 montant_non_paye = 0.0
                 
+                # Calculons les montants pour les paniers boutique
                 for panier in paniers:
                     if panier.status in ['validé', 'payé', 'completed']:
-                        # Paniers payés - ajouter au total dépensé
-                        total_depense += float(panier.total_final or 0)
+                        total_depense += float(getattr(panier, 'total_final', getattr(panier, 'total', 0)) or 0)
                     elif panier.status not in ['cancelled', 'completed', 'payé', 'validé']:
-                        # Paniers non réglés
                         paniers_non_regles += 1
-                        
-                        # Calculer le montant non payé pour ce panier
                         montant_paye = session.query(ShopPayment)\
                             .filter(ShopPayment.panier_id == panier.id)\
                             .with_entities(func.sum(ShopPayment.amount))\
                             .scalar() or 0
-                        
-                        montant_du = float(panier.total_final or 0) - float(montant_paye)
+                        montant_du = float(getattr(panier, 'total_final', getattr(panier, 'total', 0)) or 0) - float(montant_paye)
                         if montant_du > 0:
                             montant_non_paye += montant_du
+
+                # Inclure les paniers restaurant
+                if RestauPanier is not None:
+                    try:
+                        if hasattr(RestauPanier, 'pos_id'):
+                            restau_q = session.query(RestauPanier).filter(RestauPanier.pos_id == pos_filter)
+                        else:
+                            restau_q = session.query(RestauPanier)
+
+                        restau_list = restau_q.all()
+                        for rp in restau_list:
+                            status = getattr(rp, 'status', '')
+                            if status in ['valide', 'payé', 'completed', 'en_cours']:
+                                total_depense += float(getattr(rp, 'total_final', getattr(rp, 'total', 0)) or 0)
+                            elif status and status.lower() not in ('cancelled', 'completed', 'payé', 'validé'):
+                                # Compter comme non réglé
+                                paniers_non_regles += 1
+                                # Somme des paiements restau si disponible
+                                montant_paye = 0.0
+                                if RestauPayment is not None:
+                                    try:
+                                        montant_paye = session.query(func.sum(RestauPayment.amount)).filter(RestauPayment.panier_id == getattr(rp, 'id', None)).scalar() or 0.0
+                                    except Exception:
+                                        montant_paye = 0.0
+                                montant_du = float(getattr(rp, 'total_final', getattr(rp, 'total', 0)) or 0) - float(montant_paye)
+                                if montant_du > 0:
+                                    montant_non_paye += montant_du
+                    except Exception:
+                        # Si tout échoue, ignorer la partie restau
+                        pass
                 
-                # Mettre à jour les labels
-                self.total_depense_label.setText(f"{total_depense:.2f} {self.get_currency_symbol()}")
+                # Mettre à jour les labels (utiliser le formateur central pour espacement et devise)
+                try:
+                    self.total_depense_label.setText(self.enterprise_controller.format_amount(total_depense))
+                except Exception:
+                    self.total_depense_label.setText(f"{total_depense:.2f} {self.get_currency_symbol()}")
                 self.paniers_non_regles_label.setText(str(paniers_non_regles))
-                self.montant_non_paye_label.setText(f"{montant_non_paye:.2f} {self.get_currency_symbol()}")
+                try:
+                    self.montant_non_paye_label.setText(self.enterprise_controller.format_amount(montant_non_paye))
+                except Exception:
+                    self.montant_non_paye_label.setText(f"{montant_non_paye:.2f} {self.get_currency_symbol()}")
                 
         except Exception as e:
             print(f"Erreur lors du calcul des statistiques: {e}")
