@@ -95,20 +95,7 @@ class DepenseDialog(QDialog):
         self.compte_combo.setPlaceholderText("Sélectionner un compte de charges...")
         form_layout.addRow("Compte de charges *:", self.compte_combo)
         
-        # Catégorie
-        self.categorie_combo = QComboBox()
-        self.categorie_combo.addItems([
-            "Achat matériel",
-            "Achat nourriture/boisson", 
-            "Transport",
-            "Service externe",
-            "Maintenance",
-            "Salaire personnel",
-            "Frais généraux",
-            "Autre"
-        ])
-        self.categorie_combo.setEditable(True)
-        form_layout.addRow("Catégorie:", self.categorie_combo)
+        # (Catégorie removed to simplify the expense flow)
         
         # Fournisseur (nouveau)
         self.fournisseur_edit = QLineEdit()
@@ -214,7 +201,6 @@ class DepenseDialog(QDialog):
             'libelle': self.libelle_edit.text().strip(),
             'montant': self.montant_spinbox.value(),
             'compte_id': selected_compte_id,
-            'categorie': self.categorie_combo.currentText().strip(),
             'fournisseur': self.fournisseur_edit.text().strip() or None,
             'facture': self.facture_edit.text().strip() or None,
             'description': self.description_edit.toPlainText().strip()
@@ -391,7 +377,7 @@ class EntreeSortieIndex(QWidget):
         """)
         filters_layout.addWidget(self.date_fin_filter)
         
-        # Filtre type d'opération
+    # Filtre type d'opération
         filters_layout.addWidget(QLabel("Type:"))
         self.type_filter = QComboBox()
         self.type_filter.addItems(["Tous", "Entrées", "Sorties"])
@@ -429,10 +415,11 @@ class EntreeSortieIndex(QWidget):
         table_layout = QVBoxLayout(table_group)
         
         self.journal_table = QTableWidget()
-        self.journal_table.setColumnCount(7)
+        # Colonnes: Date/Heure, Type, Libellé, Entrée, Sortie
+        self.journal_table.setColumnCount(5)
         currency_symbol = self.get_currency_symbol()
         self.journal_table.setHorizontalHeaderLabels([
-            "Date/Heure", "Type", "Libellé", "Catégorie", f"Entrée ({currency_symbol})", f"Sortie ({currency_symbol})", "Utilisateur"
+            "Date/Heure", "Type", "Libellé", f"Entrée ({currency_symbol})", f"Sortie ({currency_symbol})"
         ])
         
         # Configuration du tableau
@@ -469,10 +456,8 @@ class EntreeSortieIndex(QWidget):
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # Date
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Type
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)           # Libellé
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Catégorie
-        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Entrée
-        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)  # Sortie
-        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)  # Utilisateur
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Entrée
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)  # Sortie
         
         table_layout.addWidget(self.journal_table)
         layout.addWidget(table_group)
@@ -843,10 +828,7 @@ class EntreeSortieIndex(QWidget):
             # Libellé
             self.journal_table.setItem(row, 2, QTableWidgetItem(entry['libelle']))
             
-            # Catégorie
-            self.journal_table.setItem(row, 3, QTableWidgetItem(entry['categorie']))
-            
-            # Montant Entrée
+            # Montant Entrée (colonne 3 après suppression de la catégorie)
             if entry['montant_entree'] > 0:
                 entree_item = QTableWidgetItem(self.format_amount(entry['montant_entree']))
                 entree_item.setForeground(Qt.GlobalColor.darkGreen)
@@ -854,7 +836,7 @@ class EntreeSortieIndex(QWidget):
             else:
                 entree_item = QTableWidgetItem("-")
                 entree_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.journal_table.setItem(row, 4, entree_item)
+            self.journal_table.setItem(row, 3, entree_item)
             
             # Montant Sortie
             if entry['montant_sortie'] > 0:
@@ -864,10 +846,10 @@ class EntreeSortieIndex(QWidget):
             else:
                 sortie_item = QTableWidgetItem("-")
                 sortie_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.journal_table.setItem(row, 5, sortie_item)
+            # Montant Sortie (colonne 4)
+            self.journal_table.setItem(row, 4, sortie_item)
             
-            # Utilisateur
-            self.journal_table.setItem(row, 6, QTableWidgetItem(entry['utilisateur']))
+            # (Utilisateur column removed)
         
         # Mettre à jour les statistiques
         self.update_statistics(filtered_data)
@@ -899,8 +881,7 @@ class EntreeSortieIndex(QWidget):
             search_text = self.search_edit.text().lower()
             if search_text:
                 filtered_data = [entry for entry in filtered_data 
-                               if search_text in entry['libelle'].lower() or 
-                                  search_text in entry['categorie'].lower()]
+                               if search_text in entry['libelle'].lower()]
         
         return filtered_data
     
@@ -1173,7 +1154,7 @@ class EntreeSortieIndex(QWidget):
 
                     # Tableau des opérations
                     table_data = [
-                        ['Date/Heure', 'Type', 'Libellé', 'Catégorie', f'Entrée ({currency_symbol})', f'Sortie ({currency_symbol})', 'Utilisateur']
+                        ['Date/Heure', 'Type', 'Libellé', f'Entrée ({currency_symbol})', f'Sortie ({currency_symbol})']
                     ]
 
                     for entry in filtered_data:
@@ -1192,15 +1173,13 @@ class EntreeSortieIndex(QWidget):
                             entry['datetime'].strftime("%d/%m/%Y\n%H:%M"),
                             entry['type'],
                             entry['libelle'],
-                            entry['categorie'],
                             entree_str,
-                            sortie_str,
-                            entry['utilisateur']
+                            sortie_str
                         ]
                         table_data.append(row)
 
                     # Créer le tableau avec des largeurs appropriées
-                    col_widths = [2.5*cm, 2*cm, 6*cm, 3*cm, 2.5*cm, 2.5*cm, 2.5*cm]
+                    col_widths = [2.5*cm, 2*cm, 8*cm, 3*cm, 3*cm]
                     operations_table = Table(table_data, colWidths=col_widths, repeatRows=1)
 
                     # Style du tableau
@@ -1219,9 +1198,8 @@ class EntreeSortieIndex(QWidget):
                         ('ALIGN', (0, 0), (0, -1), 'CENTER'),  # Date
                         ('ALIGN', (1, 0), (1, -1), 'CENTER'),  # Type
                         ('ALIGN', (2, 0), (2, -1), 'LEFT'),    # Libellé
-                        ('ALIGN', (3, 0), (3, -1), 'LEFT'),    # Catégorie
-                        ('ALIGN', (4, 0), (5, -1), 'RIGHT'),   # Montants
-                        ('ALIGN', (6, 0), (6, -1), 'CENTER'),  # Utilisateur
+                        ('ALIGN', (3, 0), (3, -1), 'RIGHT'),   # Montants (Entrée)
+                        ('ALIGN', (4, 0), (4, -1), 'RIGHT'),   # Montants (Sortie)
 
                         # Bordures
                         ('GRID', (0, 0), (-1, -1), 0.5, black),
@@ -1260,12 +1238,42 @@ class EntreeSortieIndex(QWidget):
                 # Ouvrir le dossier contenant le PDF
                 try:
                     import subprocess
-                    subprocess.run(['explorer', '/select,', filename], shell=True, check=True)
+                    fullpath = os.path.abspath(filename)
+                    # Sous Windows, on demande à explorer de sélectionner le fichier. Certaines environnements
+                    # retournent un code non-zéro si la sélection échoue ; dans ce cas on ouvre le dossier.
+                    if os.name == 'nt':
+                        if os.path.exists(fullpath):
+                            # Utiliser une commande shell pour conserver la syntaxe attendue par explorer
+                            cmd = f'explorer /select,"{fullpath}"'
+                            proc = subprocess.run(cmd, shell=True)
+                            if proc.returncode != 0:
+                                # Fallback : ouvrir le dossier contenant le fichier
+                                folder = os.path.dirname(fullpath)
+                                try:
+                                    subprocess.run(['explorer', folder], check=False)
+                                except Exception:
+                                    pass
+                        else:
+                            # Si le fichier n'existe pas (imprévu), ouvrir le dossier d'exports
+                            folder = os.path.dirname(fullpath)
+                            try:
+                                subprocess.run(['explorer', folder], check=False)
+                            except Exception:
+                                pass
+                    else:
+                        # Pour les autres OS, ouvrir le dossier contenant le fichier
+                        folder = os.path.dirname(fullpath)
+                        if sys.platform == 'darwin':
+                            subprocess.run(['open', folder], check=False)
+                        else:
+                            subprocess.run(['xdg-open', folder], check=False)
+
                     QMessageBox.information(self, "Export réussi",
                                           f"Le journal de caisse a été exporté avec succès !\n\n"
                                           f"Fichier: {filename}\n\n"
-                                          "Le dossier contenant l'export a été ouvert.")
+                                          "Le dossier contenant l'export a été ouvert (ou sélectionné).")
                 except Exception as open_error:
+                    # Ne leverons pas d'exception ici : informer l'utilisateur mais considérer l'export comme réussi
                     QMessageBox.information(self, "Export réussi",
                                           f"Le journal de caisse a été exporté avec succès !\n\n"
                                           f"Fichier: {filename}\n\n"
