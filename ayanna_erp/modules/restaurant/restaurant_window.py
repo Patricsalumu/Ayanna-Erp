@@ -35,7 +35,10 @@ class RestaurantWindow(QMainWindow):
         super().__init__()
         self.current_user = current_user
         # Utiliser l'instance globale de DatabaseManager partagée par l'application
-        self.pos_id = 1
+        # POS id pour le module restaurant — utilise l'ID 4 qui mappe normalement à POS_4 (restaurant)
+        # Si votre base utilise un autre pos_id pour le restaurant, ajustez cette valeur ou
+        # modifiez l'appelant pour transmettre le pos_id correct.
+        self.pos_id = 4
         self.db_manager = get_database_manager()
         self.boutique_controller = BoutiqueController(self.pos_id)
         
@@ -138,7 +141,9 @@ class RestaurantWindow(QMainWindow):
         
     def setup_produits_tab(self):
         """Configuration de l'onglet Paiements"""
-        produit_widget = ProduitIndex(1, 1)
+        # Instancier le widget produits en mode 'restaurant' pour afficher le stock et
+        # les statistiques liées au POS restaurant (entrepôt POS_4)
+        produit_widget = ProduitIndex(self.pos_id, self.current_user, module='restaurant')
         self.tab_widget.addTab(produit_widget, "📦 Produits")
     
     def setup_orders_tab(self):

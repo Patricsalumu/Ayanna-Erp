@@ -29,10 +29,13 @@ class ProduitIndex(QWidget):
     # Signaux
     product_updated = pyqtSignal(int)  # product_id
     
-    def __init__(self, pos_id, current_user):
+    def __init__(self, pos_id, current_user, module: str = None):
         super().__init__()
         from ayanna_erp.modules.boutique.controller.produit_controller import ProduitController
         self.produit_controller = ProduitController(pos_id)
+        # conserver le pos_id et le module demandé (boutique / restaurant / None)
+        self.pos_id = pos_id
+        self.module = module or 'boutique'
         self.current_user = current_user
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
@@ -246,22 +249,59 @@ class ProduitIndex(QWidget):
             details += f"<b>Statut :</b> {'Actif' if product.is_active else 'Inactif'}<br>"
             details += f"<b>Description :</b> {product.description or ''}<br>"
             
-            # Ajouter les statistiques de vente
+            # Ajouter les statistiques de vente — commencer par celles du controller (boutique selon pos_id)
             sales_stats = self.produit_controller.get_product_sales_statistics(session, product_id)
+
+            # Agréger ensuite les ventes provenant du module Restaurant (table restau_produit_panier)
+            try:
+                from sqlalchemy import func
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauProduitPanier, RestauPanier
+
+                restau_q = session.query(
+                    func.COALESCE(func.SUM(RestauProduitPanier.quantity), 0).label('qty_sum'),
+                    func.COALESCE(func.SUM(RestauProduitPanier.total), 0).label('total_sum'),
+                    func.COALESCE(func.COUNT(func.DISTINCT(RestauProduitPanier.panier_id)), 0).label('panier_count'),
+                    func.MAX(RestauPanier.created_at).label('last_date')
+                ).join(RestauPanier, RestauProduitPanier.panier_id == RestauPanier.id)
+                restau_q = restau_q.filter(RestauProduitPanier.product_id == product_id)
+                # Exclure paniers annulés
+                restau_q = restau_q.filter(RestauPanier.status != 'annule')
+
+                restau_row = restau_q.one()
+
+                # Combiner
+                sales_count = int((sales_stats.get('sales_count') or 0) + (restau_row.panier_count or 0))
+                total_quantity = float((sales_stats.get('total_quantity_sold') or 0.0) + (restau_row.qty_sum or 0.0))
+                # Last sale: choisir la date la plus récente entre les deux sources
+                last_dates = [d for d in [sales_stats.get('last_sale_date'), restau_row.last_date] if d]
+                last_sale_date = max(last_dates) if last_dates else None
+                total_revenue = float((sales_stats.get('total_revenue') or 0.0) + (restau_row.total_sum or 0.0))
+                total_profit = float((sales_stats.get('total_profit') or 0.0) + ((restau_row.total_sum or 0.0) - ((restau_row.qty_sum or 0.0) * float(product.cost or 0))))
+
+                combined_stats = {
+                    'sales_count': sales_count,
+                    'total_quantity_sold': total_quantity,
+                    'last_sale_date': last_sale_date,
+                    'total_revenue': total_revenue,
+                    'total_profit': total_profit
+                }
+            except Exception:
+                # Si le module restaurant est absent ou erreur, conserver les stats du controller
+                combined_stats = sales_stats
+
             details += f"<br><b>📊 STATISTIQUES DE VENTE</b><br>"
-            details += f"<b>Ventes :</b> {sales_stats['sales_count']} fois<br>"
-            details += f"<b>Quantité vendue :</b> {sales_stats['total_quantity_sold']:.2f} {product.unit}<br>"
-            if sales_stats['last_sale_date']:
-                # Gérer le cas où last_sale_date peut être une string ou un datetime
-                last_sale = sales_stats['last_sale_date']
+            details += f"<b>Ventes :</b> {combined_stats['sales_count']} fois<br>"
+            details += f"<b>Quantité vendue :</b> {combined_stats['total_quantity_sold']:.2f} {product.unit}<br>"
+            if combined_stats['last_sale_date']:
+                last_sale = combined_stats['last_sale_date']
                 if isinstance(last_sale, str):
                     details += f"<b>Dernière vente :</b> {last_sale}<br>"
                 else:
                     details += f"<b>Dernière vente :</b> {last_sale.strftime('%d/%m/%Y %H:%M')}<br>"
             else:
                 details += f"<b>Dernière vente :</b> Jamais vendu<br>"
-            details += f"<b>Chiffre d'affaires :</b> {sales_stats['total_revenue']:.2f} {self.get_currency_symbol()}<br>"
-            details += f"<b>Marge :</b> {sales_stats['total_profit']:.2f} {self.get_currency_symbol()}<br>"
+            details += f"<b>Chiffre d'affaires :</b> {combined_stats['total_revenue']:.2f} {self.get_currency_symbol()}<br>"
+            details += f"<b>Marge :</b> {combined_stats['total_profit']:.2f} {self.get_currency_symbol()}<br>"
             
             # Ajouter les détails de stock
             stock_details = self.produit_controller.get_product_stock_details(session, product_id)
@@ -284,20 +324,33 @@ class ProduitIndex(QWidget):
             self.load_product_image(product.image)
 
     def _get_product_stock_info(self, product_id):
-        """Récupérer les informations de stock d'un produit depuis l'entrepôt POS Boutique"""
+        """Récupérer les informations de stock d'un produit depuis l'entrepôt du POS correspondant.
+        Si le widget a été instancié pour le module 'restaurant', on utilisera le code d'entrepôt
+        mappé au POS restaurant; sinon on utilisera le pos_code fourni par le controller.
+        """
         try:
             from ayanna_erp.modules.stock.models import StockProduitEntrepot, StockWarehouse
             session = self.db_manager.get_session()
-            
-            # Récupérer l'entrepôt POS Boutique
-            pos_warehouse = session.query(StockWarehouse).filter_by(code='POS_2').first()
+
+            # Déterminer le code d'entrepôt à utiliser
+            try:
+                # prioriser le pos_code du controller s'il existe
+                warehouse_code = getattr(self.produit_controller, 'pos_code', None) or 'POS_2'
+                # si le module explicitement demandé est 'restaurant', favoriser le code POS_4
+                if getattr(self, 'module', None) == 'restaurant':
+                    warehouse_code = 'POS_4'
+            except Exception:
+                warehouse_code = 'POS_2'
+
+            # Récupérer l'entrepôt correspondant au POS
+            pos_warehouse = session.query(StockWarehouse).filter_by(code=warehouse_code).first()
             
             if not pos_warehouse:
                 session.close()
                 return {
                     'total_stock': 0,
                     'min_stock': 0,
-                    'warehouse_name': 'Entrepôt introuvable'
+                    'warehouse_name': f'Entrepôt {warehouse_code} introuvable'
                 }
             
             # Récupérer le stock pour ce produit dans l'entrepôt POS Boutique
