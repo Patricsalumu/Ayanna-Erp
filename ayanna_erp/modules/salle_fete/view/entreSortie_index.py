@@ -351,7 +351,8 @@ class EntreeSortieIndex(QWidget):
         # Filtre par plage de dates
         filters_layout.addWidget(QLabel("Du:"))
         self.date_debut_filter = QDateEdit()
-        self.date_debut_filter.setDate(QDate.currentDate().addDays(-7))  # Par défaut 7 jours en arrière
+        # Par défaut : afficher uniquement la date du jour (intervalle d'une seule journée)
+        self.date_debut_filter.setDate(QDate.currentDate())
         self.date_debut_filter.setCalendarPopup(True)
         self.date_debut_filter.setStyleSheet("""
             QDateEdit {
