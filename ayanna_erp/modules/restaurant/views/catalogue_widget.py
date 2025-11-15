@@ -127,6 +127,13 @@ class CatalogueWidget(QWidget):
         self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText('Rechercher...')
         self.search_edit.textChanged.connect(self.load_products)
         search_h.addWidget(self.search_edit)
+        # Refresh button to reload products / cart quickly
+        try:
+            refresh_btn = QPushButton('🔄 Rafraîchir')
+            refresh_btn.clicked.connect(lambda: (self.load_products(), self.refresh_cart()))
+            search_h.addWidget(refresh_btn)
+        except Exception:
+            pass
         left_l.addLayout(search_h)
 
         self.products_area = QScrollArea(); self.products_area.setWidgetResizable(True)
@@ -1360,6 +1367,13 @@ class CatalogueWidget(QWidget):
                 serveuse_name = ''
 
             # invoice_data expected fields
+            # Compute total_net from freshly computed subtotal and any panier-level discount
+            try:
+                remise_val = float(getattr(self.panier, 'remise_amount', 0.0) or 0.0)
+            except Exception:
+                remise_val = 0.0
+            total_net_computed = subtotal - remise_val
+
             invoice_data = {
                 'module': 'restaurant',
                 'reference': f"PANIER-{self.panier.id}",
@@ -1367,7 +1381,8 @@ class CatalogueWidget(QWidget):
                 'order_date': getattr(self.panier, 'created_at', None),
                 'items': invoice_items,
                 'subtotal_ht': subtotal,
-                'total_net': float(getattr(self.panier, 'total_final', subtotal) or subtotal),
+                # prefer freshly computed total_net (subtotal - remise) rather than possibly stale self.panier.total_final
+                'total_net': float(total_net_computed),
                 'notes': getattr(self.panier, 'notes', '') or '',
                 # Restaurant-specific metadata for printing
                 'table': tbl_display,
