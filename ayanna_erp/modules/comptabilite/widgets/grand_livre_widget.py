@@ -245,9 +245,13 @@ class GrandLivreWidget(QWidget):
             credit = float(e.get("credit", 0))
             total_debit += debit
             total_credit += credit
+            # privilégier le libellé de l'écriture s'il existe, sinon le libellé du journal
+            item_libelle = str(e.get('libelle', '')) if isinstance(e, dict) else ''
+            if not item_libelle:
+                item_libelle = str(journal.libelle if journal else '')
             items = [
                 QStandardItem(str(e.get("date", ""))),
-                QStandardItem(str(journal.libelle if journal else "")),
+                QStandardItem(item_libelle),
                 QStandardItem(self._format_currency(debit)),
                 QStandardItem(self._format_currency(credit)),
             ]

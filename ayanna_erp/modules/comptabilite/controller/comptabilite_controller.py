@@ -558,8 +558,28 @@ class ComptabiliteController:
             list: Liste des objets EcritureComptable (en général 2 lignes)
         """
         # Import remplac� par les nouveaux mod�les
-        ecritures = self.session.query(EcritureComptable).filter_by(journal_id=journal_id).order_by(EcritureComptable.ordre.asc()).all()
-        return ecritures
+        # On renvoie un dictionnaire léger avec les champs utiles et surtout le libellé de l'écriture
+        rows = self.session.query(EcritureComptable).filter_by(journal_id=journal_id).order_by(EcritureComptable.ordre.asc()).all()
+        result = []
+        for e in rows:
+            # tenter de construire un libellé plus parlant : prioriser e.libelle si présent, sinon utiliser le libellé du compte
+            libelle = getattr(e, 'libelle', None)
+            compte_libelle = ''
+            try:
+                compte_libelle = getattr(e.compte_comptable, 'libelle', '')
+            except Exception:
+                compte_libelle = ''
+            final_libelle = libelle or compte_libelle or ''
+            result.append({
+                'id': getattr(e, 'id', None),
+                'journal_id': getattr(e, 'journal_id', None),
+                'date': getattr(e, 'date_creation', None),
+                'debit': float(getattr(e, 'debit', 0) or 0),
+                'credit': float(getattr(e, 'credit', 0) or 0),
+                'compte_id': getattr(e, 'compte_comptable_id', None),
+                'libelle': final_libelle,
+            })
+        return result
     """
     Classe centrale pour la logique métier et l'accès aux données comptables.
     """

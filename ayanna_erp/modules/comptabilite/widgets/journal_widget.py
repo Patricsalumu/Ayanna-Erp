@@ -322,28 +322,59 @@ class JournalWidget(QWidget):
         ecritures = self.controller.get_ecritures_du_journal(journal.id)
 
         for idx, e in enumerate(ecritures):
-            # Déterminer le sens à partir des valeurs debit/credit :
-            # si debit est à 0 ou None => c'est un crédit, sinon c'est un débit
-            debit_val = getattr(e, 'debit', 0) or 0
-            credit_val = getattr(e, 'credit', 0) or 0
-            if float(debit_val) == 0 and float(credit_val) != 0:
-                sens = "Crédit"
+            # e peut être un objet ORM ou un dict léger retourné par le controller
+            if isinstance(e, dict):
+                debit_val = float(e.get('debit', 0) or 0)
+                credit_val = float(e.get('credit', 0) or 0)
+                # sens
+                if float(debit_val) == 0 and float(credit_val) != 0:
+                    sens = "Crédit"
+                else:
+                    sens = "Débit"
+
+                # Montant à afficher
+                montant = credit_val if sens == 'Crédit' else debit_val
+                montant = montant or 0
+                try:
+                    montant_str = self.controller.format_amount(montant)
+                except Exception:
+                    montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
+
+                # Libellé : privilégier le champ 'libelle' renvoyé par le controller
+                libelle = e.get('libelle') or ''
+                # Compte : on peut tenter de récupérer le numéro du compte via l'id si la session est disponible
+                compte = ''
+                cid = e.get('compte_id')
+                if cid and self.session:
+                    try:
+                        from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes as CompteComptable
+                        comp = self.session.query(CompteComptable).filter_by(id=cid).first()
+                        compte = getattr(comp, 'numero', '') if comp is not None else str(cid)
+                    except Exception:
+                        compte = str(cid)
+
+                detail_text = f"{sens} : {compte} - {libelle}  Montant : {montant_str}"
             else:
-                sens = "Débit"
+                # Objet ORM ancien format — conserver compatibilité
+                debit_val = getattr(e, 'debit', 0) or 0
+                credit_val = getattr(e, 'credit', 0) or 0
+                if float(debit_val) == 0 and float(credit_val) != 0:
+                    sens = "Crédit"
+                else:
+                    sens = "Débit"
 
-            compte = getattr(e.compte_comptable, 'numero', '')
-            libelle = getattr(e.compte_comptable, 'libelle', '')
+                compte = getattr(e.compte_comptable, 'numero', '')
+                # privilégier un libellé explicite si l'écriture expose 'libelle'
+                libelle = getattr(e, 'libelle', None) or getattr(e.compte_comptable, 'libelle', '')
 
-            # Utiliser la valeur non nulle comme montant affiché
-            montant = credit_val if sens == 'Crédit' else debit_val
-            montant = montant or 0
-            try:
-                montant_str = self.controller.format_amount(montant)
-            except Exception:
-                montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
+                montant = credit_val if sens == 'Crédit' else debit_val
+                montant = montant or 0
+                try:
+                    montant_str = self.controller.format_amount(montant)
+                except Exception:
+                    montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
 
-            # Créer un item pour cette écriture
-            detail_text = f"{sens} : {compte} - {libelle}  Montant : {montant_str}"
+                detail_text = f"{sens} : {compte} - {libelle}  Montant : {montant_str}"
             detail_item = QStandardItem(detail_text)
             detail_item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             detail_item.setBackground(QColor("#f5f5f5"))  # Fond gris clair

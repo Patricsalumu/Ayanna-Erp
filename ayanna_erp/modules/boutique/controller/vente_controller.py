@@ -411,21 +411,42 @@ class VenteController:
                     qty = item.get('quantity', 0)
 
                     # Récupérer le prix d'achat (cost) et le compte charge du produit
-                    cost_result = session.execute(text("""
+                    # Récupérer le coût d'achat moyen : privilégier la moyenne des mouvements d'entrée
+                    avg_cost_row = session.execute(text("""
+                        SELECT AVG(unit_cost) FROM stock_mouvements
+                        WHERE product_id = :product_id AND unit_cost IS NOT NULL AND unit_cost > 0 AND movement_type = 'ENTREE'
+                    """), {'product_id': product_id}).fetchone()
+                    avg_unit_cost = float(avg_cost_row[0]) if avg_cost_row and avg_cost_row[0] is not None else 0.0
+
+                    # Si pas de moyenne trouvée, tenter le coût stock courant en entrepôt POS_2
+                    if avg_unit_cost <= 0:
+                        spe_row = session.execute(text("""
+                            SELECT unit_cost FROM stock_produits_entrepot
+                            WHERE product_id = :product_id AND warehouse_id = (
+                                SELECT id FROM stock_warehouses WHERE code = 'POS_2' LIMIT 1
+                            ) LIMIT 1
+                        """), {'product_id': product_id}).fetchone()
+                        if spe_row and spe_row[0] is not None:
+                            avg_unit_cost = float(spe_row[0])
+
+                    # Enfin fallback sur le champ cost du produit
+                    product_meta = session.execute(text("""
                         SELECT cost, name, compte_charge_id FROM core_products
                         WHERE id = :product_id
-                    """), {'product_id': product_id})
-                    cost_row = cost_result.fetchone()
-                    unit_cost = float(cost_row[0]) if cost_row and cost_row[0] is not None else 0.0
-                    product_name = cost_row[1] if cost_row and len(cost_row) > 1 else item.get('name', f'Produit {product_id}')
-                    product_compte_charge_id = cost_row[2] if cost_row and len(cost_row) > 2 and cost_row[2] is not None else None
+                    """), {'product_id': product_id}).fetchone()
+                    product_cost_field = float(product_meta[0]) if product_meta and product_meta[0] is not None else 0.0
+                    product_name = product_meta[1] if product_meta and len(product_meta) > 1 else item.get('name', f'Produit {product_id}')
+                    product_compte_charge_id = product_meta[2] if product_meta and len(product_meta) > 2 and product_meta[2] is not None else None
+
+                    unit_cost = avg_unit_cost if avg_unit_cost > 0 else product_cost_field
 
                     # Déterminer le compte charge à utiliser (hiérarchie: compte_charge_id produit > compte_achat_id config > compte_variation_stock_id)
                     compte_charge_id = product_compte_charge_id or compte_achat_id or compte_variation_stock_id
 
-                    print(f"DEBUGG 1 UNIT COSTE {unit_cost}")
+                    # cogs basé sur coût moyen d'achat
+                    print(f"DEBUGG: unit_cost utilisé pour COGS {unit_cost}")
                     cogs_amount = unit_cost * qty
-                    print(f"DEBUGG 2 COGS AMOUNT {cogs_amount}")
+                    print(f"DEBUGG: COGS AMOUNT {cogs_amount}")
                     if cogs_amount <= 0:
                         # Si pas de coût renseigné on saute (ne doit pas arrêter la vente)
                         continue

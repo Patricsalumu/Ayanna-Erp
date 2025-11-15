@@ -118,7 +118,14 @@ class VenteController:
                 insufficient = []
 
             if insufficient:
-                msgs = [f"Produit {p} demandé {q} disponible {a}" for p, q, a in insufficient]
+                msgs = []
+                for p, q, a in insufficient:
+                    try:
+                        prod_row = session.execute(text("SELECT name FROM core_products WHERE id = :pid LIMIT 1"), {'pid': p}).fetchone()
+                        prod_name = prod_row[0] if prod_row and prod_row[0] else f'Produit {p}'
+                    except Exception:
+                        prod_name = f'Produit {p}'
+                    msgs.append(f"{prod_name}: demandé {q}, disponible {a}")
                 raise ValueError("Stock insuffisant: " + "; ".join(msgs))
             pay = RestauPayment(
                 panier_id=panier_id,
@@ -298,7 +305,14 @@ class VenteController:
                     insufficient.append((pid, qty_needed, available))
 
             if insufficient:
-                msgs = [f"Produit {p} demandé {q} disponible {a}" for p, q, a in insufficient]
+                msgs = []
+                for p, q, a in insufficient:
+                    try:
+                        prod_row = session.execute(text("SELECT name FROM core_products WHERE id = :pid LIMIT 1"), {'pid': p}).fetchone()
+                        prod_name = prod_row[0] if prod_row and prod_row[0] else f'Produit {p}'
+                    except Exception:
+                        prod_name = f'Produit {p}'
+                    msgs.append(f"{prod_name}: demandé {q}, disponible {a}")
                 return False, "Stock insuffisant: " + "; ".join(msgs)
 
             # user id fallback: prefer provided user_id, then controller.user_id, then panier.user_id, else 1
@@ -446,7 +460,36 @@ class VenteController:
             for ligne in lignes:
                 item_total = float(getattr(ligne, 'total', 0.0) or 0.0)
                 qty = float(getattr(ligne, 'quantity', 0) or 0)
-                # débit: compte achat (COGS), crédit: compte stock
+                pid = getattr(ligne, 'product_id', None)
+
+                # Calculer coût moyen d'achat depuis mouvements d'entrée pour ce produit (POS_4 env.)
+                avg_cost_row = session.execute(text("""
+                    SELECT AVG(unit_cost) FROM stock_mouvements
+                    WHERE product_id = :product_id AND unit_cost IS NOT NULL AND unit_cost > 0 AND movement_type = 'ENTREE'
+                """), {'product_id': pid}).fetchone()
+                avg_unit_cost = float(avg_cost_row[0]) if avg_cost_row and avg_cost_row[0] is not None else 0.0
+
+                # fallback to stock_produits_entrepot for POS_4
+                if avg_unit_cost <= 0:
+                    spe_row = session.execute(text("""
+                        SELECT spe.unit_cost FROM stock_produits_entrepot spe
+                        JOIN stock_warehouses w ON w.id = spe.warehouse_id
+                        WHERE spe.product_id = :product_id AND w.code = 'POS_4' AND w.is_active = 1
+                        LIMIT 1
+                    """), {'product_id': pid}).fetchone()
+                    if spe_row and spe_row[0] is not None:
+                        avg_unit_cost = float(spe_row[0])
+
+                # dernier fallback: champ cost du produit
+                prod_meta = session.execute(text("""
+                    SELECT cost, name FROM core_products WHERE id = :product_id
+                """), {'product_id': pid}).fetchone()
+                prod_cost_field = float(prod_meta[0]) if prod_meta and prod_meta[0] is not None else 0.0
+                product_name = prod_meta[1] if prod_meta and len(prod_meta) > 1 else f'Produit {pid}'
+
+                unit_cost = avg_unit_cost if avg_unit_cost > 0 else prod_cost_field
+
+                # débit: compte achat (COGS), crédit: compte stock — utiliser unité moyenne
                 if compte_achat_id:
                     session.execute(text(
                         """
@@ -457,15 +500,14 @@ class VenteController:
                         {
                             'journal_id': journal_stock_id,
                             'compte_id': compte_achat_id,
-                            'debit': item_total,
+                            'debit': unit_cost * qty,
                             'credit': 0,
                             'ordre': ordre_stock,
-                            'libelle': f"COGS produit {getattr(ligne, 'product_id', '')} (x{qty})",
+                            'libelle': f"COGS {product_name} (x{qty})",
                             'date_creation': datetime.now()
                         }
                     )
                     session.flush()
-                    print(f"DEBUG: Created debit (COGS) entry for product {getattr(ligne, 'product_id', None)} amount {item_total} in journal {journal_stock_id}")
                     ordre_stock += 1
                 if compte_stock_id:
                     session.execute(text(
@@ -478,17 +520,16 @@ class VenteController:
                             'journal_id': journal_stock_id,
                             'compte_id': compte_stock_id,
                             'debit': 0,
-                            'credit': item_total,
+                            'credit': unit_cost * qty,
                             'ordre': ordre_stock,
-                            'libelle': f"Sortie stock produit {getattr(ligne, 'product_id', '')} (x{qty})",
+                            'libelle': f"Sortie stock {product_name} (x{qty})",
                             'date_creation': datetime.now()
                         }
                     )
                     session.flush()
-                    print(f"DEBUG: Created credit (stock) entry for product {getattr(ligne, 'product_id', None)} amount {item_total} in journal {journal_stock_id}")
                     ordre_stock += 1
 
-                # Mettre à jour le stock réel dans l'entrepôt POS_4
+                # Mettre à jour le stock réel dans l'entrepôt POS_4 (pour chaque ligne)
                 try:
                     self._update_pos_stock_restaurant(session, getattr(ligne, 'product_id', None), int(qty), getattr(ligne, 'price', 0.0), item_total, f"CMD-{panier.id}")
                 except Exception as e:
