@@ -358,13 +358,22 @@ class VenteController:
             )
             session.flush()
             journal_sale_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
-            print(f"DEBUG: Created sale journal {journal_sale_id} for panier {panier.id}")
 
             ordre = 1
             # Écritures produits (crédit revenus)
             for ligne in lignes:
                 item_total = float(getattr(ligne, 'total', 0.0) or 0.0)
                 compte_item = compte_vente_id or None
+                pid = getattr(ligne, 'product_id', None)
+                
+                product_result = session.execute(text("""
+                        SELECT compte_produit_id FROM core_products
+                        WHERE id = :product_id
+                    """), {'product_id':pid})
+                product_row = product_result.fetchone()
+                if product_row and product_row[0]:
+                    compte_item = product_row[0]
+                    
                 # Debug log
                 session.execute(text(
                     """
@@ -383,7 +392,6 @@ class VenteController:
                     }
                 )
                 session.flush()
-                print(f"DEBUG: Created credit entry for product {getattr(ligne, 'product_id', None)} amount {item_total} in journal {journal_sale_id}")
                 ordre += 1
 
             # Débit compte client
@@ -405,7 +413,6 @@ class VenteController:
                     }
                 )
                 session.flush()
-                print(f"DEBUG: Created debit entry on client account {compte_client_id} amount {total_amount} for journal {journal_sale_id}")
                 ordre += 1
 
             # Remise si applicable
@@ -469,65 +476,61 @@ class VenteController:
                 """), {'product_id': pid}).fetchone()
                 avg_unit_cost = float(avg_cost_row[0]) if avg_cost_row and avg_cost_row[0] is not None else 0.0
 
-                # fallback to stock_produits_entrepot for POS_4
-                if avg_unit_cost <= 0:
-                    spe_row = session.execute(text("""
-                        SELECT spe.unit_cost FROM stock_produits_entrepot spe
-                        JOIN stock_warehouses w ON w.id = spe.warehouse_id
-                        WHERE spe.product_id = :product_id AND w.code = 'POS_4' AND w.is_active = 1
-                        LIMIT 1
-                    """), {'product_id': pid}).fetchone()
-                    if spe_row and spe_row[0] is not None:
-                        avg_unit_cost = float(spe_row[0])
 
-                # dernier fallback: champ cost du produit
-                prod_meta = session.execute(text("""
-                    SELECT cost, name FROM core_products WHERE id = :product_id
+                # Enfin fallback sur le champ cost du produit
+                product_meta = session.execute(text("""
+                    SELECT cost, name, compte_charge_id FROM core_products
+                    WHERE id = :product_id
                 """), {'product_id': pid}).fetchone()
-                prod_cost_field = float(prod_meta[0]) if prod_meta and prod_meta[0] is not None else 0.0
-                product_name = prod_meta[1] if prod_meta and len(prod_meta) > 1 else f'Produit {pid}'
 
-                unit_cost = avg_unit_cost if avg_unit_cost > 0 else prod_cost_field
+                product_cost_field = float(product_meta[0]) if product_meta and product_meta[0] is not None else 0.0
+                product_name = product_meta[1]
+                product_compte_charge_id = product_meta[2] if product_meta and len(product_meta) > 2 and product_meta[2] is not None else None
 
-                # débit: compte achat (COGS), crédit: compte stock — utiliser unité moyenne
-                if compte_achat_id:
-                    session.execute(text(
-                        """
-                        INSERT INTO compta_ecritures
-                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-                        """),
-                        {
-                            'journal_id': journal_stock_id,
-                            'compte_id': compte_achat_id,
-                            'debit': unit_cost * qty,
-                            'credit': 0,
-                            'ordre': ordre_stock,
-                            'libelle': f"COGS {product_name} (x{qty})",
-                            'date_creation': datetime.now()
-                        }
-                    )
-                    session.flush()
-                    ordre_stock += 1
-                if compte_stock_id:
-                    session.execute(text(
-                        """
-                        INSERT INTO compta_ecritures
-                        (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
-                        VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
-                        """),
-                        {
-                            'journal_id': journal_stock_id,
-                            'compte_id': compte_stock_id,
-                            'debit': 0,
-                            'credit': unit_cost * qty,
-                            'ordre': ordre_stock,
-                            'libelle': f"Sortie stock {product_name} (x{qty})",
-                            'date_creation': datetime.now()
-                        }
-                    )
-                    session.flush()
-                    ordre_stock += 1
+                unit_cost = avg_unit_cost if avg_unit_cost > 0 else product_cost_field
+
+                # Déterminer le compte charge à utiliser (hiérarchie: compte_charge_id produit > compte_achat_id config > compte_variation_stock_id)
+                compte_charge_id = product_compte_charge_id or compte_achat_id
+                
+
+                # débit: compte achat (COGS), crédit: compte stock — utiliser unité moyenne            
+                session.execute(text(
+                    """
+                    INSERT INTO compta_ecritures
+                    (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                    VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """),
+                    {
+                        'journal_id': journal_stock_id,
+                        'compte_id': compte_charge_id,
+                        'debit': unit_cost * qty,
+                        'credit': 0,
+                        'ordre': ordre_stock,
+                        'libelle': f"COGS {product_name} (x{qty})",
+                        'date_creation': datetime.now()
+                    }
+                )
+                session.flush()
+                ordre_stock += 1
+            
+                session.execute(text(
+                    """
+                    INSERT INTO compta_ecritures
+                    (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
+                    VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
+                    """),
+                    {
+                        'journal_id': journal_stock_id,
+                        'compte_id': compte_stock_id,
+                        'debit': 0,
+                        'credit': unit_cost * qty,
+                        'ordre': ordre_stock,
+                        'libelle': f"Sortie stock {product_name} (x{qty})",
+                        'date_creation': datetime.now()
+                    }
+                )
+                session.flush()
+                ordre_stock += 1
 
                 # Mettre à jour le stock réel dans l'entrepôt POS_4 (pour chaque ligne)
                 try:

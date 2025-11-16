@@ -1470,7 +1470,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         if cfg and cfg[0] and cfg[1]:
                             compte_caisse_id = cfg[0]
                             compte_client_id = cfg[1]
-                            numero = f"ANN-REST-{panier_id}"
+                            numero = f"ANN-CMD-{panier_id}"
                             session.execute(text("""
                                 INSERT INTO compta_journaux
                                 (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification)
@@ -1500,7 +1500,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                 'debit': total_paid,
                                 'credit': 0,
                                 'ordre': 1,
-                                'libelle': f"Annulation règlement client - REST {panier_id}",
+                                'libelle': f"Annulation règlement client - CMD {panier_id}",
                                 'date_creation': datetime.now()
                             })
 
@@ -1559,13 +1559,13 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                     """), {
                                         'product_id': product_id,
                                         'warehouse_id': warehouse_id,
-                                        'movement_type': 'ENTREE',
+                                        'movement_type': 'ANNULATION',
                                         'quantity': qty,
                                         'unit_cost': unit_price,
                                         'total_cost': total_cost,
                                         'destination_warehouse_id': warehouse_id,
-                                        'reference': f"ANN-REST-{panier_id}",
-                                        'description': f"Annulation vente restaurant - {panier_id}",
+                                        'reference': f"ANN-CMD-{panier_id}",
+                                        'description': f"Annulation vente CMD- {panier_id}",
                                         'user_id': getattr(current_user, 'id', 1),
                                         'movement_date': datetime.now(),
                                         'created_at': datetime.now()
@@ -1587,11 +1587,11 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                 VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification)
                             """), {
                                 'date_operation': datetime.now(),
-                                'libelle': f"Annulation vente PANIER-{panier_id}",
+                                'libelle': f"Annulation vente CMD-{panier_id}",
                                 'montant': montant_sale or 0,
                                 'type_operation': 'annulation',
-                                'reference': f"ANN-PANIER-{panier_id}-VENTE",
-                                'description': f"Annulation vente restaurant - panier {panier_id}",
+                                'reference': f"ANN-CMD-{panier_id}",
+                                'description': f"Annulation vente restaurant - CMD {panier_id}",
                                 'enterprise_id': 1,
                                 'user_id': getattr(current_user, 'id', 1),
                                 'date_creation': datetime.now(),

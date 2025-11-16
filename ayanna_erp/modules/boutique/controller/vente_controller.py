@@ -418,16 +418,6 @@ class VenteController:
                     """), {'product_id': product_id}).fetchone()
                     avg_unit_cost = float(avg_cost_row[0]) if avg_cost_row and avg_cost_row[0] is not None else 0.0
 
-                    # Si pas de moyenne trouvée, tenter le coût stock courant en entrepôt POS_2
-                    if avg_unit_cost <= 0:
-                        spe_row = session.execute(text("""
-                            SELECT unit_cost FROM stock_produits_entrepot
-                            WHERE product_id = :product_id AND warehouse_id = (
-                                SELECT id FROM stock_warehouses WHERE code = 'POS_2' LIMIT 1
-                            ) LIMIT 1
-                        """), {'product_id': product_id}).fetchone()
-                        if spe_row and spe_row[0] is not None:
-                            avg_unit_cost = float(spe_row[0])
 
                     # Enfin fallback sur le champ cost du produit
                     product_meta = session.execute(text("""
@@ -441,16 +431,11 @@ class VenteController:
                     unit_cost = avg_unit_cost if avg_unit_cost > 0 else product_cost_field
 
                     # Déterminer le compte charge à utiliser (hiérarchie: compte_charge_id produit > compte_achat_id config > compte_variation_stock_id)
-                    compte_charge_id = product_compte_charge_id or compte_achat_id or compte_variation_stock_id
+                    compte_charge_id = product_compte_charge_id or compte_achat_id
 
                     # cogs basé sur coût moyen d'achat
-                    print(f"DEBUGG: unit_cost utilisé pour COGS {unit_cost}")
                     cogs_amount = unit_cost * qty
-                    print(f"DEBUGG: COGS AMOUNT {cogs_amount}")
-                    if cogs_amount <= 0:
-                        # Si pas de coût renseigné on saute (ne doit pas arrêter la vente)
-                        continue
-
+            
                     # Débit : Compte charge (COGS) - utiliser le compte déterminé selon la hiérarchie
                     session.execute(text("""
                         INSERT INTO compta_ecritures
@@ -462,7 +447,7 @@ class VenteController:
                         'debit': cogs_amount,
                         'credit': 0,
                         'ordre': ordre_stock,
-                        'libelle': f"COGS {product_name} (x{qty})",
+                        'libelle': f"Charge {product_name} (x{qty})",
                         'date_creation': datetime.now()
                     })
                     ordre_stock += 1
@@ -863,7 +848,7 @@ class VenteController:
                         'debit': 0,
                         'credit': total_amount,
                         'ordre': ordre,
-                        'libelle': f"Annulation client - Vente {numero_commande}",
+                        'libelle': f"Annulation - FAC {numero_commande}",
                         'date_creation': datetime.now()
                     })
                     ordre += 1
@@ -1102,12 +1087,12 @@ class VenteController:
                         )"""), {
                             'product_id': product_id,
                             'warehouse_id': warehouse_id,
-                            'movement_type': 'ENTREE',
+                            'movement_type': 'ANNULATION',
                             'quantity': quantity_returned,
                             'unit_cost': 0,  # Pas de coût pour l'annulation
                             'total_cost': 0,
                             'destination_warehouse_id': warehouse_id,
-                            'reference': numero_commande,
+                            'reference': "ANN-FAC- " + numero_commande,
                             'description': "Annulation vente - " + numero_commande,
                             'user_id': 1,
                             'movement_date': datetime.now(),
