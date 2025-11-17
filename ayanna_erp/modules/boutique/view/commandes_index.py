@@ -1647,38 +1647,73 @@ Notes: {notes_preview}
         return '\n'.join(formatted_items)
 
     def _generate_products_pdf(self, products, date_debut, date_fin):
-        """Générer un PDF A4 portrait listant les produits/services vendus
+    
+        """Générer un PDF A4 portrait professionnel listant les produits/services vendus
 
         products: liste de dicts renvoyée par CommandeController.get_products_summary
         """
         try:
+            import os
+            from datetime import datetime
+
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
             from reportlab.lib.units import cm
             from reportlab.lib.colors import HexColor, black, white
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+            from reportlab.platypus import (
+                SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+            )
             from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
             from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 
+            # ============================
+            # 1) Chemin d'export
+            # ============================
             export_dir = os.path.join(os.getcwd(), "exports_products")
             os.makedirs(export_dir, exist_ok=True)
             timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             filename = os.path.join(export_dir, f"export_produits_{timestamp}.pdf")
 
-            doc = SimpleDocTemplate(filename, pagesize=A4)
+            # ============================
+            # 2) Document avec marges professionnelles
+            # ============================
+            doc = SimpleDocTemplate(
+                filename,
+                pagesize=A4,
+                leftMargin=4*cm,
+                rightMargin=4*cm,
+                topMargin=2*cm,
+                bottomMargin=2*cm,
+            )
+
             elements = []
 
+            # ============================
+            # 3) Styles
+            # ============================
             styles = getSampleStyleSheet()
-            styles.add(ParagraphStyle(name='CompanyTitle', fontSize=16, fontName='Helvetica-Bold', alignment=TA_LEFT))
-            styles.add(ParagraphStyle(name='ReportTitle', fontSize=14, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=10))
+            styles.add(ParagraphStyle(name='CompanyTitle', fontSize=18, fontName='Helvetica-Bold', alignment=TA_LEFT, spaceAfter=6))
+            styles.add(ParagraphStyle(name='SmallInfo', fontSize=9, fontName='Helvetica', textColor="grey"))
+            styles.add(ParagraphStyle(name='ReportTitle', fontSize=15, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=10))
+            styles.add(ParagraphStyle(name='SectionTitle', fontSize=11, fontName='Helvetica-Bold', spaceAfter=6))
             styles.add(ParagraphStyle(name='NormalText', fontSize=9, fontName='Helvetica'))
 
+            # ============================
+            # 4) Infos entreprise + Logo
+            # ============================
             enterprise_controller = EntrepriseController()
             company_info = enterprise_controller.get_company_info_for_pdf(1)
 
             temp_logo = None
             logo_path = None
             header_data = []
+
+            company_text = (
+                f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>"
+                f"{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}"
+            )
+
+            # Logo si disponible
             if company_info.get('logo'):
                 try:
                     import tempfile
@@ -1686,88 +1721,112 @@ Notes: {notes_preview}
                     temp_logo.write(company_info['logo'])
                     logo_path = temp_logo.name
                     temp_logo.close()
-                    logo = Image(logo_path, width=2*cm, height=2*cm)
-                    header_data.append([logo, Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText'])])
+                    logo = Image(logo_path, width=2.3*cm, height=2.3*cm)
+                    header_data.append([logo, Paragraph(company_text, styles['NormalText'])])
                 except Exception as e:
-                    print(f"Erreur logo produits PDF: {e}")
-                    header_data.append([Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText']), ''])
+                    header_data.append([Paragraph(company_text, styles['NormalText']), ''])
             else:
-                header_data.append([Paragraph(f"<b>{company_info.get('name','AYANNA ERP')}</b><br/>{company_info.get('address','')}<br/>{company_info.get('city','')}<br/>Tel: {company_info.get('phone','')}", styles['NormalText']), ''])
+                header_data.append([Paragraph(company_text, styles['NormalText']), ''])
 
-            header_table = Table(header_data, colWidths=[3*cm, 14*cm])
-            header_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+            header_table = Table(header_data, colWidths=[3*cm, 12*cm])
+            header_table.setStyle(TableStyle([
+                ('VALIGN', (0,0), (-1,-1), 'TOP')
+            ]))
+
             elements.append(header_table)
-            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Spacer(1, 0.6*cm))
 
+            # ============================
+            # 5) Titre du rapport
+            # ============================
             elements.append(Paragraph("RAPPORT PRODUITS / SERVICES VENDUS", styles['ReportTitle']))
-            elements.append(Paragraph(f"Période: {date_debut.strftime('%d/%m/%Y')} - {date_fin.strftime('%d/%m/%Y')}", styles['NormalText']))
-            elements.append(Spacer(1, 0.3*cm))
+            elements.append(Paragraph(f"Période : <b>{date_debut.strftime('%d/%m/%Y')}</b> - <b>{date_fin.strftime('%d/%m/%Y')}</b>", styles['NormalText']))
+            elements.append(Spacer(1, 0.5*cm))
 
-            # Formatter les montants: utiliser le helper centralisé format_amount_for_pdf
+            # ============================
+            # 6) Fonction pour formattage monétaire
+            # ============================
             try:
                 from ayanna_erp.utils.formatting import format_amount_for_pdf as _fmt_pdf
                 currency_symbol = self.get_currency_symbol()
                 def _fmt_local(v):
-                    try:
-                        return _fmt_pdf(v, currency_symbol)
-                    except Exception:
-                        return str(v)
-            except Exception:
-                def _fmt_local(v):
-                    try:
-                        return str(v)
-                    except Exception:
-                        return str(v)
+                    try: return _fmt_pdf(v, currency_symbol)
+                    except: return str(v)
+            except:
+                def _fmt_local(v): return str(v)
 
-            # Table header
-            table_data = [['No', 'Nom', 'Initial', 'Ajouté', 'Achats/Transferts', 'Total Initial+Ajouté', 'Reste', 'Vendu', 'Prix Unitaire', 'Total']]
+            # ============================
+            # 7) Construction du tableau
+            # ============================
+            table_data = [[
+                'N°', 'Nom', 'Q.Init', 'Ajout', 'Total', 'Reste', 'Vendu', 'P.U', 'Total'
+            ]]
+
+            total_general = 0
+
             for row in products:
+                total_general += row.get('total', 0)
                 table_data.append([
                     row.get('no', ''),
                     row.get('name', ''),
-                    f"{row.get('initial_quantity', 0):.3f}",
-                    f"{row.get('quantity_added', 0):.3f}",
-                    f"{row.get('purchases_transfers', 0):.3f}",
-                    f"{row.get('total_initial_plus_added', 0):.3f}",
-                    f"{row.get('reste', 0):.3f}",
-                    f"{row.get('sold', 0):.3f}",
+                    f"{row.get('initial_quantity', 0)}",
+                    f"{row.get('quantity_added', 0)}",
+                    f"{row.get('total_initial_plus_added', 0)}",
+                    f"{row.get('reste', 0)}",
+                    f"{row.get('sold', 0)}",
                     _fmt_local(row.get('unit_price', 0)),
-                    _fmt_local(row.get('total', 0)),
+                    _fmt_local(row.get('total', 0))
                 ])
 
-            # Column widths (adjustement pour A4 portrait)
-            col_widths = [1.2*cm, 7*cm, 1.6*cm, 1.6*cm, 2.2*cm, 2.2*cm, 1.6*cm, 1.6*cm, 2*cm, 2*cm]
+            col_widths = [1.2*cm, 5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2.5*cm]
+
             tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
-            tbl_style = TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), HexColor('#34495E')),
+            tbl.setStyle(TableStyle([
+                ('BACKGROUND', (0,0), (-1,0), HexColor('#2C3E50')),
                 ('TEXTCOLOR', (0,0), (-1,0), white),
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0,0), (-1,0), 9),
-                ('ALIGN', (0,0), (0,-1), 'CENTER'),
-                ('ALIGN', (2,0), (8,-1), 'RIGHT'),
+                ('ALIGN', (0,0), (-1,0), 'CENTER'),
                 ('GRID', (0,0), (-1,-1), 0.4, black),
+                ('FONTSIZE', (0,0), (-1,-1), 9),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-            ])
-            tbl.setStyle(tbl_style)
+                ('ALIGN', (2,1), (8,-1), 'RIGHT'),
+            ]))
+
             elements.append(tbl)
+            elements.append(Spacer(1, 0.5*cm))
 
-            elements.append(Spacer(1, 0.3*cm))
-            elements.append(Paragraph(f"Rapport généré par Ayanna ERP le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}", styles['NormalText']))
+            # ============================
+            # 8) Total général des ventes
+            # ============================
+            elements.append(Paragraph("<b>TOTAL DES VENTES :</b> " + _fmt_local(total_general), styles['SectionTitle']))
+            elements.append(Spacer(1, 0.6*cm))
 
+            # ============================
+            # 9) Pied de page
+            # ============================
+            elements.append(Paragraph(
+                f"Rapport généré par Ayanna ERP le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                styles['SmallInfo']
+            ))
+
+            # ============================
+            # 10) Génération
+            # ============================
             doc.build(elements)
 
             return filename
+
         except Exception as e:
             print(f"❌ Erreur génération PDF produits: {e}")
             import traceback
             traceback.print_exc()
             return None
+
         finally:
-            if logo_path and os.path.exists(logo_path):
-                try:
-                    os.unlink(logo_path)
-                except Exception:
-                    pass
+            if 'logo_path' in locals() and logo_path and os.path.exists(logo_path):
+                try: os.unlink(logo_path)
+                except: pass
+
     
     def refresh_data(self):
         """Actualiser les données (interface publique)"""
