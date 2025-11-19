@@ -111,7 +111,7 @@ class InvoicePrintManager:
             return "F"  # Fallback
 
     def format_amount(self, amount):
-        """Formater un montant avec la devise de l'entreprise"""
+        """Formater un montant avec la devise de l'enreprise"""
         if self.entreprise_controller:
             return self.entreprise_controller.format_amount(amount, self.enterprise_id)
         else:
@@ -453,9 +453,15 @@ class InvoicePrintManager:
 
     def print_receipt_53mm(self, invoice_data, payments_list, user_name, filename):
         # Debug prints removed in production
-        """Imprimer un reçu de paiement sur format 53mm avec détail de tous les paiements"""
-        # Taille du ticket 53mm de large (format imprimante thermique)
-        TICKET_WIDTH = 53 * mm
+        """Imprimer un reçu de paiement sur format 60mm avec détail de tous les paiements"""
+        # Taille du ticket 60mm de large (format imprimante thermique)
+        TICKET_WIDTH = 60 * mm
+        # Petite marge gauche pour aérer le ticket
+        LEFT_MARGIN = 5 * mm
+        # Définitions d'indent internes pour aligner les éléments
+        ITEM_NAME_X = LEFT_MARGIN + 1 * mm
+        ITEM_DETAIL_X = LEFT_MARGIN + 3 * mm
+        CENTER_AVAILABLE_WIDTH = TICKET_WIDTH - (LEFT_MARGIN * 2)
 
         # --- Pré-passage (simulation) pour calculer la hauteur exacte nécessaire ---
         from reportlab.pdfbase import pdfmetrics
@@ -478,8 +484,8 @@ class InvoicePrintManager:
             y_sim -= 2.5 * mm
 
         # séparation
+        y_sim -= 1.5 * mm
         y_sim -= 2 * mm
-        y_sim -= 3 * mm
 
         # titre
         line_height = 3.5 * mm
@@ -560,9 +566,9 @@ class InvoicePrintManager:
 
         used_height = simulate_start_height - y_sim
         # ajouter petite marge
-        TICKET_HEIGHT = used_height + 12 * mm
+        TICKET_HEIGHT = used_height + 2 * mm
         # garantir une hauteur minimale
-        min_height = 85 * mm
+        min_height = 55 * mm
         if TICKET_HEIGHT < min_height:
             TICKET_HEIGHT = min_height
 
@@ -602,12 +608,14 @@ class InvoicePrintManager:
             rccm_text = self.company_info['rccm'][:25]
             text_width = c.stringWidth(rccm_text, 'Helvetica', 6)
             c.drawString((TICKET_WIDTH - text_width) / 2, y_position, rccm_text)
-            y_position -= 2.5*mm
+            # réduire l'espace entre RCCM et la ligne de séparation
+            y_position -= 1.0*mm
 
         # Ligne de séparation
-        y_position -= 2*mm
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
-        y_position -= 3*mm
+        # réduire l'espace avant et après la ligne pour un rendu plus compact
+        y_position -= 0.5*mm
+        c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
+        y_position -= 2.0*mm
 
         # Titre du reçu
         c.setFont('Helvetica-Bold', 7)
@@ -621,13 +629,13 @@ class InvoicePrintManager:
 
         # Référence
         ref_text = f"Ref: {invoice_data.get('reference', 'N/A')[:15]}"
-        c.drawString(2*mm, y_position, ref_text)
+        c.drawString(LEFT_MARGIN, y_position, ref_text)
         y_position -= 2.5*mm
 
         # Client (limiter la longueur)
         client_name = invoice_data.get('client_nom', 'N/A')[:25]
         client_text = f"Client: {client_name}"
-        c.drawString(2*mm, y_position, client_text)
+        c.drawString(LEFT_MARGIN, y_position, client_text)
         y_position -= 2.5*mm
 
         # Date commande
@@ -637,7 +645,7 @@ class InvoicePrintManager:
         else:
             order_date = str(order_date_obj)[:20]
         date_text = f"Date: {order_date}"
-        c.drawString(2*mm, y_position, date_text)
+        c.drawString(LEFT_MARGIN, y_position, date_text)
         y_position -= 2.5*mm
 
         # Afficher table / salle / serveuse / comptoiriste exceptionnellement pour le module restaurant
@@ -663,27 +671,29 @@ class InvoicePrintManager:
         # Afficher uniquement si c'est bien un ticket du module restaurant ou si la table est explicitement fournie
         if is_restaurant or table_val:
             if table_val:
-                c.drawString(2*mm, y_position, f"Table: {str(table_val)[:20]}")
-                y_position -= 2.5*mm
+                c.drawString(LEFT_MARGIN, y_position, f"Table: {str(table_val)[:20]}")
+                # réduire l'espace après l'affichage de la table
+                y_position -= 2.0*mm
             if salle_val:
-                c.drawString(2*mm, y_position, f"Salle: {str(salle_val)[:20]}")
-                y_position -= 2.5*mm
+                c.drawString(LEFT_MARGIN, y_position, f"Salle: {str(salle_val)[:20]}")
+                y_position -= 1.0*mm
             if serveuse_val:
-                c.drawString(2*mm, y_position, f"Serveuse: {str(serveuse_val)[:25]}")
-                y_position -= 2.5*mm
+                c.drawString(LEFT_MARGIN, y_position, f"Serveuse: {str(serveuse_val)[:25]}")
+                y_position -= 1.0*mm
             if comptoiriste_val:
-                c.drawString(2*mm, y_position, f"Comptoir: {str(comptoiriste_val)[:25]}")
-                y_position -= 2.5*mm
+                c.drawString(LEFT_MARGIN, y_position, f"Comptoir: {str(comptoiriste_val)[:25]}")
+                y_position -= 1.0*mm
 
         # Ligne de séparation
-        y_position -= 2*mm
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
-        y_position -= 3*mm
+        # espace réduit avant et après la ligne
+        y_position -= 0.5*mm
+        c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
+        y_position -= 2.0*mm
 
         # Détail des articles
         c.setFont('Helvetica-Bold', 6)
-        c.drawString(2*mm, y_position, "ARTICLES:")
-        y_position -= 3*mm
+        c.drawString(LEFT_MARGIN, y_position, "ARTICLES:")
+        y_position -= 2*mm
 
         # Lister chaque article
         if invoice_data.get('items'):
@@ -706,8 +716,8 @@ class InvoicePrintManager:
                 # Nom de l'article (tronqué si nécessaire)
                 item_name = item.get('name', 'N/A')[:30]
                 c.setFont('Helvetica', 6)
-                c.drawString(3*mm, y_position, item_name)
-                y_position -= 2*mm
+                c.drawString(ITEM_NAME_X, y_position, item_name)
+                y_position -= 2.5*mm
 
                 # Quantité x Prix = Total
                 quantity = item.get('quantity', 0)
@@ -719,25 +729,99 @@ class InvoicePrintManager:
                 subtotal_articles += total_line
                 # Utiliser format_amount pour un affichage uniforme
                 item_detail = f"{int(quantity)} x {_fmt_ticket_amount(unit_price)} = {_fmt_ticket_amount(total_line)}"
-                c.drawString(5*mm, y_position, item_detail)
-                y_position -= 2.5*mm
+                c.drawString(ITEM_DETAIL_X, y_position, item_detail)
+                y_position -= 3*mm
 
             # Afficher le sous-total des articles juste après la liste
             try:
                 c.setFont('Helvetica-Bold', 6)
-                c.drawString(3*mm, y_position, f"Sous-total articles: {_fmt_ticket_amount(subtotal_articles)}")
-                y_position -= 3.5*mm
+                c.drawString(ITEM_NAME_X, y_position, f"Sous-total articles: {_fmt_ticket_amount(subtotal_articles)}")
+                # réduire l'espace entre le sous-total et la remise
+                y_position -= 2.0*mm
             except Exception:
                 pass
 
+            # --- Si c'est une impression depuis le module restaurant, produire une facture courte ---
+            try:
+                # calculer totaux/ remises avec plusieurs fallback keys
+                total_ttc = invoice_data.get('total_ttc', invoice_data.get('total_amount', subtotal_articles + (invoice_data.get('tax_amount', 0) or 0)))
+                remise_val = invoice_data.get('discount_amount', invoice_data.get('remise_amount', invoice_data.get('remise', 0))) or 0
+                if not remise_val and invoice_data.get('discount_percent'):
+                    try:
+                        remise_val = float(total_ttc) * (float(invoice_data.get('discount_percent') or 0) / 100.0)
+                    except Exception:
+                        remise_val = 0
+
+                net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', invoice_data.get('total_final', total_ttc - remise_val)))
+
+                # total payé cumulé
+                total_paid = 0
+                if payments_list:
+                    for p in payments_list:
+                        try:
+                            total_paid += float(p.get('amount', 0))
+                        except Exception:
+                            pass
+
+            except Exception:
+                remise_val = invoice_data.get('discount_amount', 0)
+                net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', 0))
+                total_paid = 0
+
+            if is_restaurant:
+                # Compact : pas de ligne de séparation entre la section articles et la remise
+                # réduire l'espace vertical avant d'afficher la remise
+                y_position -= 1.0*mm
+                y_position -= 1.0*mm
+
+                c.setFont('Helvetica', 6)
+                # Afficher directement Remise / Net à payer / Payé immédiatement après le sous-total
+                try:
+                    remise_val_display = float(remise_val or 0)
+                except Exception:
+                    try:
+                        remise_val_display = float(str(remise_val).replace(',', '.'))
+                    except Exception:
+                        remise_val_display = 0.0
+
+                try:
+                    net_display = float(net_a_payer or 0)
+                except Exception:
+                    net_display = 0.0
+
+                try:
+                    paid_display = float(total_paid or 0)
+                except Exception:
+                    paid_display = 0.0
+
+                c.drawString(LEFT_MARGIN, y_position, f"Remise: {_fmt_ticket_amount(remise_val_display)}")
+                y_position -= 2.0*mm
+
+                c.drawString(LEFT_MARGIN, y_position, f"Net à payer: {_fmt_ticket_amount(net_display)}")
+                y_position -= 2.0*mm
+
+                c.drawString(LEFT_MARGIN, y_position, f"Payé: {_fmt_ticket_amount(paid_display)}")
+                y_position -= 2.0*mm
+
+                # Finaliser et sauvegarder le ticket simplifié
+                c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
+                y_position -= 2.5*mm
+                c.setFont('Helvetica', 6)
+                generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
+                filigrane_text = f"Developed by Ayanna Erp (©) {generation_time}"
+                text_width = c.stringWidth(filigrane_text, 'Helvetica', 6)
+                c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
+                c.save()
+                return filename
+
         # Ligne de séparation avant les paiements
         y_position -= 2*mm
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
         y_position -= 3*mm
 
         # Détail de chaque paiement
         c.setFont('Helvetica-Bold', 6)
-        c.drawString(2*mm, y_position, "DETAIL PAIEMENTS:")
+        c.drawString(LEFT_MARGIN, y_position, "DETAIL PAIEMENTS:")
         y_position -= 3*mm
 
         total_paid = 0
@@ -747,7 +831,7 @@ class InvoicePrintManager:
                 # Numéro du paiement
                 c.setFont('Helvetica-Bold', 6)
                 payment_num_text = f"#{i}"
-                c.drawString(2*mm, y_position, payment_num_text)
+                c.drawString(LEFT_MARGIN, y_position, payment_num_text)
                 y_position -= 2*mm
 
                 # Montant (formaté)
@@ -758,12 +842,12 @@ class InvoicePrintManager:
                 except Exception:
                     pass
                 amount_text = _fmt_ticket_amount(amount)
-                c.drawString(3*mm, y_position, amount_text)
+                c.drawString(ITEM_DETAIL_X, y_position, amount_text)
                 y_position -= 2*mm
 
                 # Méthode
                 method_text = payment.get('payment_method', 'N/A')[:20]
-                c.drawString(3*mm, y_position, method_text)
+                c.drawString(ITEM_DETAIL_X, y_position, method_text)
                 y_position -= 2*mm
 
                 # Date
@@ -772,31 +856,31 @@ class InvoicePrintManager:
                     date_text = payment_date.strftime('%d/%m/%Y %H:%M')[:20]
                 else:
                     date_text = str(payment_date)[:20]
-                c.drawString(3*mm, y_position, date_text)
+                c.drawString(ITEM_DETAIL_X, y_position, date_text)
                 y_position -= 2*mm
 
                 # Caissier
                 cashier_name = payment.get('user_name', 'N/A')[:25]
                 cashier_text = f"Par: {cashier_name}"
-                c.drawString(3*mm, y_position, cashier_text)
+                c.drawString(ITEM_DETAIL_X, y_position, cashier_text)
                 y_position -= 2*mm
 
                 # Petite ligne de séparation entre paiements
                 if i < len(payments_list):
-                    c.line(3*mm, y_position, TICKET_WIDTH - 3*mm, y_position)
+                    c.line(ITEM_DETAIL_X, y_position, TICKET_WIDTH - ITEM_DETAIL_X, y_position)
                     y_position -= 3*mm
         else:
             c.setFont('Helvetica', 6)
-            c.drawString(2*mm, y_position, "Aucun paiement")
+            c.drawString(LEFT_MARGIN, y_position, "Aucun paiement")
             y_position -= 3*mm
 
-        # Récapitulatif final
+        # Récapitulatif final (non-restaurant)
         y_position -= 2*mm
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
         y_position -= 3*mm
 
         c.setFont('Helvetica-Bold', 6)
-        c.drawString(2*mm, y_position, "RECAPITULATIF:")
+        c.drawString(LEFT_MARGIN, y_position, "RECAPITULATIF:")
         y_position -= 3*mm
 
         c.setFont('Helvetica', 6)
@@ -808,32 +892,32 @@ class InvoicePrintManager:
 
         # Sous total (avant remise)
         sous_total_text = f"Sous total: {_fmt_ticket_amount(sous_total_val)}"
-        c.drawString(2*mm, y_position, sous_total_text)
+        c.drawString(LEFT_MARGIN, y_position, sous_total_text)
         y_position -= 3.5*mm
 
         # Remise
         remise_text = f"Remise: {_fmt_ticket_amount(remise_val)}"
-        c.drawString(2*mm, y_position, remise_text)
+        c.drawString(LEFT_MARGIN, y_position, remise_text)
         y_position -= 3.5*mm
 
         # Net à payer (après remise)
         total_text = f"Net à payer: {_fmt_ticket_amount(net_a_payer)}"
-        c.drawString(2*mm, y_position, total_text)
+        c.drawString(LEFT_MARGIN, y_position, total_text)
         y_position -= 3.5*mm
 
         # Total payé
         paid_text = f"Paye: {_fmt_ticket_amount(total_paid)}"
-        c.drawString(2*mm, y_position, paid_text)
+        c.drawString(LEFT_MARGIN, y_position, paid_text)
         y_position -= 3.5*mm
 
         # Reste à payer
         c.setFont('Helvetica-Bold', 7)
         balance_text = f"Reste: {_fmt_ticket_amount(balance)}"
-        c.drawString(2*mm, y_position, balance_text)
+        c.drawString(LEFT_MARGIN, y_position, balance_text)
         y_position -= 3*mm
 
         # Ligne de séparation finale
-        c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+        c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
         y_position -= 3*mm
         
         # Section Notes (si présentes)
@@ -841,7 +925,7 @@ class InvoicePrintManager:
         notes = (invoice_data.get('notes') or '').strip()
         if notes:
             c.setFont('Helvetica-Bold', 6)
-            c.drawString(2*mm, y_position, "NOTES:")
+            c.drawString(LEFT_MARGIN, y_position, "NOTES:")
             y_position -= 3*mm
 
             c.setFont('Helvetica', 5)
@@ -860,11 +944,11 @@ class InvoicePrintManager:
 
             # Dernière ligne
             if current_line:
-                c.drawString(3*mm, y_position, current_line.strip())
+                c.drawString(ITEM_DETAIL_X, y_position, current_line.strip())
                 y_position -= 3*mm
 
             # Ligne de séparation après les notes
-            c.line(2*mm, y_position, TICKET_WIDTH - 2*mm, y_position)
+            c.line(LEFT_MARGIN, y_position, TICKET_WIDTH - LEFT_MARGIN, y_position)
             y_position -= 3*mm
 
 
