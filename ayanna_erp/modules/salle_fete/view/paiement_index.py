@@ -1,6 +1,6 @@
 """
 Onglet Paiements pour le module Salle de Fête
-Gestion et affichage des paiements liés aux réservations
+Gestion et affichage des paiements liés aux réservtions
 """
 
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, 
@@ -17,6 +17,7 @@ from decimal import Decimal
 from datetime import datetime, timedelta
 import sys
 import os
+import re
 
 # Import du gestionnaire d'impression
 try:
@@ -170,6 +171,49 @@ class PaiementIndex(QWidget):
             return self.entreprise_controller.format_amount(amount)
         else:
             return f"{amount:.2f} €"  # Fallback
+
+    def parse_amount_text(self, text):
+        """Parser un montant formaté (ex: '1 234,56 €', '5 fc', '€ 12.34') -> float
+
+        Méthode robuste : cherche la première séquence numérique, normalise séparateurs
+        et retourne float ou 0.0 en fallback.
+        """
+        if text is None:
+            return 0.0
+        if isinstance(text, (int, float)):
+            return float(text)
+        # Assurer une chaîne
+        s = str(text).strip()
+        if s == "":
+            return 0.0
+
+        # Chercher une séquence numérique (avec ., , et espaces)
+        m = re.search(r"[-+]?\d[\d\s\.,]*\d|\d+", s)
+        if not m:
+            # Essayer de retirer tout sauf chiffres et séparateurs
+            cleaned = re.sub(r"[^0-9,\.\-]", "", s)
+            try:
+                return float(cleaned.replace(',', '.'))
+            except Exception:
+                return 0.0
+
+        num = m.group(0)
+        # Retirer espaces (espaces normaux et insécables)
+        num = num.replace('\u00A0', '').replace(' ', '')
+
+        # Si à la fois '.' et ',' présents, supposer que '.' = milliers et ',' = décimal
+        if '.' in num and ',' in num:
+            num = num.replace('.', '').replace(',', '.')
+        else:
+            # Remplacer virgule décimale par point
+            num = num.replace(',', '.')
+
+        # Final cleanup - garder chiffres, point et signe
+        num = re.sub(r'[^0-9.\-+]', '', num)
+        try:
+            return float(num)
+        except Exception:
+            return 0.0
     
     def get_currency_symbol(self):
         """Récupérer le symbole de devise via la session"""
@@ -1174,12 +1218,14 @@ class PaiementIndex(QWidget):
         # Calculer le total payé jusqu'à ce paiement
         total_paid = 0
         for i in range(row_index + 1):
-            amount_text = self.payments_table.item(i, 1).text().replace(f' {self.get_currency_symbol()}', '') if self.payments_table.item(i, 1) else '0'
-            total_paid += float(amount_text)
+            cell = self.payments_table.item(i, 1)
+            amount_text = cell.text() if cell else ''
+            amt = self.parse_amount_text(amount_text)
+            total_paid += amt
         
         return {
             'payment_date': self.payments_table.item(row_index, 0).text() if self.payments_table.item(row_index, 0) else 'N/A',
-            'amount': float(self.payments_table.item(row_index, 1).text().replace(f' {self.get_currency_symbol()}', '')) if self.payments_table.item(row_index, 1) else 0,
+            'amount': self.parse_amount_text(self.payments_table.item(row_index, 1).text() if self.payments_table.item(row_index, 1) else '0'),
             'payment_method': self.payments_table.item(row_index, 2).text() if self.payments_table.item(row_index, 2) else 'N/A',
             'total_paid': total_paid
         }
@@ -1190,7 +1236,7 @@ class PaiementIndex(QWidget):
         for i in range(self.payments_table.rowCount()):
             payment = {
                 'payment_date': self.payments_table.item(i, 0).text() if self.payments_table.item(i, 0) else 'N/A',
-                'amount': float(self.payments_table.item(i, 1).text().replace(f' {self.get_currency_symbol()}', '')) if self.payments_table.item(i, 1) else 0,
+                'amount': self.parse_amount_text(self.payments_table.item(i, 1).text() if self.payments_table.item(i, 1) else '0'),
                 'payment_method': self.payments_table.item(i, 2).text() if self.payments_table.item(i, 2) else 'N/A',
                 'user_name': self.payments_table.item(i, 3).text() if self.payments_table.item(i, 3) else 'N/A'
             }
