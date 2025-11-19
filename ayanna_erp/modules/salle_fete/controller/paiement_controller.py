@@ -490,63 +490,39 @@ class PaiementController(QObject):
                 session.flush()  # Pour avoir l'id du journal
 
                 # Récupérer les comptes configurés
-                compte_debit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
-                if not compte_debit:
-                    print("⚠️  Le compte caisse configuré n'existe pas ou n'est pas actif.")
-                else:
-                    # Vérifier si le compte TVA est configuré
-                    compte_tva_id = config.compte_tva_id if hasattr(config, 'compte_tva_id') else None
-                    if compte_tva_id:
-                        compte_tva = session.query(CompteComptable).filter(CompteComptable.id == compte_tva_id).first()
-                        if not compte_tva:
-                            print("⚠️  Compte TVA configuré mais inexistant, TVA sera ignorée")
-                            compte_tva_id = None
+                compte_caisse_id = getattr(config, 'compte_caisse_id', None)
+                compte_client_id = getattr(config, 'compte_client_id', None)
 
-                    # NOUVELLE LOGIQUE : Calculer la répartition du paiement selon les comptes spécifiques
-                    repartition = self.calculer_repartition_paiement(reservation, payment_data['amount'])
-                    
-                    # Créer les écritures comptables réparties
-                    ecritures = self.creer_ecritures_comptables_reparties(
-                        session=session,
-                        reservation=reservation,
-                        payment=payment,
-                        repartition=repartition,
-                        compte_debit_id=compte_debit.id,
-                        compte_tva_id=compte_tva_id,
-                        journal_id=journal.id
+                compte_debit = session.query(CompteComptable).filter(CompteComptable.id == compte_caisse_id).first() if compte_caisse_id else None
+                compte_client = session.query(CompteComptable).filter(CompteComptable.id == compte_client_id).first() if compte_client_id else None
+
+                if not compte_debit:
+                    print("⚠️  Le compte caisse configuré n'existe pas ou n'est pas actif. Aucune écriture de paiement créée.")
+                elif not compte_client:
+                    print("⚠️  Le compte client configuré n'existe pas ou n'est pas actif. Aucune écriture de paiement créée.")
+                else:
+                    # Créer l'écriture comptable de débit (caisse augmente)
+                    ecriture_debit = EcritureComptable(
+                        journal_id=journal.id,
+                        compte_comptable_id=compte_debit.id,
+                        debit=payment_data['amount'],
+                        credit=0,
+                        ordre=1,
+                        libelle=f"Encaissement - {reservation.get_client_name()}"
                     )
-                    
-                    if ecritures:
-                        print(f"📊 {len(ecritures)} écritures comptables créées avec répartition")
-                    else:
-                        # Fallback à l'ancienne méthode si problème
-                        print("⚠️  Fallback: création d'écriture simple")
-                        compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
-                        if not compte_credit:
-                            print("⚠️  Le compte vente configuré n'existe pas ou n'est pas actif.")
-                        else:
-                            # Créer l'écriture comptable de débit (caisse augmente)
-                            ecriture_debit = EcritureComptable(
-                                journal_id=journal.id,
-                                compte_comptable_id=compte_debit.id,
-                                debit=payment_data['amount'],
-                                credit=0,
-                                ordre=1,
-                                libelle=f"Encaissement - {reservation.get_client_name()}"
-                            )
-                            session.add(ecriture_debit)
-                            
-                            # Créer l'écriture comptable de crédit (client diminue - paiement reçu)
-                            ecriture_credit = EcritureComptable(
-                                journal_id=journal.id,
-                                compte_comptable_id=compte_credit.id,
-                                debit=0,
-                                credit=payment_data['amount'],
-                                ordre=2,
-                                libelle=f"Paiement reçu - {reservation.get_client_name()}"
-                            )
-                            session.add(ecriture_credit)
-                            print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
+                    session.add(ecriture_debit)
+
+                    # Créer l'écriture comptable de crédit (client diminue - paiement reçu)
+                    ecriture_credit = EcritureComptable(
+                        journal_id=journal.id,
+                        compte_comptable_id=compte_client.id,
+                        debit=0,
+                        credit=payment_data['amount'],
+                        ordre=2,
+                        libelle=f"Paiement reçu - {reservation.get_client_name()}"
+                    )
+                    session.add(ecriture_credit)
+                    print(f"📊 Écritures comptables paiement créées: Débit {compte_debit.numero} / Crédit {compte_client.numero}")
             
             session.commit()
             
@@ -973,13 +949,25 @@ class PaiementController(QObject):
             list: Liste des écritures créées
         """
         try:
-            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable
-            
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable, ComptaConfig
+
             ecritures = []
-            libelle_base = f"Paiement Réservation: {reservation.get_client_name()}"
-            
-            # === 1. ÉCRITURE DE DÉBIT (Caisse/Banque) ===
-            ecriture_debit = EcritureComptable(
+            libelle_base = f"Encaissement Réservation: {reservation.get_client_name()}"
+
+            # Récupérer config pour compte client si nécessaire
+            config = session.query(ComptaConfig).first()
+            compte_client_id = getattr(config, 'compte_client_id', None) if config else None
+
+            # Vérifier comptes fournis
+            if not compte_debit_id:
+                print("⚠️ Aucun compte caisse fourni pour l'écriture de paiement.")
+                return []
+            if not compte_client_id:
+                print("⚠️ Aucun compte client configuré (compte_client_id). Impossible de créer l'écriture de contrepartie.")
+                return []
+
+            # Écriture de débit (caisse)
+            e_debit = EcritureComptable(
                 journal_id=journal_id,
                 compte_comptable_id=compte_debit_id,
                 debit=payment.amount,
@@ -987,90 +975,27 @@ class PaiementController(QObject):
                 ordre=1,
                 libelle=libelle_base
             )
-            session.add(ecriture_debit)
-            ecritures.append(ecriture_debit)
-            print(f"  📥 Débit: {payment.amount:.2f} sur compte {compte_debit_id}")
-            
-            ordre = 2
-            
-            # === 2. CRÉDITS PROPORTIONNELS POUR CHAQUE COMPTE ===
-            # Utiliser directement les proportions calculées dans repartition
-            
-            # LOGIQUE SIMPLE : Pour paiement_controller, ventiler le montant perçu selon les proportions
-            montant_a_ventiler = payment.amount
-            
-            print(f"  📊 Ventilation PAIEMENT: {payment.amount:.2f}€ selon proportions")
-            
-            # === SERVICES ===
-            for compte_produit_id, details in repartition['services'].items():
-                if details['montant_net'] > 0:
-                    # Utiliser directement la proportion calculée dans calculer_repartition_paiement
-                    proportion = details['proportion']
-                    montant_credit = montant_a_ventiler * proportion
-                    
-                    ecriture_service = EcritureComptable(
-                        journal_id=journal_id,
-                        compte_comptable_id=compte_produit_id,
-                        debit=0,
-                        credit=montant_credit,
-                        ordre=ordre,
-                        libelle=f"{libelle_base} - Services"
-                    )
-                    session.add(ecriture_service)
-                    ecritures.append(ecriture_service)
-                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
-                    ordre += 1
-            
-            # === PRODUITS ===
-            for compte_produit_id, details in repartition['produits'].items():
-                if details['montant_net'] > 0:
-                    # Utiliser directement la proportion calculée dans calculer_repartition_paiement
-                    proportion = details['proportion']
-                    montant_credit = montant_a_ventiler * proportion
-                    
-                    ecriture_produit = EcritureComptable(
-                        journal_id=journal_id,
-                        compte_comptable_id=compte_produit_id,
-                        debit=0,
-                        credit=montant_credit,
-                        ordre=ordre,
-                        libelle=f"{libelle_base} - Produits"
-                    )
-                    session.add(ecriture_produit)
-                    ecritures.append(ecriture_produit)
-                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
-                    ordre += 1
-            
-            # === TVA ===
-            if repartition['tva']['montant_net'] > 0 and compte_tva_id:
-                # Utiliser directement la proportion calculée dans calculer_repartition_paiement
-                proportion = repartition['tva']['proportion']
-                montant_tva_credit = montant_a_ventiler * proportion
-                
-                ecriture_tva = EcritureComptable(
-                    journal_id=journal_id,
-                    compte_comptable_id=compte_tva_id,
-                    debit=0,
-                    credit=montant_tva_credit,
-                    ordre=ordre,
-                    libelle=f"{libelle_base} - TVA"
-                )
-                session.add(ecriture_tva)
-                ecritures.append(ecriture_tva)
-                print(f"  📤 Crédit TVA: {montant_tva_credit:.2f} sur compte {compte_tva_id} (proportion: {proportion:.1%})")
-                ordre += 1
-            
-            # === 3. PAS DE REMISE ===
-            # La remise est déjà débitée en totalité dans reservation_controller
-            if reservation.discount_percent and reservation.discount_percent > 0:
-                print(f"  💳 Remise {reservation.discount_percent}% déjà débitée dans reservation_controller")
-            
-            print(f"  ✅ Ventilation proportionnelle terminée")
-            
+            session.add(e_debit)
+            ecritures.append(e_debit)
+            print(f"  � Débit Caisse: {payment.amount:.2f} sur compte {compte_debit_id}")
+
+            # Écriture de crédit (client)
+            e_credit = EcritureComptable(
+                journal_id=journal_id,
+                compte_comptable_id=compte_client_id,
+                debit=0,
+                credit=payment.amount,
+                ordre=2,
+                libelle=libelle_base
+            )
+            session.add(e_credit)
+            ecritures.append(e_credit)
+            print(f"  📤 Crédit Client: {payment.amount:.2f} sur compte {compte_client_id}")
+
             return ecritures
-            
+
         except Exception as e:
-            print(f"❌ Erreur lors de la création des écritures: {e}")
+            print(f"❌ Erreur lors de la création des écritures de paiement: {e}")
             import traceback
             traceback.print_exc()
             return []

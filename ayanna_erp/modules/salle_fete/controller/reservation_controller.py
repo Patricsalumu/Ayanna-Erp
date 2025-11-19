@@ -883,121 +883,158 @@ class ReservationController(QObject):
             list: Liste des écritures créées
         """
         try:
-            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable, ComptaConfig
-            
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable, ComptaConfig, ComptaComptes as CompteComptable
+
             ecritures = []
-            libelle_base = f"Paiement Réservation: {reservation.client_nom} {reservation.client_prenom}"
-            
-            # === 1. ÉCRITURE DE DÉBIT (Caisse/Banque) ===
-            ecriture_debit = EcritureComptable(
-                journal_id=journal_id,
-                compte_comptable_id=compte_debit_id,
-                debit=payment.amount,
-                credit=0,
-                ordre=1,
-                libelle=libelle_base
-            )
-            session.add(ecriture_debit)
-            ecritures.append(ecriture_debit)
-            print(f"  📥 Débit: {payment.amount:.2f} sur compte {compte_debit_id}")
-            
+            libelle_base = f"Facture Réservation: {reservation.get_client_name()}"
+
+            # Récupérer la configuration comptable
+            config = session.query(ComptaConfig).first()
+            compte_client_id = getattr(config, 'compte_client_id', None) if config else None
+            compte_vente_general_id = getattr(config, 'compte_vente_id', None) if config else None
+            compte_remise_id = getattr(config, 'compte_remise_id', None) if config else None
+            compte_tva_id = getattr(config, 'compte_tva_id', None) if config else None
+
+            # === Calcul des montants par compte ===
+            services_by_account = {}
+            produits_by_account = {}
+            total_services = 0.0
+            total_produits = 0.0
+
+            # Services : utiliser unit_price * quantity (ou line_total si présent)
+            for s in reservation.services:
+                service = s.service
+                if not service:
+                    continue
+                compte_id = getattr(service, 'compte_produit_id', None)
+                montant = float(s.line_total or (s.unit_price or 0) * (s.quantity or 1))
+                if not compte_id:
+                    # si pas de compte service défini, on l'ignore et on affiche un warning
+                    print(f"⚠️ Service '{getattr(service,'name', '')}' sans compte produit, ignoré pour l'écriture comptable")
+                    continue
+                services_by_account.setdefault(compte_id, 0.0)
+                services_by_account[compte_id] += montant
+                total_services += montant
+
+            # Produits : utiliser unit_price * quantity (ou line_total si présent) -> créditer sur compte_vente_id de la config
+            for p in reservation.products:
+                product = p.product
+                if not product:
+                    continue
+                montant = float(p.line_total or (p.unit_price or 0) * (p.quantity or 1))
+                # compte de vente: toujours le compte_vente général de la config
+                compte_id = compte_vente_general_id
+                if not compte_id:
+                    print(f"⚠️ Produit '{getattr(product,'name','')}' sans compte de vente configuré, ignoré pour l'écriture comptable")
+                    continue
+                produits_by_account.setdefault(compte_id, 0.0)
+                produits_by_account[compte_id] += montant
+                total_produits += montant
+
+            # TVA totale (si renseignée)
+            tva_total = float(reservation.tax_amount or 0)
+
+            # Calcul de la remise totale (sur le TTC stocké sans remise)
+            total_ttc_brut = float(reservation.total_amount or 0)
+            remise_totale = total_ttc_brut * (float(reservation.discount_percent or 0) / 100.0)
+
+            # === 1. Débit du compte client (net à payer = total brut + tva - remise) ===
+            if not compte_client_id:
+                print("⚠️ Aucun compte client configuré (compte_client_id). Impossible de créer l'écriture débit client.")
+            else:
+                montant_debit_client = (total_services + total_produits) + tva_total - remise_totale
+                montant_debit_client = round(montant_debit_client, 2)
+                if montant_debit_client != 0:
+                    ecriture_client = EcritureComptable(
+                        journal_id=journal_id,
+                        compte_comptable_id=compte_client_id,
+                        debit=montant_debit_client,
+                        credit=0,
+                        ordre=1,
+                        libelle=f"{libelle_base} - Client"
+                    )
+                    session.add(ecriture_client)
+                    ecritures.append(ecriture_client)
+                    print(f"  � Débit Client: {montant_debit_client:.2f} sur compte {compte_client_id}")
+
             ordre = 2
-            
-            # === 2. ÉCRITURES DE CRÉDIT PROPORTIONNELLES (ACCOMPTE + PART DE REMISE) ===
-            # LOGIQUE CORRECTE : Créditer proportionnellement (accompte + part de remise par compte)
-            total_ttc_sans_remise = float(reservation.total_amount or 0)
-            remise_totale = total_ttc_sans_remise * (reservation.discount_percent / 100) if reservation.discount_percent else 0
-            montant_a_ventiler = payment.amount + remise_totale  # Accompte + Remise totale
-            
-            print(f"  📊 Ventilation: Accompte {payment.amount:.2f}€ + Remise {remise_totale:.2f}€ = {montant_a_ventiler:.2f}€")
-            
-            for compte_produit_id, details in repartition['services'].items():
-                if details['montant_net'] > 0:
-                    # Utiliser la proportion déjà calculée correctement
-                    proportion = details['proportion']
-                    montant_credit = montant_a_ventiler * proportion
-                    
-                    ecriture_service = EcritureComptable(
-                        journal_id=journal_id,
-                        compte_comptable_id=compte_produit_id,
-                        debit=0,
-                        credit=montant_credit,
-                        ordre=ordre,
-                        libelle=f"{libelle_base} - Services (proportionnel)"
-                    )
-                    session.add(ecriture_service)
-                    ecritures.append(ecriture_service)
-                    print(f"  📤 Crédit Services: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
-                    ordre += 1
-            
-            # === 3. ÉCRITURES DE CRÉDIT POUR LES PRODUITS (PROPORTIONNEL) ===
-            for compte_produit_id, details in repartition['produits'].items():
-                if details['montant_net'] > 0:
-                    # Utiliser la proportion déjà calculée correctement
-                    proportion = details['proportion']
-                    montant_credit = montant_a_ventiler * proportion
-                    
-                    ecriture_produit = EcritureComptable(
-                        journal_id=journal_id,
-                        compte_comptable_id=compte_produit_id,
-                        debit=0,
-                        credit=montant_credit,
-                        ordre=ordre,
-                        libelle=f"{libelle_base} - Produits (proportionnel)"
-                    )
-                    session.add(ecriture_produit)
-                    ecritures.append(ecriture_produit)
-                    print(f"  📤 Crédit Produits: {montant_credit:.2f} sur compte {compte_produit_id} (proportion: {proportion:.1%})")
-                    ordre += 1
-            
-            # === 4. ÉCRITURE DE CRÉDIT POUR LA TVA (PROPORTIONNEL) ===
-            if repartition.get('tva', 0) > 0 and compte_tva_id:
-                # Utiliser la proportion déjà calculée correctement
-                proportion_tva = repartition.get('tva_proportion', 0)
-                montant_tva_credit = montant_a_ventiler * proportion_tva
-                
-                ecriture_tva = EcritureComptable(
+
+            # === 2. Crédits pour les services (par compte) ===
+            for compte_id, montant in services_by_account.items():
+                montant = round(montant, 2)
+                if montant <= 0:
+                    continue
+                e = EcritureComptable(
+                    journal_id=journal_id,
+                    compte_comptable_id=compte_id,
+                    debit=0,
+                    credit=montant,
+                    ordre=ordre,
+                    libelle=f"{libelle_base} - Services"
+                )
+                session.add(e)
+                ecritures.append(e)
+                print(f"  📤 Crédit Services: {montant:.2f} sur compte {compte_id}")
+                ordre += 1
+
+            # === 3. Crédits pour les produits (par compte) ===
+            for compte_id, montant in produits_by_account.items():
+                montant = round(montant, 2)
+                if montant <= 0:
+                    continue
+                e = EcritureComptable(
+                    journal_id=journal_id,
+                    compte_comptable_id=compte_id,
+                    debit=0,
+                    credit=montant,
+                    ordre=ordre,
+                    libelle=f"{libelle_base} - Produits"
+                )
+                session.add(e)
+                ecritures.append(e)
+                print(f"  📤 Crédit Produits: {montant:.2f} sur compte {compte_id}")
+                ordre += 1
+
+            # === 4. Crédit TVA (si applicable) ===
+            if tva_total > 0 and compte_tva_id:
+                montant_tva = round(tva_total, 2)
+                e_tva = EcritureComptable(
                     journal_id=journal_id,
                     compte_comptable_id=compte_tva_id,
                     debit=0,
-                    credit=montant_tva_credit,
+                    credit=montant_tva,
                     ordre=ordre,
-                    libelle=f"{libelle_base} - TVA (proportionnel)"
+                    libelle=f"{libelle_base} - TVA"
                 )
-                session.add(ecriture_tva)
-                ecritures.append(ecriture_tva)
-                print(f"  📤 Crédit TVA: {montant_tva_credit:.2f} sur compte {compte_tva_id} (proportion: {proportion_tva:.1%})")
+                session.add(e_tva)
+                ecritures.append(e_tva)
+                print(f"  📤 Crédit TVA: {montant_tva:.2f} sur compte {compte_tva_id}")
                 ordre += 1
-            
-            # === 5. ÉCRITURE DE DÉBIT POUR LA REMISE (TOTALITÉ DE LA REMISE) ===
-            # NOUVELLE LOGIQUE : Débiter TOUTE la remise en une seule fois lors de la création
-            if reservation.discount_percent and reservation.discount_percent > 0:
-                # Récupérer le compte remise depuis la config
-                config = session.query(ComptaConfig).first()
-                if config and config.compte_remise_id:
-                    # Calculer la REMISE TOTALE sur le TTC de la réservation
-                    total_ttc_brut = float(reservation.total_amount or 0)  # TTC stocké SANS remise
-                    remise_totale = total_ttc_brut * (reservation.discount_percent / 100)
-                    
-                    if remise_totale > 0:
-                        ecriture_remise = EcritureComptable(
-                            journal_id=journal_id,
-                            compte_comptable_id=config.compte_remise_id,
-                            debit=remise_totale,
-                            credit=0,
-                            ordre=1,
-                            libelle=f"{libelle_base} - Remise {reservation.discount_percent}% (TOTALE)"
-                        )
-                        session.add(ecriture_remise)
-                        ecritures.append(ecriture_remise)
-                        print(f"  💳 Débit Remise TOTALE: {remise_totale:.2f}€ sur compte {config.compte_remise_id}")
-                        print(f"      Total TTC brut: {total_ttc_brut:.2f}€ × {reservation.discount_percent}% = {remise_totale:.2f}€")
-            
+
+            # === 5. Débit Remise (si applicable) ===
+            if remise_totale and remise_totale > 0:
+                if not compte_remise_id:
+                    print("⚠️ Remise définie mais aucun compte_remise_id configuré. Remise non enregistrée comptablement.")
+                else:
+                    montant_remise = round(remise_totale, 2)
+                    e_remise = EcritureComptable(
+                        journal_id=journal_id,
+                        compte_comptable_id=compte_remise_id,
+                        debit=montant_remise,
+                        credit=0,
+                        ordre=ordre,
+                        libelle=f"{libelle_base} - Remise {reservation.discount_percent}%"
+                    )
+                    session.add(e_remise)
+                    ecritures.append(e_remise)
+                    print(f"  💳 Débit Remise: {montant_remise:.2f} sur compte {compte_remise_id}")
+                    ordre += 1
+
+            print(f"  ✅ Écritures facture créées: {len(ecritures)}")
             return ecritures
-            
+
         except Exception as e:
-            print(f"❌ Erreur lors de la création des écritures: {e}")
+            print(f"❌ Erreur lors de la création des écritures facture: {e}")
             import traceback
             traceback.print_exc()
-            return []
             return []
