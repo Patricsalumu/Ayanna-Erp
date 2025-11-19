@@ -71,9 +71,12 @@ class TableButton(QPushButton):
         try:
             montant_text = ''
             if occupied:
-                # if numeric, format using centralized helper
+                # Distinguish boolean True (occupied with no amount) from numeric amounts.
                 try:
-                    if isinstance(occupied, (int, float)):
+                    if isinstance(occupied, bool):
+                        # occupied flag only, no badge
+                        montant_text = ''
+                    elif isinstance(occupied, (int, float)):
                         currency = get_currency(getattr(self.parent_view, 'entreprise_id', None))
                         montant_text = f"{format_amount(occupied)} {currency}"
                     else:
@@ -235,12 +238,27 @@ class VenteView(QWidget):
             panier = self.vente_ctrl.get_open_panier_for_table(t.id)
 
             if panier:
-                total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                # If a panier exists we mark the table occupied even when it has no items/amounts.
                 try:
-                    # pass numeric total so apply_style formats it
-                    btn.apply_style(occupied=float(total))
+                    total, _ = self.vente_ctrl.get_panier_total(panier.id)
                 except Exception:
-                    btn.apply_style(occupied=total)
+                    total = None
+
+                # If panier exists, mark occupied. Show numeric badge only when total > 0.
+                if total is None:
+                    occ = True
+                else:
+                    try:
+                        num_total = float(total)
+                        if num_total > 0:
+                            occ = num_total
+                        else:
+                            occ = True
+                    except Exception:
+                        # non-numeric totals: show as-is
+                        occ = total
+
+                btn.apply_style(occupied=occ)
             else:
                 btn.apply_style(occupied=False)
 
@@ -268,25 +286,58 @@ class VenteView(QWidget):
             panier = self.vente_ctrl.get_open_panier_for_table(self.active_table_btn.table_id)
             total = None
             if panier:
-                total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                try:
+                    total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                except Exception:
+                    total = None
+
+            # decide occupied flag: True if panier exists but no numeric total, numeric otherwise
+            if panier:
+                # panier exists -> occupied; display numeric badge only if total > 0
+                if total is None:
+                    occ_prev = True
+                else:
+                    try:
+                        num_total = float(total)
+                        occ_prev = num_total if num_total > 0 else True
+                    except Exception:
+                        occ_prev = total
+            else:
+                occ_prev = False
 
             try:
                 self.active_table_btn.apply_style(
-                    occupied=(float(total) if total else False),
+                    occupied=occ_prev,
                     selected=False
                 )
             except Exception:
-                self.active_table_btn.apply_style(occupied=(total if total else False), selected=False)
+                self.active_table_btn.apply_style(occupied=occ_prev, selected=False)
 
         panier = self.vente_ctrl.get_open_panier_for_table(table_button.table_id)
         total = None
         if panier:
-            total, _ = self.vente_ctrl.get_panier_total(panier.id)
+            try:
+                total, _ = self.vente_ctrl.get_panier_total(panier.id)
+            except Exception:
+                total = None
+
+        if panier:
+            # panier exists -> occupied; display numeric badge only if total > 0
+            if total is None:
+                occ_new = True
+            else:
+                try:
+                    num_total = float(total)
+                    occ_new = num_total if num_total > 0 else True
+                except Exception:
+                    occ_new = total
+        else:
+            occ_new = False
 
         try:
-            table_button.apply_style(occupied=(float(total) if total else False), selected=True)
+            table_button.apply_style(occupied=occ_new, selected=True)
         except Exception:
-            table_button.apply_style(occupied=(total if total else False), selected=True)
+            table_button.apply_style(occupied=occ_new, selected=True)
         self.active_table_btn = table_button
 
     def open_table_panel(self, table_id):

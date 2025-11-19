@@ -561,14 +561,14 @@ class InvoicePrintManager:
             y_sim -= max(6 * mm, lines * 2.5 * mm)
             y_sim -= 3 * mm  # séparation après notes
 
-        # filigrane
-        y_sim -= 10 * mm
+        # filigrane (réduire l'espace réservé pour diminuer la marge inférieure)
+        y_sim -= 6 * mm
 
         used_height = simulate_start_height - y_sim
-        # ajouter petite marge
-        TICKET_HEIGHT = used_height + 2 * mm
-        # garantir une hauteur minimale
-        min_height = 55 * mm
+        # ajouter petite marge (réduite)
+        TICKET_HEIGHT = used_height + 1 * mm
+        # garantir une hauteur minimale (légèrement réduite pour tickets courts)
+        min_height = 50 * mm
         if TICKET_HEIGHT < min_height:
             TICKET_HEIGHT = min_height
 
@@ -743,30 +743,93 @@ class InvoicePrintManager:
 
             # --- Si c'est une impression depuis le module restaurant, produire une facture courte ---
             try:
-                # calculer totaux/ remises avec plusieurs fallback keys
-                total_ttc = invoice_data.get('total_ttc', invoice_data.get('total_amount', subtotal_articles + (invoice_data.get('tax_amount', 0) or 0)))
-                remise_val = invoice_data.get('discount_amount', invoice_data.get('remise_amount', invoice_data.get('remise', 0))) or 0
-                if not remise_val and invoice_data.get('discount_percent'):
+                # helper to parse numeric-like values robustly
+                def _to_float(value, default=0.0):
                     try:
-                        remise_val = float(total_ttc) * (float(invoice_data.get('discount_percent') or 0) / 100.0)
+                        if value is None:
+                            return default
+                        if isinstance(value, (int, float)):
+                            return float(value)
+                        s = str(value).strip()
+                        # handle percentage strings like '10%'
+                        if s.endswith('%'):
+                            return float(s[:-1].replace(',', '.').strip())
+                        # remove common currency suffixes/words
+                        for bad in ['fc', 'f', 'fcfa', 'cdf', 'xof', '€', '$']:
+                            if s.lower().endswith(bad):
+                                s = s[: -len(bad)].strip()
+                        # replace non-breaking spaces and thousands separators
+                        s = s.replace('\u00A0', ' ').replace(' ', '').replace(',', '.')
+                        return float(s)
                     except Exception:
-                        remise_val = 0
+                        return default
 
-                net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', invoice_data.get('total_final', total_ttc - remise_val)))
+                # calculer totaux/ remises avec plusieurs fallback keys
+                total_ttc = invoice_data.get('total_ttc')
+                if total_ttc is None:
+                    total_ttc = invoice_data.get('total_amount')
+                if total_ttc is None:
+                    total_ttc = subtotal_articles + _to_float(invoice_data.get('tax_amount', 0))
+                total_ttc = _to_float(total_ttc, subtotal_articles)
+
+                # rechercher la remise parmi plusieurs clés possibles
+                remise_keys = ['discount_amount', 'remise_amount', 'remise', 'discount', 'discount_value']
+                remise_val = None
+                for k in remise_keys:
+                    if k in invoice_data and invoice_data.get(k) not in (None, ''):
+                        remise_val = invoice_data.get(k)
+                        break
+
+                # si pas de valeur absolue, chercher un pourcentage
+                if remise_val in (None, ''):
+                    percent_keys = ['discount_percent', 'remise_percent', 'discount_pct', 'discount_rate']
+                    pct = None
+                    for k in percent_keys:
+                        v = invoice_data.get(k)
+                        if v not in (None, ''):
+                            pct = v
+                            break
+                    if pct not in (None, ''):
+                        pct_num = _to_float(pct, 0.0)
+                        # If percent looks like 10 (meaning 10%), convert
+                        if pct_num and pct_num > 1:
+                            pct_num = pct_num
+                        remise_val = (pct_num / 100.0) * total_ttc
+
+                # coerce to float
+                remise_val = _to_float(remise_val, 0.0)
+
+                # net à payer (fallbacks)
+                net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', invoice_data.get('total_final')))
+                if net_a_payer is None:
+                    net_a_payer = total_ttc - remise_val
+                net_a_payer = _to_float(net_a_payer, total_ttc - remise_val)
+
+                # If no explicit remise found but the invoice provides a total_net, derive remise by diff
+                if (not remise_val or remise_val == 0) and ('total_net' in invoice_data or 'net_a_payer' in invoice_data):
+                    try:
+                        derived = total_ttc - net_a_payer
+                        remise_val = _to_float(derived, 0.0)
+                    except Exception:
+                        remise_val = _to_float(remise_val, 0.0)
 
                 # total payé cumulé
-                total_paid = 0
+                total_paid = 0.0
                 if payments_list:
                     for p in payments_list:
                         try:
-                            total_paid += float(p.get('amount', 0))
+                            total_paid += _to_float(p.get('amount', 0), 0.0)
                         except Exception:
                             pass
 
             except Exception:
-                remise_val = invoice_data.get('discount_amount', 0)
-                net_a_payer = invoice_data.get('total_net', invoice_data.get('net_a_payer', 0))
-                total_paid = 0
+                # safe fallback
+                try:
+                    remise_val = float(invoice_data.get('discount_amount', 0) or 0)
+                except Exception:
+                    remise_val = 0.0
+                net_a_payer = _to_float(invoice_data.get('total_net', invoice_data.get('net_a_payer', 0)), 0.0)
+                total_paid = 0.0
 
             if is_restaurant:
                 # Compact : pas de ligne de séparation entre la section articles et la remise
