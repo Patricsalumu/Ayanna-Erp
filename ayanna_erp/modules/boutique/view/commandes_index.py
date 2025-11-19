@@ -1581,7 +1581,7 @@ Notes: {notes_preview}
             
             # Pied de page avec informations supplémentaires
             elements.append(Spacer(1, 0.5*cm))
-            elements.append(Paragraph(f"<i>Rapport généré By Ayanna ERP APP, le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')} - {len(commandes)} commandes exportées</i>", styles['NormalText']))
+            elements.append(Paragraph(f"<i>Developed By Ayanna ERP ©, le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')} - {len(commandes)} commandes exportées</i>", styles['NormalText']))
             
             # Générer le PDF
             doc.build(elements)
@@ -1805,7 +1805,7 @@ Notes: {notes_preview}
             # 9) Pied de page
             # ============================
             elements.append(Paragraph(
-                f"Rapport généré par Ayanna ERP le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
+                f"Developed by Ayanna ERP © le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
                 styles['SmallInfo']
             ))
 

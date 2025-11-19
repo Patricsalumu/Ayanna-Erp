@@ -120,6 +120,27 @@ class ReservationIndex(QWidget):
         """)
         
         toolbar_layout.addWidget(self.add_reservation_button)
+
+        # Bouton de rafraîchissement pour recharger la liste des réservations
+        self.refresh_button = QPushButton("🔄 Rafraîchir")
+        self.refresh_button.setToolTip("Rafraîchir la liste des réservations")
+        self.refresh_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;
+                color: white;
+                border: none;
+                padding: 8px 14px;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+        """)
+        # Connecter le clic au rechargement des réservations
+        self.refresh_button.clicked.connect(self.load_reservations)
+
+        toolbar_layout.addWidget(self.refresh_button)
         toolbar_layout.addStretch()
         toolbar_layout.addWidget(QLabel("Statut:"))
         toolbar_layout.addWidget(self.status_filter)

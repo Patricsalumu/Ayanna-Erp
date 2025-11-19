@@ -540,9 +540,8 @@ class ReservationForm(QDialog):
             service_container = QWidget()
             service_layout = QHBoxLayout(service_container)
             service_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Case à cocher pour le service
-            checkbox = QCheckBox(f"{service.name} - {service.price:.2f} $")
+            # Case à cocher pour le service (afficher la devise dynamique)
+            checkbox = QCheckBox(f"{service.name} - {self.format_amount(float(service.price))}")
             checkbox.setObjectName(f"service_{service.id}")
             checkbox.service_data = service
             checkbox.toggled.connect(self.update_selection_summary)
@@ -598,9 +597,8 @@ class ReservationForm(QDialog):
             product_widget = QWidget()
             product_layout = QHBoxLayout(product_widget)
             product_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # Checkbox du produit
-            checkbox = QCheckBox(f"{product.name} - {product.price_unit:.2f} $")
+            # Checkbox du produit (afficher la devise dynamique)
+            checkbox = QCheckBox(f"{product.name} - {self.format_amount(float(product.price_unit))}")
             checkbox.setObjectName(f"product_{product.id}")
             checkbox.product_data = product
             checkbox.toggled.connect(self.update_selection_summary)
@@ -643,7 +641,7 @@ class ReservationForm(QDialog):
         ]
         
         for service_data in default_services:
-            checkbox = QCheckBox(f"{service_data['name']} - {service_data['price']:.2f} $")
+            checkbox = QCheckBox(f"{service_data['name']} - {self.format_amount(float(service_data['price']))}")
             checkbox.service_data = service_data
             checkbox.toggled.connect(self.update_selection_summary)
             
@@ -662,7 +660,7 @@ class ReservationForm(QDialog):
         ]
         
         for product_data in default_products:
-            checkbox = QCheckBox(f"{product_data['name']} - {product_data['price']:.2f} $")
+            checkbox = QCheckBox(f"{product_data['name']} - {self.format_amount(float(product_data['price']))}")
             checkbox.product_data = product_data
             checkbox.toggled.connect(self.update_selection_summary)
             
@@ -696,7 +694,7 @@ class ReservationForm(QDialog):
                     price = float(service_data['price'])
                 
                 line_total = price * quantity
-                selected_services.append(f"🔧 {name} - {price:.2f} $ x{quantity} = {line_total:.2f} $")
+                selected_services.append(f"🔧 {name} - {self.format_amount(price)} x{quantity} = {self.format_amount(line_total)}")
                 total_services += line_total
         
         # Vérifier les produits sélectionnés avec quantités
@@ -717,13 +715,13 @@ class ReservationForm(QDialog):
                     unit_price = float(product_data['price'])
                 
                 line_total = unit_price * quantity
-                selected_products.append(f"📦 {name} (x{quantity}) - {line_total:.2f} $")
+                selected_products.append(f"📦 {name} (x{quantity}) - {self.format_amount(line_total)}")
                 total_products += line_total
         
         # Mettre à jour l'affichage des services
         if selected_services:
             services_text = "\n".join(selected_services)
-            services_text += f"\n\nSous-total services: {total_services:.2f} $"
+            services_text += f"\n\nSous-total services: {self.format_amount(total_services)}"
             self.services_summary_label.setText(services_text)
             self.services_summary_label.setStyleSheet("color: #27AE60; font-weight: bold;")
         else:
@@ -733,7 +731,7 @@ class ReservationForm(QDialog):
         # Mettre à jour l'affichage des produits
         if selected_products:
             products_text = "\n".join(selected_products)
-            products_text += f"\n\nSous-total produits: {total_products:.2f} $"
+            products_text += f"\n\nSous-total produits: {self.format_amount(total_products)}"
             self.products_summary_label.setText(products_text)
             self.products_summary_label.setStyleSheet("color: #3498DB; font-weight: bold;")
         else:
@@ -913,18 +911,37 @@ class ReservationForm(QDialog):
         # Parcourir les checkboxes de services et cocher ceux qui sont sélectionnés
         for checkbox in self.service_checkboxes:
             if hasattr(checkbox, 'service_data'):
-                service_name = checkbox.service_data.name
-                
-                # Trouver le service correspondant dans les données
-                matching_service = next((s for s in selected_services if s['name'] == service_name), None)
-                
+                sd = checkbox.service_data
+                # Supporter à la fois les objets ORM (avec attribut .name) et les dicts
+                if hasattr(sd, 'name'):
+                    service_name = sd.name
+                elif isinstance(sd, dict):
+                    service_name = sd.get('name')
+                else:
+                    # Fallback: convertir en string
+                    service_name = str(sd)
+
+                # Trouver le service correspondant dans les données (selected_services peut contenir des dicts)
+                matching_service = None
+                for s in selected_services:
+                    try:
+                        s_name = s.get('name') if isinstance(s, dict) else getattr(s, 'name', None)
+                    except Exception:
+                        s_name = None
+                    if s_name == service_name:
+                        matching_service = s
+                        break
+
                 if matching_service:
                     checkbox.setChecked(True)
                     
                     # Restaurer la quantité si on a un spinbox correspondant
                     if hasattr(checkbox, 'quantity_spinbox'):
-                        quantity = matching_service.get('quantity', 1)
-                        checkbox.quantity_spinbox.setValue(int(quantity))
+                        quantity = matching_service.get('quantity', 1) if isinstance(matching_service, dict) else getattr(matching_service, 'quantity', 1)
+                        try:
+                            checkbox.quantity_spinbox.setValue(int(quantity))
+                        except Exception:
+                            checkbox.quantity_spinbox.setValue(1)
                         checkbox.quantity_spinbox.setEnabled(True)  # Activer le spinbox
     
     def _load_selected_products(self):
@@ -937,18 +954,36 @@ class ReservationForm(QDialog):
         # Parcourir les checkboxes de produits et cocher ceux qui sont sélectionnés
         for i, checkbox in enumerate(self.product_checkboxes):
             if hasattr(checkbox, 'product_data'):
-                product_name = checkbox.product_data.name
-                
+                pd = checkbox.product_data
+                # Supporter à la fois les objets ORM (avec .name) et les dicts
+                if hasattr(pd, 'name'):
+                    product_name = pd.name
+                elif isinstance(pd, dict):
+                    product_name = pd.get('name')
+                else:
+                    product_name = str(pd)
+
                 # Trouver le produit correspondant dans les données
-                matching_product = next((p for p in selected_products if p['name'] == product_name), None)
-                
+                matching_product = None
+                for p in selected_products:
+                    try:
+                        p_name = p.get('name') if isinstance(p, dict) else getattr(p, 'name', None)
+                    except Exception:
+                        p_name = None
+                    if p_name == product_name:
+                        matching_product = p
+                        break
+
                 if matching_product:
                     checkbox.setChecked(True)
                     
                     # Restaurer la quantité si on a un spinbox correspondant
                     if i < len(self.product_quantity_spinboxes):
-                        quantity = matching_product.get('quantity', 1)
-                        self.product_quantity_spinboxes[i].setValue(int(quantity))
+                        quantity = matching_product.get('quantity', 1) if isinstance(matching_product, dict) else getattr(matching_product, 'quantity', 1)
+                        try:
+                            self.product_quantity_spinboxes[i].setValue(int(quantity))
+                        except Exception:
+                            self.product_quantity_spinboxes[i].setValue(1)
     
     def save_reservation(self):
         """Sauvegarder la réservation"""

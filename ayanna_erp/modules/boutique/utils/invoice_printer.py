@@ -171,7 +171,7 @@ class InvoicePrintManager:
         canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(HexColor('#555555'))
         generation_time = datetime.now().strftime('%d/%m/%Y à %H:%M')
-        filigrane_text = f"Généré par Ayanna Erp App © - {generation_time}"
+        filigrane_text = f"Developed By Ayanna Erp © - {generation_time}"
         text_width = canvas.stringWidth(filigrane_text, 'Helvetica-Bold', 11)
         x_center = (A4[0] - text_width) / 2
         canvas.drawString(x_center, 15, filigrane_text)
@@ -871,7 +871,7 @@ class InvoicePrintManager:
         # Filigrane avec nom d'entreprise dynamique
         c.setFont('Helvetica', 6)
         generation_time = datetime.now().strftime('%d/%m/%Y %H:%M')
-        filigrane_text = f"Ayanna Erp App (c) {generation_time}"
+        filigrane_text = f"Developed by Ayanna Erp (©) {generation_time}"
         text_width = c.stringWidth(filigrane_text, 'Helvetica', 6)
         c.drawString((TICKET_WIDTH - text_width) / 2, y_position, filigrane_text)
 
