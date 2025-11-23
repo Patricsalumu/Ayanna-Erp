@@ -607,7 +607,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     LEFT JOIN shop_paniers p ON spp.panier_id = p.id
                     LEFT JOIN core_products cp ON spp.product_id = cp.id
                     WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                    AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                    AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
                     GROUP BY cp.id, cp.name
                 """)
                 prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
@@ -621,7 +621,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
                     LEFT JOIN core_products cp ON rpp.product_id = cp.id
                     WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
-                    AND LOWER(COALESCE(rp.status,'')) <> 'annule'
+                    AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
                     GROUP BY cp.id, cp.name
                 """)
                 restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
@@ -637,7 +637,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                        AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                        AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
                         GROUP BY ss.id, ss.name
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
@@ -810,7 +810,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     LEFT JOIN shop_paniers p ON spp.panier_id = p.id
                     LEFT JOIN core_products cp ON spp.product_id = cp.id
                     WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                    AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                    AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
                     GROUP BY cp.id, cp.name
                 """)
                 prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
@@ -824,7 +824,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
                     LEFT JOIN core_products cp ON rpp.product_id = cp.id
                     WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
-                    AND LOWER(COALESCE(rp.status,'')) <> 'annule'
+                    AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
                     GROUP BY cp.id, cp.name
                 """)
                 restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
@@ -840,7 +840,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                        AND LOWER(COALESCE(p.status,'')) <> 'cancelled'
+                        AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
                         GROUP BY ss.id, ss.name
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
