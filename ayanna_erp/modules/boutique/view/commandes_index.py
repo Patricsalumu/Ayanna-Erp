@@ -1759,26 +1759,30 @@ Notes: {notes_preview}
             # 7) Construction du tableau
             # ============================
             table_data = [[
-                'N°', 'Nom', 'Q.Init', 'Ajout', 'Total', 'Reste', 'Vendu', 'P.U', 'Total'
+                'N°', 'Nom', 'Q. Init', 'Ajouts', 'Ajust', 'Total', 'Ventes', 'Reste', 'P.U', 'Total'
             ]]
 
             total_general = 0
 
             for row in products:
                 total_general += row.get('total', 0)
+                # Total après ajustement = Q. Initiale + Ajouts + Ajustements
+                total_apres_ajust = row.get('initial_quantity', 0) + row.get('quantity_added', 0) + row.get('adjustments', 0)
+                
                 table_data.append([
                     row.get('no', ''),
                     row.get('name', ''),
-                    f"{row.get('initial_quantity', 0)}",
-                    f"{row.get('quantity_added', 0)}",
-                    f"{row.get('total_initial_plus_added', 0)}",
-                    f"{row.get('reste', 0)}",
-                    f"{row.get('sold', 0)}",
+                    f"{row.get('initial_quantity', 0):.0f}",
+                    f"{row.get('quantity_added', 0):.0f}",
+                    f"{row.get('adjustments', 0):.0f}",
+                    f"{total_apres_ajust:.0f}",
+                    f"{row.get('sold', 0):.0f}",
+                    f"{row.get('final_quantity', 0):.0f}",
                     _fmt_local(row.get('unit_price', 0)),
                     _fmt_local(row.get('total', 0))
                 ])
 
-            col_widths = [1.2*cm, 5*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2*cm, 2.5*cm]
+            col_widths = [0.7*cm, 3.8*cm, 1.4*cm, 1.2*cm, 1.4*cm, 1.5*cm, 1.2*cm, 1.3*cm, 1.6*cm, 2*cm]
 
             tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
             tbl.setStyle(TableStyle([
@@ -1787,9 +1791,9 @@ Notes: {notes_preview}
                 ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
                 ('ALIGN', (0,0), (-1,0), 'CENTER'),
                 ('GRID', (0,0), (-1,-1), 0.4, black),
-                ('FONTSIZE', (0,0), (-1,-1), 9),
+                ('FONTSIZE', (0,0), (-1,-1), 7),
                 ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ALIGN', (2,1), (8,-1), 'RIGHT'),
+                ('ALIGN', (2,1), (9,-1), 'RIGHT'),
             ]))
 
             elements.append(tbl)

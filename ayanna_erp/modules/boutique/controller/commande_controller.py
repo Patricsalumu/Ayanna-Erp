@@ -905,6 +905,29 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 except Exception:
                     warehouse_id = None
 
+                # AJOUTER TOUS LES PRODUITS ACTIFS (même non vendus) pour avoir une vue complète
+                # Récupérer tous les produits actifs
+                q_all_products = text("""
+                    SELECT id as product_id, name as product_name, price_unit
+                    FROM core_products
+                    WHERE is_active = 1
+                    ORDER BY name
+                """)
+                all_products_rows = session.execute(q_all_products).fetchall()
+                
+                # Ajouter les produits non vendus à items
+                for prod in all_products_rows:
+                    pid = f"P-{prod.product_id}"
+                    if pid not in items:
+                        # Produit actif mais non vendu pendant la période
+                        items[pid] = {
+                            'name': prod.product_name,
+                            'sold': 0.0,
+                            'unit_price': float(prod.price_unit or 0),
+                            'product_id': prod.product_id,
+                            'is_service': False
+                        }
+
                 # Pour chaque produit/service, calculer quantités stock via stock_mouvements
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
@@ -912,45 +935,137 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         # Pas de stock pour les services
                         initial_q = 0.0
                         added_q = 0.0
-                        purchases_q = 0.0
+                        adjustments_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # quantité initiale = somme des mouvements avant d1
-                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
+                        # QUANTITÉ INITIALE = Stock avant date_debut
+                        # = (ENTREES) - (SORTIES) + (AJUSTEMENTS) + (TRANSFERTS IN) - (TRANSFERTS OUT) + (ANNULATIONS)
+                        # Les ANNULATIONS peuvent être:
+                        #   - Annulation d'une SORTIE → +quantity (remise en stock)
+                        #   - Annulation d'une ENTREE → -quantity (retrait du stock)
+                        # On filtre uniquement les mouvements de cet entrepôt
+                        if warehouse_id:
+                            # Avec filtre entrepôt spécifique
+                            q_init_sql = text("""
+                                SELECT 
+                                    COALESCE(SUM(CASE 
+                                        WHEN movement_type = 'ENTREE' AND warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'ENTREE' AND destination_warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'SORTIE' AND warehouse_id = :wid THEN -quantity
+                                        WHEN movement_type = 'SORTIE' AND destination_warehouse_id = :wid THEN -quantity
+                                        WHEN movement_type = 'AJUSTEMENT' AND warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'AJUSTEMENT' AND destination_warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -quantity
+                                        WHEN movement_type = 'ANNULATION' AND warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'ANNULATION' AND destination_warehouse_id = :wid THEN quantity
+                                        ELSE 0
+                                    END), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date < :d1
+                                AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                            """)
+                        else:
+                            # Sans filtre entrepôt (tous les entrepôts)
+                            q_init_sql = text("""
+                                SELECT 
+                                    COALESCE(SUM(CASE 
+                                        WHEN movement_type = 'ENTREE' THEN quantity
+                                        WHEN movement_type = 'SORTIE' THEN -quantity
+                                        WHEN movement_type = 'AJUSTEMENT' THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' THEN quantity
+                                        WHEN movement_type = 'ANNULATION' THEN quantity
+                                        ELSE 0
+                                    END), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date < :d1
+                            """)
+                        
                         try:
                             params_init = {'pid': pid, 'd1': d1}
                             if warehouse_id:
                                 params_init['wid'] = warehouse_id
-                            r_init = session.execute(q_init, params_init).fetchone()
+                            r_init = session.execute(q_init_sql, params_init).fetchone()
                             initial_q = float(r_init.qty or 0)
-                        except Exception:
+                        except Exception as e:
+                            print(f"⚠️ Erreur calcul Q initiale pour produit {pid}: {e}")
                             initial_q = 0.0
 
-                        # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
-                        q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
+                        # AJOUTS DU JOUR = ENTREE + TRANSFERT IN (reçus uniquement)
+                        # On ne compte que les entrées réelles (achats) et les transferts entrants
+                        if warehouse_id:
+                            q_added_sql = text("""
+                                SELECT COALESCE(SUM(CASE 
+                                    WHEN movement_type = 'ENTREE' AND warehouse_id = :wid THEN quantity
+                                    WHEN movement_type = 'ENTREE' AND destination_warehouse_id = :wid THEN quantity
+                                    WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN quantity
+                                    ELSE 0
+                                END), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date >= :d1 
+                                AND movement_date <= :d2
+                                AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                            """)
+                        else:
+                            q_added_sql = text("""
+                                SELECT COALESCE(SUM(CASE 
+                                    WHEN movement_type = 'ENTREE' THEN quantity
+                                    WHEN movement_type = 'TRANSFERT' THEN quantity
+                                    ELSE 0
+                                END), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date >= :d1 
+                                AND movement_date <= :d2
+                            """)
+                        
                         try:
                             params_added = {'pid': pid, 'd1': d1, 'd2': d2}
                             if warehouse_id:
                                 params_added['wid'] = warehouse_id
-                            r_added = session.execute(q_added, params_added).fetchone()
+                            r_added = session.execute(q_added_sql, params_added).fetchone()
                             added_q = float(r_added.qty or 0)
-                        except Exception:
+                        except Exception as e:
+                            print(f"⚠️ Erreur calcul ajouts pour produit {pid}: {e}")
                             added_q = 0.0
 
-                        # achats/transferts (ENTREE or TRANSFERT)
-                        q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')" + (" AND (warehouse_id = :wid OR destination_warehouse_id = :wid)" if warehouse_id else ""))
+                        # AJUSTEMENTS = Corrections d'inventaire (peuvent être + ou -)
+                        if warehouse_id:
+                            q_adj_sql = text("""
+                                SELECT COALESCE(SUM(quantity), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date >= :d1 
+                                AND movement_date <= :d2
+                                AND movement_type = 'AJUSTEMENT'
+                                AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                            """)
+                        else:
+                            q_adj_sql = text("""
+                                SELECT COALESCE(SUM(quantity), 0) as qty
+                                FROM stock_mouvements
+                                WHERE product_id = :pid 
+                                AND movement_date >= :d1 
+                                AND movement_date <= :d2
+                                AND movement_type = 'AJUSTEMENT'
+                            """)
+                        
                         try:
-                            params_purch = {'pid': pid, 'd1': d1, 'd2': d2}
+                            params_adj = {'pid': pid, 'd1': d1, 'd2': d2}
                             if warehouse_id:
-                                params_purch['wid'] = warehouse_id
-                            r_purch = session.execute(q_purch, params_purch).fetchone()
-                            purchases_q = float(r_purch.qty or 0)
-                        except Exception:
-                            purchases_q = 0.0
+                                params_adj['wid'] = warehouse_id
+                            r_adj = session.execute(q_adj_sql, params_adj).fetchone()
+                            adjustments_q = float(r_adj.qty or 0)
+                        except Exception as e:
+                            print(f"⚠️ Erreur calcul ajustements pour produit {pid}: {e}")
+                            adjustments_q = 0.0
 
                     sold = float(it.get('sold', 0.0))
-                    total_initial_plus = initial_q + added_q
-                    reste = total_initial_plus - sold
+                    # Quantité finale = Q_initiale + Ajouts + Ajustements - Ventes
+                    final_q = initial_q + added_q + adjustments_q - sold
                     unit_price = float(it.get('unit_price', 0.0))
                     total_amount = sold * unit_price
 
@@ -959,10 +1074,9 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'name': it['name'],
                         'initial_quantity': initial_q,
                         'quantity_added': added_q,
-                        'purchases_transfers': purchases_q,
-                        'total_initial_plus_added': total_initial_plus,
-                        'reste': reste,
+                        'adjustments': adjustments_q,
                         'sold': sold,
+                        'final_quantity': final_q,
                         'unit_price': unit_price,
                         'total': total_amount
                     })
