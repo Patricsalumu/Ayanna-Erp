@@ -722,6 +722,8 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'initial_quantity': initial_q,
                         'quantity_added': added_q,
                         'purchases_transfers': purchases_q,
+                        'product_id': it.get('product_id'),
+                        'service_id': it.get('service_id'),
                         'total_initial_plus_added': total_initial_plus,
                         'reste': reste,
                         'sold': sold,
@@ -955,8 +957,8 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                         WHEN movement_type = 'SORTIE' AND destination_warehouse_id = :wid THEN -quantity
                                         WHEN movement_type = 'AJUSTEMENT' AND warehouse_id = :wid THEN quantity
                                         WHEN movement_type = 'AJUSTEMENT' AND destination_warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -quantity
+                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
+                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN ABS(quantity)
                                         WHEN movement_type = 'ANNULATION' AND warehouse_id = :wid THEN quantity
                                         WHEN movement_type = 'ANNULATION' AND destination_warehouse_id = :wid THEN quantity
                                         ELSE 0
@@ -974,7 +976,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                         WHEN movement_type = 'ENTREE' THEN quantity
                                         WHEN movement_type = 'SORTIE' THEN -quantity
                                         WHEN movement_type = 'AJUSTEMENT' THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' THEN 0
                                         WHEN movement_type = 'ANNULATION' THEN quantity
                                         ELSE 0
                                     END), 0) as qty
@@ -1000,7 +1002,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                 SELECT COALESCE(SUM(CASE 
                                     WHEN movement_type = 'ENTREE' AND warehouse_id = :wid THEN quantity
                                     WHEN movement_type = 'ENTREE' AND destination_warehouse_id = :wid THEN quantity
-                                    WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
                                     ELSE 0
                                 END), 0) as qty
                                 FROM stock_mouvements
@@ -1013,7 +1015,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             q_added_sql = text("""
                                 SELECT COALESCE(SUM(CASE 
                                     WHEN movement_type = 'ENTREE' THEN quantity
-                                    WHEN movement_type = 'TRANSFERT' THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' THEN 0
                                     ELSE 0
                                 END), 0) as qty
                                 FROM stock_mouvements
@@ -1075,6 +1077,8 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'initial_quantity': initial_q,
                         'quantity_added': added_q,
                         'adjustments': adjustments_q,
+                        'product_id': it.get('product_id'),
+                        'service_id': it.get('service_id'),
                         'sold': sold,
                         'final_quantity': final_q,
                         'unit_price': unit_price,

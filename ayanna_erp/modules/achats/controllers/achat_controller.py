@@ -31,6 +31,10 @@ class AchatController:
             # Récupérer l'entreprise de l'utilisateur connecté
             connected_enterprise_id = SessionManager.get_current_enterprise_id()
             self.entreprise_id = connected_enterprise_id
+
+    def _local_now(self):
+        """Retourne la date/heure locale de la machine (naive datetime, sans tzinfo)."""
+        return datetime.now()
     
     # ================== GESTION DES FOURNISSEURS ==================
     
@@ -58,6 +62,11 @@ class AchatController:
             adresse=adresse,
             email=email
         )
+        # s'assurer que la date de création reflète l'heure locale de la machine
+        try:
+            fournisseur.created_at = self._local_now()
+        except Exception:
+            pass
         session.add(fournisseur)
         session.commit()
         session.refresh(fournisseur)
@@ -82,7 +91,7 @@ class AchatController:
     
     def generate_numero_commande(self, session: Session) -> str:
         """Génère un numéro de commande unique"""
-        today = datetime.now()
+        today = self._local_now()
         prefix = f"CMD{today.strftime('%Y%m%d')}"
         
         # Trouver le dernier numéro du jour
@@ -116,7 +125,10 @@ class AchatController:
             entrepot_id=entrepot_id,
             utilisateur_id=1,  # TODO: utiliser l'utilisateur connecté
             remise_global=remise_global,
-            montant_total=Decimal('0')  # Sera calculé
+            montant_total=Decimal('0'),  # Sera calculé
+            date_commande=self._local_now(),
+            created_at=self._local_now(),
+            updated_at=self._local_now()
         )
         session.add(commande)
         session.flush()  # Pour obtenir l'ID
@@ -301,7 +313,7 @@ class AchatController:
                 mode_paiement=mode_paiement,
                 description=f"Achat Marchandise - commande {commande.numero}",
                 reference=reference,
-                date_paiement=datetime.now()
+                date_paiement=self._local_now()
             )
             session.add(depense)
             session.flush()  # Pour obtenir l'ID
@@ -314,7 +326,7 @@ class AchatController:
             #     payment_method=mode_paiement,
             #     description =f"Achat Marchandise - commande {commande.numero}",
             #     account_id = 1,
-            #     expense_date=datetime.now()
+            #     expense_date=self._local_now()
             # )
             # session.add(event_expense)
             
@@ -368,7 +380,7 @@ class AchatController:
 
             # === JOURNAL 1 : Achat (stock / charge vs fournisseur) ===
             journal_commande = ComptaJournaux(
-                date_operation=datetime.now(),
+                date_operation=self._local_now(),
                 libelle=f"Achat marchandises - Commande {commande.numero}",
                 montant=commande.montant_total,
                 type_operation="Commande",
@@ -432,7 +444,7 @@ class AchatController:
             # === JOURNAL 2 : Paiement (fournisseur vs caisse) ===
             if depense and depense.montant and depense.montant > 0:
                 journal_paiement = ComptaJournaux(
-                    date_operation=datetime.now(),
+                    date_operation=self._local_now(),
                     libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'} - {commande.numero}",
                     montant=depense.montant,
                     type_operation="Sortie",
@@ -501,9 +513,10 @@ class AchatController:
                 total_cost=ligne.quantite * ligne.prix_unitaire,
                 reference=commande.numero,
                 description=f'Achat - Commande {commande.numero}',
-                movement_date=datetime.now(),
+                movement_date=self._local_now(),
                 user_id=commande.utilisateur_id
             )
+            movement.created_at = self._local_now()
             session.add(movement)
             
             # Mettre à jour ou créer l'entrée stock produit-entrepôt
@@ -524,7 +537,7 @@ class AchatController:
                 
                 stock_entry.quantity = new_quantity
                 stock_entry.total_cost = new_quantity * stock_entry.unit_cost
-                stock_entry.last_movement_date = datetime.now()
+                stock_entry.last_movement_date = self._local_now()
             else:
                 # Créer une nouvelle entrée stock
                 stock_entry = StockProduitEntrepot(
@@ -535,7 +548,7 @@ class AchatController:
                     unit_cost=ligne.prix_unitaire,
                     total_cost=ligne.quantite * ligne.prix_unitaire,
                     min_stock_level=Decimal('10'),  # Valeur par défaut
-                    last_movement_date=datetime.now()
+                    last_movement_date=self._local_now()
                 )
                 session.add(stock_entry)
     
@@ -575,7 +588,9 @@ class AchatController:
                         reference=f"ANN-{commande.numero}",
                         description=f"Annulation commande d'achat - {commande.numero}",
                         user_id=getattr(commande, 'utilisateur_id', None),
-                        user_name=getattr(commande, 'utilisateur_nom', 'Système')
+                        user_name=getattr(commande, 'utilisateur_nom', 'Système'),
+                        movement_date=self._local_now(),
+                        created_at=self._local_now()
                     )
                     session.add(mouvement_sortie)
                     session.flush()  # Pour obtenir l'ID du mouvement
@@ -591,7 +606,7 @@ class AchatController:
                         produit_entrepot.quantity = (produit_entrepot.quantity or Decimal('0')) - ligne.quantite
                         # Recalculer le coût total
                         produit_entrepot.total_cost = produit_entrepot.quantity * (produit_entrepot.unit_cost or Decimal('0'))
-                        produit_entrepot.last_movement_date = datetime.now()
+                        produit_entrepot.last_movement_date = self._local_now()
                         session.add(produit_entrepot)
                     else:
                         # Si l'entrée n'existe pas, la créer avec quantité négative (cas exceptionnel)
@@ -601,7 +616,7 @@ class AchatController:
                             quantity=-ligne.quantite,
                             unit_cost=ligne.prix_unitaire,
                             total_cost=-(ligne.prix_unitaire * ligne.quantite),
-                            last_movement_date=datetime.now()
+                            last_movement_date=self._local_now()
                         )
                         session.add(nouveau_produit_entrepot)
 
@@ -634,7 +649,7 @@ class AchatController:
                     if ancien_montant > 0:  # Utiliser l'ancien montant avant mise à zéro
                         # Créer une écriture d'annulation pour chaque paiement
                         journal_annulation_paiement = ComptaJournaux(
-                            date_operation=datetime.now(),
+                            date_operation=self._local_now(),
                             libelle=f"Annulation paiement - {depense.description or 'Paiement'} - Cmd {commande.numero}",
                             montant=ancien_montant,
                             type_operation="Annulation",
@@ -681,7 +696,7 @@ class AchatController:
                 # === ANNULATION DE LA COMMANDE ELLE-MÊME ===
                 if commande.montant_total > 0:
                     journal_commande_annulation = ComptaJournaux(
-                        date_operation=datetime.now(),
+                        date_operation=self._local_now(),
                         libelle=f"Annulation commande - {commande.numero}",
                         montant=commande.montant_total,
                         type_operation="Annulation",

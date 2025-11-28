@@ -25,6 +25,10 @@ class AlerteController:
         self.entreprise_id = entreprise_id
         self.db_manager = DatabaseManager()
 
+    def _local_now(self):
+        """Retourne la date/heure locale de la machine (naive datetime, sans tzinfo)."""
+        return datetime.now()
+
     def get_low_stock_alerts(self) -> List[Dict[str, Any]]:
         """
         Récupérer les alertes de stock faible
@@ -177,14 +181,14 @@ class AlerteController:
             low_count = len([a for a in low_stock if a['alert_level'] == 'low'])
             
             return {
-                'total_low_stock': len(low_stock),
-                'critical_alerts': critical_count,
-                'high_alerts': high_count,
-                'medium_alerts': medium_count,
-                'low_alerts': low_count,
-                'overstock_alerts': len(overstock),
-                'last_updated': datetime.now()
-            }
+            'total_low_stock': len(low_stock),
+            'critical_alerts': critical_count,
+            'high_alerts': high_count,
+            'medium_alerts': medium_count,
+            'low_alerts': low_count,
+            'overstock_alerts': len(overstock),
+            'last_updated': self._local_now()
+        }
                 
         except Exception as e:
             print(f"Erreur lors du calcul des statistiques: {e}")
@@ -195,7 +199,7 @@ class AlerteController:
                 'medium_alerts': 0,
                 'low_alerts': 0,
                 'overstock_alerts': 0,
-                'last_updated': datetime.now()
+                'last_updated': self._local_now()
             }
 
     def update_alert_thresholds(self, product_id: int, warehouse_id: int, 

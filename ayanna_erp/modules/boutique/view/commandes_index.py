@@ -160,7 +160,7 @@ class CommandesIndexWidget(QWidget):
         refresh_btn.clicked.connect(self.load_commandes)
         refresh_btn.setStyleSheet("QPushButton { padding: 8px 15px; }")
         
-        export_btn = QPushButton("📊 Exporter")
+        export_btn = QPushButton("📊 Export Commandes")
         export_btn.clicked.connect(self.export_commandes)
         export_btn.setStyleSheet("QPushButton { padding: 8px 15px; }")
         export_products_btn = QPushButton("📦 Export produits")
@@ -1655,6 +1655,7 @@ Notes: {notes_preview}
         try:
             import os
             from datetime import datetime
+            from collections import defaultdict
 
             from reportlab.lib.pagesizes import A4
             from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
@@ -1696,6 +1697,7 @@ Notes: {notes_preview}
             styles.add(ParagraphStyle(name='SmallInfo', fontSize=9, fontName='Helvetica', textColor="grey"))
             styles.add(ParagraphStyle(name='ReportTitle', fontSize=15, fontName='Helvetica-Bold', alignment=TA_CENTER, spaceAfter=10))
             styles.add(ParagraphStyle(name='SectionTitle', fontSize=11, fontName='Helvetica-Bold', spaceAfter=6))
+            styles.add(ParagraphStyle(name='CategoryTitle', fontSize=12, fontName='Helvetica-Bold', textColor=HexColor('#1976D2'), spaceAfter=8))
             styles.add(ParagraphStyle(name='NormalText', fontSize=9, fontName='Helvetica'))
 
             # ============================
@@ -1756,57 +1758,125 @@ Notes: {notes_preview}
                 def _fmt_local(v): return str(v)
 
             # ============================
-            # 7) Construction du tableau
+            # 7) Enrichir les produits avec les informations de catégorie
             # ============================
-            table_data = [[
-                'N°', 'Nom', 'Q. Init', 'Ajouts', 'Ajust', 'Total', 'Ventes', 'Reste', 'P.U', 'Total'
-            ]]
+            from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+            
+            # Créer un dictionnaire pour mapper les product_id aux catégories
+            product_categories = {}
+            try:
+                with self.commande_controller.db_manager.get_session() as session:
+                    # Récupérer tous les produits avec leurs catégories
+                    all_products = session.query(CoreProduct).all()
+                    for prod in all_products:
+                        print('Debug prod1:', prod.id, prod.name, prod.category_id)
+                        if prod.category_id:
+                            print('Debug prod2:', prod.id, prod.name, prod.category_id)
+                            cat = session.query(CoreProductCategory).get(prod.category_id)
+                            if cat:
+                                print('Debug prod3:', prod.id, prod.name, cat.id, cat.name)
+                                product_categories[prod.id] = {
+                                    'category_id': cat.id,
+                                    'category_name': cat.name
+                                }
+                        else:
+                            product_categories[prod.id] = {
+                                'category_id': None,
+                                'category_name': 'Sans catégorie'
+                            }
+            except Exception as e:
+                print(f"⚠️ Erreur lors de la récupération des catégories: {e}")
 
+            # Enrichir les produits avec les informations de catégorie
+            for product in products:
+                product_id = product.get('product_id')
+                if product_id and product_id in product_categories:
+                    product['category_name'] = product_categories[product_id]['category_name']
+                    product['category_id'] = product_categories[product_id]['category_id']
+                else:
+                    product['category_name'] = 'Sans catégorie'
+                    product['category_id'] = None
+
+            # ============================
+            # 8) Grouper les produits par catégorie
+            # ============================
+            products_by_category = defaultdict(list)
+            for product in products:
+                category_name = product.get('category_name', 'Sans catégorie')
+                products_by_category[category_name].append(product)
+
+            # Trier les catégories par nom
+            sorted_categories = sorted(products_by_category.keys())
+
+            # ============================
+            # 9) Construction des tableaux par catégorie
+            # ============================
             total_general = 0
-
-            for row in products:
-                total_general += row.get('total', 0)
-                # Total après ajustement = Q. Initiale + Ajouts + Ajustements
-                total_apres_ajust = row.get('initial_quantity', 0) + row.get('quantity_added', 0) + row.get('adjustments', 0)
-                
-                table_data.append([
-                    row.get('no', ''),
-                    row.get('name', ''),
-                    f"{row.get('initial_quantity', 0):.0f}",
-                    f"{row.get('quantity_added', 0):.0f}",
-                    f"{row.get('adjustments', 0):.0f}",
-                    f"{total_apres_ajust:.0f}",
-                    f"{row.get('sold', 0):.0f}",
-                    f"{row.get('final_quantity', 0):.0f}",
-                    _fmt_local(row.get('unit_price', 0)),
-                    _fmt_local(row.get('total', 0))
-                ])
-
             col_widths = [0.7*cm, 3.8*cm, 1.4*cm, 1.2*cm, 1.4*cm, 1.5*cm, 1.2*cm, 1.3*cm, 1.6*cm, 2*cm]
 
-            tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
-            tbl.setStyle(TableStyle([
-                ('BACKGROUND', (0,0), (-1,0), HexColor('#2C3E50')),
-                ('TEXTCOLOR', (0,0), (-1,0), white),
-                ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
-                ('ALIGN', (0,0), (-1,0), 'CENTER'),
-                ('GRID', (0,0), (-1,-1), 0.4, black),
-                ('FONTSIZE', (0,0), (-1,-1), 7),
-                ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
-                ('ALIGN', (2,1), (9,-1), 'RIGHT'),
-            ]))
+            for category_name in sorted_categories:
+                category_products = products_by_category[category_name]
+                
+                # Titre de la catégorie
+                elements.append(Paragraph(f"📦 {category_name}", styles['CategoryTitle']))
+                elements.append(Spacer(1, 0.3*cm))
+                
+                # En-tête du tableau
+                table_data = [[
+                    'N°', 'Nom', 'Q. Init', 'Ajouts', 'Ajust', 'Total', 'Ventes', 'Reste', 'P.U', 'Total'
+                ]]
 
-            elements.append(tbl)
-            elements.append(Spacer(1, 0.5*cm))
+                # Total de la catégorie
+                total_category = 0
+                
+                # Ajouter les produits de la catégorie
+                for row in category_products:
+                    total_category += row.get('total', 0)
+                    total_general += row.get('total', 0)
+                    # Total après ajustement = Q. Initiale + Ajouts + Ajustements
+                    total_apres_ajust = row.get('initial_quantity', 0) + row.get('quantity_added', 0) + row.get('adjustments', 0)
+                    
+                    table_data.append([
+                        row.get('no', ''),
+                        row.get('name', ''),
+                        f"{row.get('initial_quantity', 0):.0f}",
+                        f"{row.get('quantity_added', 0):.0f}",
+                        f"{row.get('adjustments', 0):.0f}",
+                        f"{total_apres_ajust:.0f}",
+                        f"{row.get('sold', 0):.0f}",
+                        f"{row.get('final_quantity', 0):.0f}",
+                        _fmt_local(row.get('unit_price', 0)),
+                        _fmt_local(row.get('total', 0))
+                    ])
+
+                # Créer le tableau
+                tbl = Table(table_data, colWidths=col_widths, repeatRows=1)
+                tbl.setStyle(TableStyle([
+                    ('BACKGROUND', (0,0), (-1,0), HexColor('#2C3E50')),
+                    ('TEXTCOLOR', (0,0), (-1,0), white),
+                    ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+                    ('ALIGN', (0,0), (-1,0), 'CENTER'),
+                    ('GRID', (0,0), (-1,-1), 0.4, black),
+                    ('FONTSIZE', (0,0), (-1,-1), 7),
+                    ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                    ('ALIGN', (2,1), (9,-1), 'RIGHT'),
+                ]))
+
+                elements.append(tbl)
+                
+                # Sous-total de la catégorie
+                elements.append(Spacer(1, 0.3*cm))
+                elements.append(Paragraph(f"<b>Sous-total {category_name}:</b> {_fmt_local(total_category)}", styles['NormalText']))
+                elements.append(Spacer(1, 0.5*cm))
 
             # ============================
-            # 8) Total général des ventes
+            # 10) Total général des ventes
             # ============================
-            elements.append(Paragraph("<b>TOTAL DES VENTES :</b> " + _fmt_local(total_general), styles['SectionTitle']))
+            elements.append(Paragraph("<b>TOTAL GÉNÉRAL DES VENTES :</b> " + _fmt_local(total_general), styles['SectionTitle']))
             elements.append(Spacer(1, 0.6*cm))
 
             # ============================
-            # 9) Pied de page
+            # 11) Pied de page
             # ============================
             elements.append(Paragraph(
                 f"Developed by Ayanna ERP © le {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}",
@@ -1814,7 +1884,7 @@ Notes: {notes_preview}
             ))
 
             # ============================
-            # 10) Génération
+            # 12) Génération
             # ============================
             doc.build(elements)
 

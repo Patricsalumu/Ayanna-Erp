@@ -26,6 +26,10 @@ class InventaireController:
         self.entreprise_id = entreprise_id
         self.db_manager = DatabaseManager()
 
+    def _local_now(self):
+        """Retourne la date/heure locale de la machine (naive datetime, sans tzinfo)."""
+        return datetime.now()
+
     def get_warehouses_for_inventory(self) -> List[Dict[str, Any]]:
         """
         Récupérer les entrepôts disponibles pour l'inventaire
@@ -169,7 +173,7 @@ class InventaireController:
         """
         try:
             # Générer un ID simple (timestamp-based) et une référence lisible
-            reference = f"INV-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+            reference = f"INV-{self._local_now().strftime('%Y%m%d%H%M%S')}"
 
             warehouse_id = inventory_data.get('warehouse_id')
 
@@ -216,6 +220,8 @@ class InventaireController:
                 include_zero_stock=bool(inventory_data.get('include_zero_stock')),
                 auto_freeze_stock=bool(inventory_data.get('auto_freeze_stock')),
                 send_notifications=bool(inventory_data.get('send_notifications'))
+                ,
+                created_at=self._local_now()
             )
             
             session.add(inventory)
@@ -320,7 +326,7 @@ class InventaireController:
                     item.variance_value = float(item.variance) * float(item.unit_cost)
                     item.variance_value_sale = float(item.variance) * price_map.get(pid, 0.0)
                     item.notes = cd.get('notes', '')
-                    item.counted_at = datetime.now()
+                    item.counted_at = self._local_now()
             
             # Recalculer les statistiques de l'inventaire
             items = session.query(StockInventaireItem).filter(
@@ -431,14 +437,16 @@ class InventaireController:
                         total_cost=item.variance_value,
                         reference=f"INV-{inventory.reference}",
                         description=f"Ajustement inventaire {inventory.session_name}",
-                        user_name=performed_by
+                        user_name=performed_by,
+                        movement_date=self._local_now(),
+                        created_at=self._local_now()
                     )
                     session.add(movement)
                     
                     # Mettre à jour le stock
                     product_warehouse.quantity += item.variance
                     product_warehouse.total_cost = product_warehouse.quantity * product_warehouse.unit_cost
-                    product_warehouse.last_movement_date = datetime.now()
+                    product_warehouse.last_movement_date = self._local_now()
 
             # Comptabiliser la variation totale (création d'une écriture comptable)
             try:
@@ -469,7 +477,7 @@ class InventaireController:
                     # Préparer le journal
                     user_id = inventory.completed_by or inventory.created_by or 1
                     journal = JournalComptable(
-                        date_operation=datetime.now(),
+                        date_operation=self._local_now(),
                         libelle=f"Ajustement inventaire {inventory.reference}",
                         montant=montant,
                         type_operation="inventaire",
@@ -505,7 +513,7 @@ class InventaireController:
             
             # Marquer comme complété
             inventory.status = 'COMPLETED'
-            inventory.completed_date = datetime.now()
+            inventory.completed_date = self._local_now()
             inventory.completed_by_name = performed_by
 
             # Retourner un message d'avertissement si la comptabilisation n'a pas été faite

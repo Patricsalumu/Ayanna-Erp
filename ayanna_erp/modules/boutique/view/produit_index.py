@@ -18,6 +18,7 @@ from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
 from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ayanna_erp.core.utils.image_utils import ImageUtils
 import os
 import shutil
 from datetime import datetime
@@ -1213,23 +1214,21 @@ class ProductFormDialog(QDialog):
             return None
         
         try:
-            # Créer le dossier des images s'il n'existe pas
+            # Sauvegarder de façon persistante via ImageUtils.
+            # Retourner le chemin absolu du fichier enregistré (persistant en-dehors du bundle)
+            saved = ImageUtils.save_uploaded_image(image_path)
+            if saved:
+                return saved
+            # Fallback : copier dans le projet si la sauvegarde persistante a échoué
             project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
             images_dir = os.path.join(project_root, "data", "images", "produits")
             os.makedirs(images_dir, exist_ok=True)
-            
-            # Générer un nom unique pour l'image
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             file_extension = os.path.splitext(image_path)[1]
             unique_filename = f"produit_{timestamp}{file_extension}"
-            
-            # Copier l'image
             destination_path = os.path.join(images_dir, unique_filename)
             shutil.copy2(image_path, destination_path)
-            
-            # Retourner le chemin relatif
-            relative_path = os.path.join("data", "images", "produits", unique_filename)
-            return relative_path.replace("\\", "/")  # Utiliser des slashes Unix pour la compatibilité
+            return os.path.abspath(destination_path)
             
         except Exception as e:
             print(f"❌ Erreur lors de la copie de l'image: {e}")

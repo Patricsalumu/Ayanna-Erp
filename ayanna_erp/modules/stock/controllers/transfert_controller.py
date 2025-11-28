@@ -25,6 +25,10 @@ class TransfertController:
         self.entreprise_id = entreprise_id
         self.db_manager = DatabaseManager()
 
+    def _local_now(self):
+        """Retourne la date/heure locale de la machine (naive datetime, sans tzinfo)."""
+        return datetime.now()
+
     def get_warehouses_for_transfer(self) -> List[Dict[str, Any]]:
         """
         Récupérer les entrepôts disponibles pour les transferts
@@ -144,7 +148,7 @@ class TransfertController:
                     'source_warehouse_id': transfer_data.get('source_warehouse_id'),
                     'destination_warehouse_id': transfer_data.get('destination_warehouse_id'),
                     'status': 'pending',
-                    'created_date': datetime.now(),
+                    'created_date': self._local_now(),
                     'notes': transfer_data.get('notes', ''),
                     'items': []
                 }

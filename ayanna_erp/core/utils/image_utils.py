@@ -3,7 +3,11 @@ Utilitaires pour la gestion des images et des logos
 """
 
 import os
+import sys
+import shutil
+import time
 import base64
+from pathlib import Path
 from PIL import Image
 from io import BytesIO
 
@@ -211,4 +215,57 @@ class ImageUtils:
                 
         except Exception as e:
             print(f"Erreur lors de la création de miniature: {e}")
+            return None
+
+    @staticmethod
+    def get_persistent_images_dir(app_name: str = 'Ayanna ERP') -> str:
+        """
+        Retourne le chemin vers un dossier persistant pour stocker les images utilisateurs.
+        Sur Windows on utilise LOCALAPPDATA, sinon on tombe back sur le dossier utilisateur.
+        """
+        try:
+            if getattr(sys, 'frozen', False):
+                # Application empaquetée (PyInstaller)
+                base = os.getenv('LOCALAPPDATA') or os.path.expanduser('~')
+            else:
+                # En développement, utiliser le dossier data du projet pour faciliter les tests
+                base = os.path.join(os.getcwd())
+
+            images_dir = Path(base) / app_name / 'images' / 'produits'
+            images_dir.mkdir(parents=True, exist_ok=True)
+            return str(images_dir)
+        except Exception as e:
+            print(f"Erreur get_persistent_images_dir: {e}")
+            # Fallback: dossier temporaire dans le répertoire utilisateur
+            fallback = Path(os.path.expanduser('~')) / app_name / 'images' / 'produits'
+            fallback.mkdir(parents=True, exist_ok=True)
+            return str(fallback)
+
+    @staticmethod
+    def save_uploaded_image(src_path: str, filename: str = None) -> str:
+        """
+        Sauvegarde une image uploadée de façon persistante et retourne le chemin absolu.
+
+        Args:
+            src_path: chemin vers le fichier source (fichier choisi par l'utilisateur)
+            filename: optionnel, nom de fichier souhaité. Si None, un nom unique est généré.
+
+        Returns:
+            str: chemin absolu du fichier enregistré, ou None en cas d'erreur
+        """
+        try:
+            if not src_path or not os.path.exists(src_path):
+                return None
+
+            dest_dir = Path(ImageUtils.get_persistent_images_dir())
+            if not filename:
+                timestamp = int(time.time())
+                filename = f"produit_{timestamp}{Path(src_path).suffix}"
+
+            dest_path = dest_dir / filename
+            # Copier le fichier (préserver metadata)
+            shutil.copy2(src_path, str(dest_path))
+            return str(dest_path)
+        except Exception as e:
+            print(f"Erreur save_uploaded_image: {e}")
             return None
