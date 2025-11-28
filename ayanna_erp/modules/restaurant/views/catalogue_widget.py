@@ -14,6 +14,8 @@ from ayanna_erp.database.database_manager import get_database_manager, User
 from sqlalchemy import text
 from ayanna_erp.utils.formatting import format_amount, get_currency
 import os
+import platform
+import subprocess
 
 
 class CatalogueWidget(QWidget):
@@ -1431,11 +1433,43 @@ class CatalogueWidget(QWidget):
                         except Exception:
                             QMessageBox.information(self, 'Addition générée', f'Addition enregistrée: {filename}')
                     elif clicked is print_btn:
-                        # attempt to print using the OS verb 'print' (Windows). Note: may send to default printer
+                        system = platform.system()
                         try:
-                            os.startfile(filename, 'print')
-                        except Exception:
-                            QMessageBox.information(self, 'Impression', 'Impossible de lancer l\'impression automatique. Le fichier est enregistré: ' + filename)
+                            if system == "Windows":
+                                # Essaye d'abord l'impression via os.startfile
+                                try:
+                                    os.startfile(filename, "print")
+                                    return
+                                except Exception:
+                                    pass
+
+                                # Si os.startfile échoue, tente via Adobe Reader (si installé)
+                                acrobat_paths = [
+                                    r"C:\Program Files\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe",
+                                    r"C:\Program Files (x86)\Adobe\Acrobat Reader DC\Reader\AcroRd32.exe"
+                                ]
+
+                                for path in acrobat_paths:
+                                    if os.path.exists(path):
+                                        subprocess.Popen([path, "/p", filename])
+                                        return
+
+                                raise Exception("Aucun moyen d'imprimer sous Windows")
+
+                            elif system == "Darwin":  # macOS
+                                subprocess.run(["lp", filename], check=True)
+
+                            elif system == "Linux":
+                                subprocess.run(["lp", filename], check=True)
+
+                            else:
+                                raise Exception("OS non supporté")
+
+                        except Exception as e:
+                            QMessageBox.information(self, "Impression",
+                                                    "Impossible d'imprimer automatiquement.\n"
+                                                    "Fichier enregistré : " + filename + "\n\n"
+                                                    "Cause : " + str(e))
                     else:
                         # cancelled
                         pass
