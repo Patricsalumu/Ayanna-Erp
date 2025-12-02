@@ -94,24 +94,16 @@ class DepenseDialog(QDialog):
         self.compte_combo = QComboBox()
         self.compte_combo.setPlaceholderText("Sélectionner un compte de charges...")
         form_layout.addRow("Compte de charges *:", self.compte_combo)
+
+        # Compte financier (pour transférer / choisir caisse/banque)
+        self.compte_financier_combo = QComboBox()
+        self.compte_financier_combo.setPlaceholderText("Sélectionner un compte financier (caisse/banque)...")
+        form_layout.addRow("Compte financier:", self.compte_financier_combo)
         
         # (Catégorie removed to simplify the expense flow)
         
-        # Fournisseur (nouveau)
-        self.fournisseur_edit = QLineEdit()
-        self.fournisseur_edit.setPlaceholderText("Nom du fournisseur (optionnel)")
-        form_layout.addRow("Fournisseur:", self.fournisseur_edit)
-        
-        # Numéro de facture (nouveau)
-        self.facture_edit = QLineEdit()
-        self.facture_edit.setPlaceholderText("Numéro de facture (optionnel)")
-        form_layout.addRow("N° Facture:", self.facture_edit)
-        
-        # Description
-        self.description_edit = QTextEdit()
-        self.description_edit.setMaximumHeight(80)
-        self.description_edit.setPlaceholderText("Description détaillée (optionnel)")
-        form_layout.addRow("Description:", self.description_edit)
+        # Compte financier (pour transférer / choisir caisse/banque)
+        # (déjà ajouté plus bas)
         
         layout.addWidget(form_group)
         
@@ -160,20 +152,31 @@ class DepenseDialog(QDialog):
             enterprise_id = SessionManager.get_current_enterprise_id() or 1
             
             # Récupérer les comptes de classe 6 (charges) filtrés par entreprise
-            comptes = session.query(ComptaComptes)\
-                .join(ComptaClasses)\
-                .filter(ComptaClasses.code.like('6%'))\
-                .filter(ComptaClasses.enterprise_id == enterprise_id)\
-                .filter(ComptaComptes.actif == True)\
-                .order_by(ComptaComptes.numero)\
-                .all()
-            
+            from sqlalchemy import or_
+            comptes = session.query(ComptaComptes).join(ComptaClasses).filter(
+                or_(ComptaClasses.code.like('6%'), ComptaClasses.code.like('5%')),
+                ComptaClasses.enterprise_id == enterprise_id,
+                ComptaComptes.actif == True
+            ).order_by(ComptaComptes.numero).all()
+
             self.comptes_charges = comptes
             self.compte_combo.clear()
-            
             for compte in comptes:
                 display_text = f"{compte.numero} - {compte.nom}"
                 self.compte_combo.addItem(display_text, compte.id)
+
+            # Récupérer aussi les comptes financiers (classe 5) pour permettre transferts entre comptes
+            comptes_financiers = session.query(ComptaComptes).join(ComptaClasses).filter(
+                ComptaClasses.code.like('5%'),
+                ComptaClasses.enterprise_id == enterprise_id,
+                ComptaComptes.actif == True
+            ).order_by(ComptaComptes.numero).all()
+
+            self.compte_financier_combo.clear()
+            # Ajouter une option vide par défaut (aucun)
+            self.compte_financier_combo.addItem('-- Aucun --', None)
+            for c in comptes_financiers:
+                self.compte_financier_combo.addItem(f"{c.numero} - {c.nom}", c.id)
             
             session.close()
             print(f"✅ {len(comptes)} comptes de charges chargés pour l'entreprise {enterprise_id}")
@@ -192,18 +195,25 @@ class DepenseDialog(QDialog):
         if self.compte_combo.currentIndex() == -1:
             QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un compte de charges.")
             return
+        # Bloquer si aucun compte financier (contrepartie) sélectionné
+        if hasattr(self, 'compte_financier_combo'):
+            # index 0 est '-- Aucun --' ajouté par défaut
+            if self.compte_financier_combo.currentIndex() <= 0 or self.compte_financier_combo.currentData() is None:
+                QMessageBox.warning(self, "Erreur", "Veuillez sélectionner un compte financier (caisse/banque) pour la contrepartie.")
+                return
         self.accept()
     
     def get_data(self):
         selected_compte_id = self.compte_combo.currentData() if self.compte_combo.currentIndex() != -1 else None
-        
+        selected_financier_id = None
+        if hasattr(self, 'compte_financier_combo') and self.compte_financier_combo.currentIndex() != -1:
+            selected_financier_id = self.compte_financier_combo.currentData()
+
         return {
             'libelle': self.libelle_edit.text().strip(),
             'montant': self.montant_spinbox.value(),
             'compte_id': selected_compte_id,
-            'fournisseur': self.fournisseur_edit.text().strip() or None,
-            'facture': self.facture_edit.text().strip() or None,
-            'description': self.description_edit.toPlainText().strip()
+            'compte_financier_id': selected_financier_id
         }
 
 
@@ -225,6 +235,8 @@ class EntreeSortieIndex(QWidget):
         self.expense_controller = EntreSortieController(pos_id=pos_id)
         
         self.setup_ui()
+        # Charger la liste des comptes financiers pour le filtre
+        self.load_financial_accounts()
         self.load_journal_data()
     
     def get_currency_symbol(self):
@@ -408,6 +420,13 @@ class EntreeSortieIndex(QWidget):
             }
         """)
         filters_layout.addWidget(self.search_edit)
+
+        # Filtre par compte financier (classe 5)
+        filters_layout.addWidget(QLabel("Compte financier:"))
+        self.financial_account_combo = QComboBox()
+        self.financial_account_combo.setPlaceholderText("Tous les comptes financiers")
+        self.financial_account_combo.setStyleSheet(self.type_filter.styleSheet())
+        filters_layout.addWidget(self.financial_account_combo)
         
         layout.addWidget(filters_group)
         
@@ -523,6 +542,62 @@ class EntreeSortieIndex(QWidget):
         self.date_fin_filter.dateChanged.connect(self.filter_journal)
         self.type_filter.currentTextChanged.connect(self.filter_journal)
         self.search_edit.textChanged.connect(self.filter_journal)
+        # Signaux pour le filtre compte financier
+        if hasattr(self, 'financial_account_combo'):
+            self.financial_account_combo.currentIndexChanged.connect(self.load_journal_data)
+
+    def load_financial_accounts(self):
+        """Charger les comptes financiers (classe 5) pour le filtre"""
+        try:
+            from ayanna_erp.database.database_manager import DatabaseManager
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
+            from ayanna_erp.core.session_manager import SessionManager
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaConfig
+
+            db_manager = DatabaseManager()
+            session = db_manager.get_session()
+
+            enterprise_id = SessionManager.get_current_enterprise_id() or 1
+
+            comptes = session.query(ComptaComptes)
+            comptes = comptes.join(ComptaClasses)
+            comptes = comptes.filter(ComptaClasses.code.like('5%'))
+            comptes = comptes.filter(ComptaClasses.enterprise_id == enterprise_id)
+            comptes = comptes.filter(ComptaComptes.actif == True)
+            comptes = comptes.order_by(ComptaComptes.numero).all()
+
+            self.financial_account_combo.clear()
+            # Ajouter une option 'Tous' (None) en première position
+            self.financial_account_combo.addItem("-- Tous --", None)
+            for c in comptes:
+                self.financial_account_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+
+            # Déterminer le compte caisse configuré pour le POS courant et le sélectionner par défaut
+            try:
+                pos_id = getattr(self.main_controller, 'pos_id', None) or 1
+                config = session.query(ComptaConfig).filter_by(pos_id=pos_id).first()
+                default_id = None
+                if config and getattr(config, 'compte_caisse_id', None):
+                    default_id = config.compte_caisse_id
+
+                # Trouver l'index du compte par id
+                if default_id:
+                    index_to_select = -1
+                    for i in range(self.financial_account_combo.count()):
+                        if self.financial_account_combo.itemData(i) == default_id:
+                            index_to_select = i
+                            break
+                    if index_to_select >= 0:
+                        self.financial_account_combo.setCurrentIndex(index_to_select)
+
+            except Exception as _:
+                pass
+
+            session.close()
+            print(f"✅ {len(comptes)} comptes financiers chargés pour l'entreprise {enterprise_id}")
+
+        except Exception as e:
+            print(f"Erreur chargement comptes financiers: {e}")
 
     def on_journal_row_double_clicked(self, row, column):
         """
@@ -603,6 +678,21 @@ class EntreeSortieIndex(QWidget):
             
             # Initialiser la liste des données
             self.journal_data = []
+
+            # Si un compte financier est sélectionné (différent de -- Tous --), charger ses écritures comptables
+            try:
+                if hasattr(self, 'financial_account_combo') and self.financial_account_combo.currentIndex() > 0:
+                    selected_account_id = self.financial_account_combo.currentData()
+                    if selected_account_id:
+                        pos_id = getattr(self.main_controller, 'pos_id', 1)
+                        entre_sortie_controller = EntreSortieController(pos_id=pos_id)
+                        entries = entre_sortie_controller.load_account_journal(selected_account_id, start_date, end_date)
+                        self.journal_data = entries or []
+                        self.journal_data.sort(key=lambda x: x['datetime'], reverse=True)
+                        self.update_journal_display()
+                        return
+            except Exception as e:
+                print(f"Erreur filtre compte financier: {e}")
             
             # Charger les sorties (dépenses) depuis event_expenses
             try:

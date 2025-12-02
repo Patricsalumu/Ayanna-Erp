@@ -1,6 +1,6 @@
 """
 Contrôleur pour la gestion des entrées et sorties de caisse du module Salle de Fête
-Gère les dépenses avec intégration comptable automatique
+Gère les dépenses avec integration comptable automatique
 """
 
 import sys
@@ -104,37 +104,50 @@ class EntreSortieController(QObject):
                 session.add(journal)
                 session.flush()  # Pour avoir l'id du journal
 
-                # Récupérer les comptes configurés
-                compte_debit = session.query(CompteComptable).filter(CompteComptable.id == expense_data.get('compte_id')).first()
-                if not compte_debit:
-                    raise Exception("Le compte de charges sélectionné n'existe pas ou n'est pas actif.")
+                # Nouveau comportement déterministe :
+                # - Le compte sélectionné dans le combo 'compte_id' est toujours considéré comme le compte
+                #   de charge (débit).
+                # - Le compte financier sélectionné dans 'compte_financier_id' est utilisé comme contrepartie (crédit).
+                #   Si absent, on utilise le compte caisse configuré dans ComptaConfig en fallback.
+                compte_selected = session.query(CompteComptable).filter(CompteComptable.id == expense_data.get('compte_id')).first()
+                if not compte_selected:
+                    raise Exception("Le compte sélectionné n'existe pas ou n'est pas actif.")
 
-                compte_credit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
-                if not compte_credit:
-                    raise Exception("Le compte caisse configuré n'existe pas ou n'est pas actif.")
+                compte_financier_id = expense_data.get('compte_financier_id')
+                compte_financier = None
+                if compte_financier_id:
+                    compte_financier = session.query(CompteComptable).filter(CompteComptable.id == compte_financier_id).first()
 
-                # Créer l'écriture comptable de débit (charge augmente)
+                # Débit : compte_selected
                 ecriture_debit = EcritureComptable(
                     journal_id=journal.id,
-                    compte_comptable_id=compte_debit.id,
+                    compte_comptable_id=compte_selected.id,
                     debit=expense.amount,
                     credit=0,
                     ordre=1,
                     libelle=f"Dépense - {expense.description}"
                 )
                 session.add(ecriture_debit)
-                
-                # Créer l'écriture comptable de crédit (caisse diminue)
+
+                # Crédit : compte_financier if provided else config.compte_caisse_id else fallback to compte_selected
+                credit_account = None
+                if compte_financier:
+                    credit_account = compte_financier
+                elif config and getattr(config, 'compte_caisse_id', None):
+                    credit_account = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
+                else:
+                    credit_account = compte_selected
+
                 ecriture_credit = EcritureComptable(
                     journal_id=journal.id,
-                    compte_comptable_id=compte_credit.id,
+                    compte_comptable_id=credit_account.id,
                     debit=0,
                     credit=expense.amount,
                     ordre=2,
-                    libelle=f"Sortie caisse - {expense.description}"
+                    libelle=f"Sortie - {expense.description}"
                 )
                 session.add(ecriture_credit)
-                print(f"📊 Écritures comptables créées: Débit {compte_debit.numero} / Crédit {compte_credit.numero}")
+                print(f"📊 Écritures comptables créées: Débit {compte_selected.numero} / Crédit {credit_account.numero}")
                 
             session.commit()
             session.refresh(expense)
@@ -212,6 +225,84 @@ class EntreSortieController(QObject):
             self.error_occurred.emit(error_msg)
             return []
             
+        finally:
+            db_manager.close_session()
+
+    def load_account_journal(self, account_id, date_from=None, date_to=None):
+        """
+        Charger les écritures comptables liées à un compte (id) sur une plage de dates.
+        Retourne une liste d'entrées mappées pour l'interface: debit -> Entrée, credit -> Sortie
+        Chaque entrée est un dict contenant : id, datetime, type, libelle, categorie, montant_entree, montant_sortie, utilisateur, description
+        """
+        try:
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaEcritures as EcritureComptable,
+                ComptaJournaux as JournalComptable,
+                ComptaComptes as CompteComptable
+            )
+
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+
+            # Construire bornes temporelles si fournies
+            start_dt = None
+            end_dt = None
+            if date_from:
+                if isinstance(date_from, datetime):
+                    start_dt = date_from
+                else:
+                    start_dt = datetime.combine(date_from, datetime.min.time())
+            if date_to:
+                if isinstance(date_to, datetime):
+                    end_dt = date_to
+                else:
+                    end_dt = datetime.combine(date_to, datetime.max.time())
+
+            # Requête des écritures pour ce compte
+            query = session.query(EcritureComptable).filter(
+                EcritureComptable.compte_comptable_id == account_id
+            )
+
+            # Joindre sur le journal si on veut filtrer par date_operation
+            query = query.join(JournalComptable, EcritureComptable.journal_id == JournalComptable.id)
+
+            if start_dt:
+                query = query.filter(JournalComptable.date_operation >= start_dt)
+            if end_dt:
+                query = query.filter(JournalComptable.date_operation <= end_dt)
+
+            query = query.order_by(JournalComptable.date_operation.desc(), EcritureComptable.ordre)
+
+            lines = query.all()
+
+            results = []
+            for line in lines:
+                # Charger le journal parent pour obtenir la date et la référence
+                journal = session.query(JournalComptable).filter(JournalComptable.id == line.journal_id).first()
+                dt = getattr(journal, 'date_operation', None) or getattr(line, 'created_at', None) or datetime.now()
+
+                montant_entree = float(line.debit or 0)
+                montant_sortie = float(line.credit or 0)
+
+                entry = {
+                    'id': f'EC_{line.id}',
+                    'datetime': dt,
+                    'type': 'Entrée' if montant_entree > 0 else ('Sortie' if montant_sortie > 0 else 'Neutre'),
+                    'libelle': line.libelle or (journal.libelle if journal else ''),
+                    'categorie': getattr(journal, 'type_operation', '') if journal else '',
+                    'montant_entree': montant_entree,
+                    'montant_sortie': montant_sortie,
+                    'utilisateur': getattr(journal, 'user_id', None) if journal else None,
+                    'description': getattr(journal, 'description', '') if journal else ''
+                }
+                results.append(entry)
+
+            return results
+
+        except Exception as e:
+            print(f"Erreur lors du chargement des écritures comptables pour le compte {account_id}: {e}")
+            return []
+
         finally:
             db_manager.close_session()
             
