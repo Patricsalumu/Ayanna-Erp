@@ -233,6 +233,11 @@ class EntreeSortieIndex(QWidget):
         from ayanna_erp.modules.salle_fete.controller.entre_sortie_controller import EntreSortieController
         pos_id = getattr(main_controller, 'pos_id', 1)
         self.expense_controller = EntreSortieController(pos_id=pos_id)
+        # Connecter le signal d'erreur du contrôleur à un affichage utilisateur convivial
+        try:
+            self.expense_controller.error_occurred.connect(lambda msg: QMessageBox.critical(self, 'Erreur', str(msg)))
+        except Exception:
+            pass
         
         self.setup_ui()
         # Charger la liste des comptes financiers pour le filtre
@@ -529,6 +534,19 @@ class EntreeSortieIndex(QWidget):
         stats_layout.addWidget(self.total_entrees_label)
         stats_layout.addWidget(self.total_sorties_label)
         stats_layout.addWidget(self.solde_label)
+        # Solde global du compte financier (si un compte est sélectionné)
+        self.global_balance_label = QLabel("")
+        self.global_balance_label.setStyleSheet("""
+            QLabel {
+                background-color: #34495E;
+                color: white;
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 13px;
+            }
+        """)
+        stats_layout.addWidget(self.global_balance_label)
         
         layout.addWidget(stats_group)
         
@@ -613,6 +631,15 @@ class EntreeSortieIndex(QWidget):
             entry = filtered[row]
             entry_id = entry.get('id')
 
+            # Désactiver le double-clic pour les lignes de type 'Entrée' (UI-side)
+            try:
+                entry_type = (entry.get('type') or '').strip().lower()
+                if entry_type in ('entrée', 'entree'):
+                    QMessageBox.information(self, "Action désactivée", "La suppression via double‑clic est désactivée pour les opérations de type 'Entrée'.")
+                    return
+            except Exception:
+                pass
+
             # Traiter les différents types d'entrées :
             # - Dépenses internes : id 'EXP_<id>' -> annulation via cancel_expense
             # - Écritures comptables : id 'EC_<id>' -> annulation via cancel_accounting_entry
@@ -626,16 +653,21 @@ class EntreeSortieIndex(QWidget):
                 except Exception:
                     return
 
-                # Confirmation
-                ok = False
-                reason = ''
-                reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
-                if not ok:
-                    reply = QMessageBox.question(self, 'Annuler la dépense',
-                                                 f"Voulez-vous annuler la dépense #{expense_id} ?\nCette opération créera une écriture d'annulation.",
-                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                    if reply != QMessageBox.StandardButton.Yes:
-                        return
+                # Demander une raison optionnelle (champ libre)
+                reason, _ = QInputDialog.getText(self, 'Raison de suppression (optionnel)', 'Veuillez indiquer une raison pour la suppression (optionnel):')
+
+                # Confirmation explicite avant suppression définitive
+                confirm_msg = (
+                    f"Vous êtes sur le point de SUPPRIMER DÉFINITIVEMENT la dépense #{expense_id}.\n\n"
+                    "Cette opération supprimera la dépense métier ainsi que le journal comptable associé et toutes ses écritures."
+                    "\n\nCette action est IRRÉVERSIBLE. Voulez-vous continuer ?"
+                )
+
+                reply = QMessageBox.question(self, 'Confirmer la suppression définitive', confirm_msg,
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                             QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
                 # Déterminer user_id
                 user_id = None
@@ -644,12 +676,14 @@ class EntreeSortieIndex(QWidget):
                 except Exception:
                     user_id = 1
 
-                result = self.expense_controller.cancel_expense(expense_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
+                # Appeler la suppression (méthode supprimant dépense + journal + écritures)
+                reason_text = reason.strip() if isinstance(reason, str) and reason.strip() else f"Supprimé depuis l'interface par utilisateur {user_id}"
+                result = self.expense_controller.cancel_expense(expense_id, user_id=user_id, reason=reason_text)
                 if result:
-                    QMessageBox.information(self, 'Annulation effectuée', f"La dépense #{expense_id} a été annulée et les écritures inverses enregistrées.")
+                    QMessageBox.information(self, 'Suppression effectuée', f"La dépense #{expense_id} et les écritures/journal associés ont été supprimés.")
                     self.load_journal_data()
                 else:
-                    QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la dépense #{expense_id}. Voir logs.")
+                    QMessageBox.critical(self, 'Erreur', f"Impossible de supprimer la dépense #{expense_id}. Voir logs.")
                 return
 
             # Écritures comptables
@@ -659,16 +693,21 @@ class EntreeSortieIndex(QWidget):
                 except Exception:
                     return
 
-                # Confirmation
-                ok = False
-                reason = ''
-                reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
-                if not ok:
-                    reply = QMessageBox.question(self, 'Annuler écriture',
-                                                 f"Voulez-vous annuler l\'écriture comptable #{ecr_id} ?\nCette opération créera un journal d'annulation.",
-                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                    if reply != QMessageBox.StandardButton.Yes:
-                        return
+                # Demander une raison optionnelle pour la suppression
+                reason, _ = QInputDialog.getText(self, 'Raison suppression (optionnel)', 'Veuillez indiquer une raison pour la suppression (optionnel):')
+
+                # Confirmation explicite avant suppression définitive
+                confirm_msg = (
+                    f"Vous êtes sur le point de SUPPRIMER DÉFINITIVEMENT l\'écriture comptable #{ecr_id}.\n\n"
+                    "Cette opération supprimera le journal comptable associé et toutes ses écritures."
+                    "\n\nCette action est IRRÉVERSIBLE. Voulez-vous continuer ?"
+                )
+
+                reply = QMessageBox.question(self, 'Confirmer la suppression définitive', confirm_msg,
+                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                             QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
+                    return
 
                 user_id = None
                 try:
@@ -676,12 +715,20 @@ class EntreeSortieIndex(QWidget):
                 except Exception:
                     user_id = 1
 
-                result = self.expense_controller.cancel_accounting_entry(ecr_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
+                # Appeler suppression définitive du journal et écritures
+                reason_text = reason.strip() if isinstance(reason, str) and reason.strip() else f"Supprimé depuis l'interface par utilisateur {user_id}"
+                # Utilise la nouvelle méthode delete_accounting_entry si disponible
+                try:
+                    result = self.expense_controller.delete_accounting_entry(ecr_id, user_id=user_id, reason=reason_text)
+                except Exception:
+                    # Fallback vers l'annulation par création de journal inverse si la suppression n'existe pas
+                    result = self.expense_controller.cancel_accounting_entry(ecr_id, user_id=user_id, reason=reason_text)
+
                 if result:
-                    QMessageBox.information(self, 'Annulation effectuée', f"L\'écriture comptable #{ecr_id} a été annulée et les écritures inverses enregistrées.")
+                    QMessageBox.information(self, 'Suppression effectuée', f"L\'écriture comptable #{ecr_id} et le journal associé ont été supprimés.")
                     self.load_journal_data()
                 else:
-                    QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler l\'écriture #{ecr_id}. Voir logs.")
+                    QMessageBox.critical(self, 'Erreur', f"Impossible de supprimer l\'écriture #{ecr_id}. Voir logs.")
                 return
 
         except Exception as e:
@@ -712,6 +759,11 @@ class EntreeSortieIndex(QWidget):
             
             # Initialiser la liste des données
             self.journal_data = []
+            # Réinitialiser l'affichage du solde global par défaut
+            try:
+                self.global_balance_label.setText("")
+            except Exception:
+                pass
 
             # Si un compte financier est sélectionné (différent de -- Tous --), charger ses écritures comptables
             try:
@@ -724,6 +776,15 @@ class EntreeSortieIndex(QWidget):
                         self.journal_data = entries or []
                         self.journal_data.sort(key=lambda x: x['datetime'], reverse=True)
                         self.update_journal_display()
+                        # Mettre à jour le solde global du compte sélectionné
+                        try:
+                            global_balance = self.get_account_global_balance(selected_account_id)
+                            if global_balance is None:
+                                self.global_balance_label.setText("")
+                            else:
+                                self.global_balance_label.setText(f"Solde global compte: {self.format_amount(global_balance)}")
+                        except Exception:
+                            self.global_balance_label.setText("")
                         return
             except Exception as e:
                 print(f"Erreur filtre compte financier: {e}")
@@ -1047,6 +1108,30 @@ class EntreeSortieIndex(QWidget):
                     font-size: 16px;
                 }
             """)
+
+    def get_account_global_balance(self, account_id):
+        """Retourne le solde global (débit - crédit) pour un compte comptable donné."""
+        try:
+            from ayanna_erp.database.database_manager import DatabaseManager
+            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures
+            from sqlalchemy import func
+
+            db_manager = DatabaseManager()
+            session = db_manager.get_session()
+
+            balance_expr = (func.coalesce(func.sum(ComptaEcritures.debit), 0) - func.coalesce(func.sum(ComptaEcritures.credit), 0))
+            bal = session.query(balance_expr).filter(ComptaEcritures.compte_comptable_id == account_id).scalar()
+            try:
+                return float(bal or 0)
+            except Exception:
+                return None
+        except Exception:
+            return None
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
     
     def filter_journal(self):
         """Appliquer les filtres et mettre à jour l'affichage"""
@@ -1257,12 +1342,32 @@ class EntreeSortieIndex(QWidget):
 
                     currency_symbol = self.get_currency_symbol()
 
+                    # Préparer les lignes de statistiques pour le PDF
                     stats_data = [
                         ['Résumé de la période', ''],
                         ['Total Entrées:', format_amount_for_pdf(total_entrees, currency=currency_symbol)],
                         ['Total Sorties:', format_amount_for_pdf(total_sorties, currency=currency_symbol)],
-                        ['Solde:', format_amount_for_pdf(solde, currency=currency_symbol)]
                     ]
+
+                    # Solde de la période
+                    stats_data.append(['Solde:', format_amount_for_pdf(solde, currency=currency_symbol)])
+
+                    # Si un compte financier est sélectionné, ajouter le solde global de ce compte
+                    selected_account_id = None
+                    try:
+                        if hasattr(self, 'financial_account_combo') and self.financial_account_combo.currentIndex() > 0:
+                            selected_account_id = self.financial_account_combo.currentData()
+                    except Exception:
+                        selected_account_id = None
+
+                    if selected_account_id:
+                        try:
+                            global_balance = self.get_account_global_balance(selected_account_id) or 0
+                            # Placer 'Solde global du compte' APRÈS la ligne 'Solde'
+                            stats_data.append(['Solde global du compte:', format_amount_for_pdf(global_balance, currency=currency_symbol)])
+                        except Exception:
+                            # Ne pas bloquer l'export si le calcul échoue
+                            pass
 
                     stats_table = Table(stats_data, colWidths=[6*cm, 6*cm])
                     stats_table.setStyle(TableStyle([

@@ -86,13 +86,13 @@ class EntreSortieController(QObject):
             session.add(expense)
             session.flush()  # Pour obtenir l'ID
             
-            print(f"💸 Dépense créée: {expense.description} - {expense.amount}€")
+            print(f"Dépense créée: {expense.description} - {expense.amount}€")
             
             # === INTEGRATION COMPTABLE ===
             # Récupérer la configuration comptable pour ce POS
             config = session.query(ComptaConfig).filter_by(pos_id=self.pos_id).first()
             if not config:
-                print("⚠️  Configuration comptable manquante pour ce point de vente")
+                print("Configuration comptable manquante pour ce point de vente")
             else:
                 # Créer la ligne de journal comptable
                 libelle = f"Dépense: {expense.description}"
@@ -143,6 +143,35 @@ class EntreSortieController(QObject):
                 else:
                     credit_account = compte_selected
 
+                # Vérifier le solde du compte financier pour empêcher un solde négatif
+                try:
+                    from sqlalchemy import func
+
+                    balance_expr = (func.coalesce(func.sum(EcritureComptable.debit), 0) - func.coalesce(func.sum(EcritureComptable.credit), 0))
+                    current_balance = session.query(balance_expr).filter(EcritureComptable.compte_comptable_id == credit_account.id).scalar() or 0
+                    current_balance = float(current_balance)
+                    montant_a_payer = float(expense.amount or 0)
+                except Exception:
+                    # En cas d'erreur lors du calcul, on laisse passer (ne pas bloquer l'opération)
+                    current_balance = None
+                    montant_a_payer = float(expense.amount or 0)
+
+                if current_balance is not None and current_balance < montant_a_payer:
+                    # Solde insuffisant — annuler et informer la vue avec message explicite
+                    session.rollback()
+                    compte_num = getattr(credit_account, 'numero', None) or getattr(credit_account, 'id', 'N/A')
+                    compte_name = getattr(credit_account, 'name', None) or getattr(credit_account, 'libelle', '')
+                    err = (
+                        f"Dépense refusée — fonds insuffisants sur le compte financier.\n"
+                        f"Compte: {compte_num}{(' - ' + compte_name) if compte_name else ''}\n"
+                        f"Solde actuel: {current_balance:.2f} € — Montant demandé: {montant_a_payer:.2f} €.\n"
+                        f"Actions possibles: approvisionner le compte, sélectionner un autre compte financier, ou contacter l'administrateur.\n"
+                        f"Référence dépense: EXP-{expense.id}"
+                    )
+                    print(err)
+                    self.error_occurred.emit(err)
+                    return None
+
                 ecriture_credit = EcritureComptable(
                     journal_id=journal.id,
                     compte_comptable_id=credit_account.id,
@@ -152,19 +181,19 @@ class EntreSortieController(QObject):
                     libelle=f"Sortie - {expense.description}"
                 )
                 session.add(ecriture_credit)
-                print(f"📊 Écritures comptables créées: Débit {compte_selected.numero} / Crédit {credit_account.numero}")
+                print(f"Écritures comptables créées: Débit {compte_selected.numero} / Crédit {credit_account.numero}")
                 
             session.commit()
             session.refresh(expense)
             
-            print(f"✅ Dépense enregistrée avec succès: {expense.description}")
+            print(f"Dépense enregistrée avec succès: {expense.description}")
             self.expense_added.emit(expense)
             return expense
             
         except Exception as e:
             session.rollback()
             error_msg = f"Erreur lors de la création de la dépense: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(error_msg)
             self.error_occurred.emit(error_msg)
             return None
             
@@ -193,7 +222,7 @@ class EntreSortieController(QObject):
             
         except Exception as e:
             error_msg = f"Erreur lors de la récupération des dépenses: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(error_msg)
             self.error_occurred.emit(error_msg)
             return []
             
@@ -226,7 +255,7 @@ class EntreSortieController(QObject):
             
         except Exception as e:
             error_msg = f"Erreur lors du chargement des dépenses: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(error_msg)
             self.error_occurred.emit(error_msg)
             return []
             
@@ -338,14 +367,14 @@ class EntreSortieController(QObject):
             session.commit()
             session.refresh(expense)
             
-            print(f"✅ Dépense {expense_id} mise à jour avec succès")
+            print(f"Dépense {expense_id} mise à jour avec succès")
             self.expense_updated.emit(expense)
             return True
             
         except Exception as e:
             session.rollback()
             error_msg = f"Erreur lors de la mise à jour de la dépense: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(error_msg)
             self.error_occurred.emit(error_msg)
             return False
             
@@ -368,18 +397,28 @@ class EntreSortieController(QObject):
                 self.error_occurred.emit(error_msg)
                 return False
                 
+            # Refuser la suppression si le libellé commence par 'Règlement fournisseur'
+            try:
+                exp_lib = (expense.description or "").strip().lower()
+                if exp_lib.startswith('règlement fournisseur') or exp_lib.startswith('reglement fournisseur'):
+                    err = "Suppression refusée  : Un 'Règlement fournisseur' ne peut pas être supprimé."
+                    self.error_occurred.emit(err)
+                    return False
+            except Exception:
+                pass
+
             # TODO: Supprimer aussi les écritures comptables liées
             session.delete(expense)
             session.commit()
             
-            print(f"✅ Dépense supprimée: {expense.description}")
+            print(f"Dépense supprimée: {expense.description}")
             self.expense_deleted.emit(expense_id)
             return True
             
         except Exception as e:
             session.rollback()
             error_msg = f"Erreur lors de la suppression: {str(e)}"
-            print(f"❌ {error_msg}")
+            print(error_msg)
             self.error_occurred.emit(error_msg)
             return False
             
@@ -387,112 +426,132 @@ class EntreSortieController(QObject):
             db_manager.close_session()
 
     def cancel_expense(self, expense_id, user_id=1, reason=None):
-        """
-        Annuler une dépense en créant :
-         - une écriture inverse dans event_expenses (montant négatif, type 'Annulation')
-         - un journal d'annulation et des écritures comptables inverses dans compta_journaux / compta_ecritures
+        """Supprimer une dépense et le journal comptable associé (et ses écritures).
 
-        Règle comptable appliquée : créditer les comptes qui ont été débités et débiter les comptes qui ont été crédités.
+        Comportement :
+        - Recherche la dépense `EventExpense` par `expense_id`.
+        - Recherche le journal comptable ayant la référence `EXP-<expense_id>`.
+        - Supprime les écritures (`compta_ecritures`) liées au journal puis supprime le journal.
+        - Supprime la dépense métier (`event_expenses`).
+
+        Retourne True si suppression réussie, False sinon.
         """
+
         try:
+            # Vérifier que l'utilisateur est super admin
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+            from ayanna_erp.database.database_manager import User
+            try:
+                user_obj = session.query(User).filter(User.id == int(user_id)).first()
+            except Exception:
+                user_obj = None
+            if not user_obj or getattr(user_obj, 'role', '') != 'super_admin':
+                err = "Suppression interdite : seul un utilisateur avec le rôle 'super_admin' peut supprimer définitivement des dépenses."
+                self.error_occurred.emit(err)
+                try:
+                    session.close()
+                except Exception:
+                    pass
+                return False
+
             from ayanna_erp.modules.comptabilite.model.comptabilite import (
                 ComptaEcritures as EcritureComptable,
                 ComptaJournaux as JournalComptable,
             )
 
-            db_manager = get_database_manager()
-            session = db_manager.get_session()
-
-            # Récupérer la dépense originale
+            # Récupérer la dépense
             expense = session.query(EventExpense).filter(
                 EventExpense.id == expense_id,
                 EventExpense.pos_id == self.pos_id
             ).first()
 
             if not expense:
-                msg = f"Dépense {expense_id} introuvable pour le POS {self.pos_id}"
+                msg = f"Dépense #{expense_id} introuvable pour le POS {self.pos_id}."
                 self.error_occurred.emit(msg)
-                return None
+                return False
 
-            # Créer une dépense inverse dans event_expenses (montant négatif)
-            # Construire la description selon: "raison - (description de la dépense annulée)"
-            if reason and str(reason).strip():
-                inverse_description = f"{reason.strip()} - ({expense.description or ''})"
-            else:
-                inverse_description = f"Annulation - ({expense.description or ''})"
-
-            inverse = EventExpense(
-                pos_id=expense.pos_id,
-                reservation_id=expense.reservation_id,
-                expense_type=f"Annulation - {expense.expense_type}",
-                description=inverse_description,
-                amount=-float(expense.amount),
-                expense_date=self._local_now(),
-                supplier=expense.supplier,
-                invoice_number=expense.invoice_number,
-                payment_method="Annulation",
-                account_id=expense.account_id,
-                created_by=user_id,
-                created_at=self._local_now()
-            )
-            session.add(inverse)
-            session.flush()
-
-            # Tenter de retrouver le journal lié à cette dépense (par référence)
+            # Rechercher le journal comptable lié (par convention de référence)
             ref = f"EXP-{expense.id}"
             orig_journal = session.query(JournalComptable).filter(JournalComptable.reference == ref).first()
 
-            # Créer un journal d'annulation
-            journal_rev = JournalComptable(
-                enterprise_id=orig_journal.enterprise_id if orig_journal and getattr(orig_journal, 'enterprise_id', None) else 1,
-                libelle=f"Annulation: {orig_journal.libelle if orig_journal else 'Dépense'} - {reason or ''}",
-                montant=abs(expense.amount),
-                type_operation="annulation",
-                reference=f"REV-EXP-{expense.id}",
-                description=f"Annulation écriture liée à la dépense ID {expense.id} - {reason or ''}",
-                user_id=user_id,
-                date_operation=self._local_now()
-            )
-            session.add(journal_rev)
-            session.flush()
+            # Refuser la suppression si le libellé du journal ou de la dépense commence par 'Règlement fournisseur'
+            try:
+                if orig_journal:
+                    jlib = (getattr(orig_journal, 'libelle', '') or '').strip().lower()
+                    if jlib.startswith('règlement fournisseur') or jlib.startswith('reglement fournisseur'):
+                        err = "Suppression refusée : les opérations comptables commençant par 'Règlement fournisseur' ne peuvent pas être supprimées."
+                        self.error_occurred.emit(err)
+                        return False
+                delib = (expense.description or '').strip().lower()
+                if delib.startswith('règlement fournisseur') or delib.startswith('reglement fournisseur'):
+                    err = "Suppression refusée : les dépenses dont le libellé commence par 'Règlement fournisseur' ne peuvent pas être supprimées."
+                    self.error_occurred.emit(err)
+                    return False
+            except Exception:
+                pass
 
-            # Si un journal original existe, inverser ses écritures
+            # Supprimer les écritures liées puis le journal
             if orig_journal:
-                # Charger les écritures originales
-                original_lines = session.query(EcritureComptable).filter(
-                    EcritureComptable.journal_id == orig_journal.id
-                ).order_by(EcritureComptable.ordre).all()
+                # Ne pas supprimer les journaux de type 'Entrée'
+                try:
+                    jtype = (getattr(orig_journal, 'type_operation', '') or '').strip().lower()
+                    if 'entree' in jtype or 'entrée' in jtype:
+                        err = "Suppression refusée : les journaux de type 'Entrée' ne peuvent pas être supprimés via cette opération."
+                        self.error_occurred.emit(err)
+                        return False
+                except Exception:
+                    pass
 
-                # Inverser débit/credit et renuméroter séquentiellement
-                for idx, line in enumerate(original_lines, start=1):
-                    rev_line = EcritureComptable(
-                        journal_id=journal_rev.id,
-                        compte_comptable_id=line.compte_comptable_id,
-                        debit=(float(line.credit or 0)),
-                        credit=(float(line.debit or 0)),
-                        ordre=idx,
-                        libelle=f"Annulation - {line.libelle or ''}".strip()
-                    )
-                    session.add(rev_line)
+                try:
+                    # Supprimer les écritures comptables liées
+                    session.query(EcritureComptable).filter(EcritureComptable.journal_id == orig_journal.id).delete(synchronize_session=False)
+                    # Supprimer le journal
+                    session.delete(orig_journal)
+                except Exception as e:
+                    session.rollback()
+                    msg = f"Erreur lors de la suppression des écritures/journal liés à la dépense #{expense.id}: {e}"
+                    print(msg)
+                    self.error_occurred.emit(msg)
+                    return False
+
+            # Supprimer la dépense métier
+            try:
+                session.delete(expense)
+            except Exception as e:
+                session.rollback()
+                msg = f"Erreur lors de la suppression de la dépense #{expense.id}: {e}"
+                print(msg)
+                self.error_occurred.emit(msg)
+                return False
 
             session.commit()
-            session.refresh(inverse)
+
+            # Émettre signal et message utilisateur
+            try:
+                self.expense_deleted.emit(expense_id)
+            except Exception:
+                pass
+            success_msg = f"Dépense #{expense_id} et écritures/journal associés supprimés avec succès."
+            print(success_msg)
+            self.error_occurred.emit(success_msg)
             return True
 
-            # Émettre signal
-            self.expense_cancelled.emit(inverse)
-            print(f"♻️ Dépense {expense.id} annulée, inversion comptable créée (journal {journal_rev.id})")
-            return inverse
-
         except Exception as e:
-            session.rollback()
-            msg = f"Erreur lors de l'annulation de la dépense: {e}"
-            print(f"❌ {msg}")
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            msg = f"Erreur lors de la suppression de la dépense: {e}"
+            print(msg)
             self.error_occurred.emit(msg)
-            return None
+            return False
 
         finally:
-            db_manager.close_session()
+            try:
+                db_manager.close_session()
+            except Exception:
+                pass
 
     def cancel_accounting_entry(self, ecriture_id, user_id=1, reason=None):
         """
@@ -559,6 +618,92 @@ class EntreSortieController(QObject):
 
         finally:
             db_manager.close_session()
+    
+    def delete_accounting_entry(self, ecriture_id, user_id=1, reason=None):
+        """Supprimer une écriture comptable et son journal associé (écritures liées).
+
+        Recherche l'écriture, identifie le journal parent et supprime toutes les écritures de ce journal
+        puis supprime le journal.
+        """
+        try:
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaEcritures as EcritureComptable,
+                ComptaJournaux as JournalComptable,
+            )
+
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+
+            # Vérifier que l'utilisateur est super admin
+            from ayanna_erp.database.database_manager import User
+            try:
+                user_obj = session.query(User).filter(User.id == int(user_id)).first()
+            except Exception:
+                user_obj = None
+            if not user_obj or getattr(user_obj, 'role', '') != 'super_admin':
+                err = "Suppression interdite : seul un utilisateur avec le rôle 'super_admin' peut supprimer définitivement des écritures/journaux."
+                self.error_occurred.emit(err)
+                try:
+                    session.close()
+                except Exception:
+                    pass
+                return False
+
+            orig_line = session.query(EcritureComptable).filter(EcritureComptable.id == int(ecriture_id)).first()
+            if not orig_line:
+                self.error_occurred.emit(f"Écriture {ecriture_id} introuvable")
+                return False
+
+            orig_journal = session.query(JournalComptable).filter(JournalComptable.id == orig_line.journal_id).first()
+            if not orig_journal:
+                self.error_occurred.emit(f"Journal lié à l'écriture {ecriture_id} introuvable")
+                return False
+
+            # Refuser la suppression si le libellé du journal commence par 'Règlement fournisseur'
+            try:
+                jlib = (getattr(orig_journal, 'libelle', '') or '').strip().lower()
+                if jlib.startswith('règlement fournisseur') or jlib.startswith('reglement fournisseur'):
+                    err = "Suppression refusée : les journaux dont le libellé commence par 'Règlement fournisseur' ne peuvent pas être supprimés."
+                    self.error_occurred.emit(err)
+                    return False
+            except Exception:
+                pass
+
+            # Ne pas supprimer les journaux de type 'Entrée'
+            try:
+                jtype = (getattr(orig_journal, 'type_operation', '') or '').strip().lower()
+                if 'entree' in jtype or 'entrée' in jtype:
+                    err = "Suppression refusée : les journaux de type 'Entrée' ne peuvent pas être supprimés via cette opération."
+                    self.error_occurred.emit(err)
+                    return False
+            except Exception:
+                pass
+
+            try:
+                # Supprimer les écritures liées
+                session.query(EcritureComptable).filter(EcritureComptable.journal_id == orig_journal.id).delete(synchronize_session=False)
+                # Supprimer le journal
+                session.delete(orig_journal)
+                session.commit()
+                return True
+            except Exception as e:
+                session.rollback()
+                self.error_occurred.emit(f"Erreur lors de la suppression du journal/écritures: {e}")
+                return False
+
+        except Exception as e:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            self.error_occurred.emit(f"Erreur suppression écriture comptable: {e}")
+            return False
+
+        finally:
+            try:
+                db_manager.close_session()
+            except Exception:
+                pass
             
     def get_expenses_statistics(self, start_date=None, end_date=None):
         """
