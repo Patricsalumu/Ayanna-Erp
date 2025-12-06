@@ -90,8 +90,37 @@ class PaiementDialog(QDialog):
                 session = self.achat_controller.db_manager.get_session()
                 try:
                     comptes = session.query(ComptaComptes).filter(ComptaComptes.numero.like('5%')).order_by(ComptaComptes.numero).all()
+
+                    # Récupérer les soldes pour tous les comptes en une seule requête GROUP BY
+                    try:
+                        from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures
+                        from sqlalchemy import func
+                        compte_ids = [c.id for c in comptes]
+                        balances = {}
+                        if compte_ids:
+                            rows = session.query(
+                                ComptaEcritures.compte_comptable_id,
+                                func.coalesce(func.sum(ComptaEcritures.debit), 0) - func.coalesce(func.sum(ComptaEcritures.credit), 0)
+                            ).filter(ComptaEcritures.compte_comptable_id.in_(compte_ids)).group_by(ComptaEcritures.compte_comptable_id).all()
+                            for cid, bal in rows:
+                                balances[cid] = bal or 0
+                    except Exception:
+                        balances = {}
+
                     for c in comptes:
-                        label = f"{c.numero} - {getattr(c, 'nom', None) or getattr(c, 'name', '')}"
+                        try:
+                            bal = balances.get(c.id, 0)
+                            try:
+                                formatted = self.entreprise_ctrl.format_amount(bal)
+                            except Exception:
+                                formatted = str(bal)
+                            saldo_text = f"Solde: {formatted}"
+                        except Exception:
+                            saldo_text = None
+
+                        compte_nom = getattr(c, 'nom', None) or getattr(c, 'name', '') or ''
+                        base_label = f"{c.numero} - {compte_nom}"
+                        label = f"{base_label} - {saldo_text}" if saldo_text else base_label
                         self.compte_financier_combo.addItem(label, c.id)
                     # sélectionner le compte caisse par défaut si présent dans la config
                     config = session.query(ComptaConfig).filter_by(enterprise_id=getattr(self.achat_controller, 'entreprise_id', None)).first()
@@ -580,6 +609,17 @@ class CommandesWidget(QWidget):
             pay_btn = QPushButton("💰")
             pay_btn.setToolTip("Payer")
             pay_btn.clicked.connect(lambda: self.pay_commande(commande.id))
+            # Désactiver le bouton si la commande est déjà payée en totalité
+            try:
+                try:
+                    total_paye = commande.total_paye if hasattr(commande, 'total_paye') else (sum(d.montant for d in commande.depenses) if commande.depenses else Decimal('0'))
+                except Exception:
+                    total_paye = Decimal('0')
+                montant_restant = (commande.montant_total or Decimal('0')) - Decimal(total_paye)
+                pay_btn.setEnabled(montant_restant > 0)
+            except Exception:
+                # En cas d'erreur, laisser le bouton activé (l'UI vérifiera ensuite)
+                pass
             l.addWidget(pay_btn)
             recv_btn = QPushButton("📦")
             recv_btn.setToolTip("Réceptionner")
@@ -595,7 +635,21 @@ class CommandesWidget(QWidget):
         has = len(selected) > 0
         self.edit_btn.setEnabled(has and self.current_commandes[selected[0].row()].etat == EtatCommande.ENCOURS if has else False)
         self.reception_btn.setEnabled(has and self.current_commandes[selected[0].row()].etat != EtatCommande.RECEPTIONNE if has else False)
-        self.pay_btn.setEnabled(has)
+        # Activer le bouton Payer seulement si une ligne est sélectionnée et que le montant restant > 0
+        if has:
+            try:
+                cmd = self.current_commandes[selected[0].row()]
+                try:
+                    total_paye = cmd.total_paye if hasattr(cmd, 'total_paye') else (sum(d.montant for d in cmd.depenses) if cmd.depenses else Decimal('0'))
+                except Exception:
+                    total_paye = Decimal('0')
+                montant_restant = (cmd.montant_total or Decimal('0')) - Decimal(total_paye)
+                self.pay_btn.setEnabled(montant_restant > 0)
+            except Exception:
+                # En cas d'erreur, laisser le bouton désactivé pour sécurité
+                self.pay_btn.setEnabled(False)
+        else:
+            self.pay_btn.setEnabled(False)
         self.cancel_btn.setEnabled(has)
         self.print_btn.setEnabled(has)
         if has:
@@ -712,7 +766,15 @@ class CommandesWidget(QWidget):
                 return
             dialog = EditCommandeDialog(self, self.achat_controller, cmd)
             if dialog.exec() == QDialog.DialogCode.Accepted:
-                self.refresh_data()
+                try:
+                    # Récupérer les lignes modifiées depuis le dialogue
+                    lignes = dialog.get_lignes_data()
+                    # Appeler le contrôleur pour mettre à jour la commande
+                    updated = self.achat_controller.update_commande(session, commande_id, lignes)
+                    QMessageBox.information(self, "Succès", f"Commande {getattr(updated, 'numero', commande_id)} mise à jour")
+                    self.refresh_data()
+                except Exception as e:
+                    QMessageBox.critical(self, "Erreur", f"Erreur lors de la mise à jour: {e}")
             session.close()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur édition: {e}")
@@ -775,13 +837,45 @@ class CommandesWidget(QWidget):
                 mode = dialog.get_mode_paiement()
                 ref = dialog.get_reference()
                 compte_financier_id = dialog.get_compte_financier_id()
+
+                # Vérification locale du solde du compte financier (UX) avant confirmation serveur
                 try:
-                    success = self.achat_controller.process_paiement_commande(session, commande_id, montant, mode, ref, compte_financier_id=compte_financier_id)
-                    if success:
-                        QMessageBox.information(self, "Succès", f"Paiement de {self.entreprise_ctrl.format_amount(montant)} enregistré")
-                        self.refresh_data()
+                    compte_a_verifier = None
+                    try:
+                        config = session.query(ComptaConfig).filter_by(enterprise_id=getattr(self.achat_controller, 'entreprise_id', None)).first()
+                        compte_a_verifier = compte_financier_id or (config.compte_caisse_id if config and getattr(config, 'compte_caisse_id', None) else None)
+                    except Exception:
+                        compte_a_verifier = compte_financier_id
+
+                    if compte_a_verifier:
+                        from decimal import Decimal as _Decimal
+                        ok = self.achat_controller.verify_solde_compte(session, int(compte_a_verifier), _Decimal(str(montant)))
+                        if not ok:
+                            # Récupérer informations du compte
+                            try:
+                                compte_obj = session.query(ComptaComptes).filter(ComptaComptes.id == int(compte_a_verifier)).first()
+                                compte_num = getattr(compte_obj, 'numero', None) or str(compte_a_verifier)
+                                compte_nom = getattr(compte_obj, 'nom', '') or ''
+                            except Exception:
+                                compte_num = str(compte_a_verifier)
+                                compte_nom = ''
+
+                            QMessageBox.critical(self, "Solde insuffisant", \
+                                f"Paiement impossible : le compte sélectionné ({compte_num}{(' - ' + compte_nom) if compte_nom else ''}) ne dispose pas de fonds suffisants pour couvrir le montant de {self.entreprise_ctrl.format_amount(montant)}.\n\n" \
+                                "Actions : approvisionner le compte, sélectionner un autre compte financier, ou contacter l'administrateur.")
+                            session.close()
+                            return
+
+                    # Appel serveur pour effectuer le paiement (vérification côté serveur restera active)
+                    try:
+                        success = self.achat_controller.process_paiement_commande(session, commande_id, montant, mode, ref, compte_financier_id=compte_financier_id)
+                        if success:
+                            QMessageBox.information(self, "Succès", f"Paiement de {self.entreprise_ctrl.format_amount(montant)} enregistré")
+                            self.refresh_data()
+                    except Exception as e:
+                        QMessageBox.critical(self, "Erreur", f"Erreur paiement: {e}")
                 except Exception as e:
-                    QMessageBox.critical(self, "Erreur", f"Erreur paiement: {e}")
+                    QMessageBox.critical(self, "Erreur", f"Erreur lors de la vérification du compte: {e}")
             session.close()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur: {e}")

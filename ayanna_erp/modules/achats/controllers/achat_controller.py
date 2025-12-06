@@ -269,12 +269,20 @@ class AchatController:
             # Crédit - Débit pour les comptes de passif
             solde = Decimal('0')
             for ecriture in ecritures:
-                if compte.numero.startswith(('1', '2', '3', '6')):  # Comptes d'actif et charges
+                # Traiter les comptes financiers (classe 5) comme comptes d'actif
+                if compte.numero.startswith(('1', '2', '3', '5', '6')):  # Comptes d'actif et charges (inclut classe 5)
                     solde += (ecriture.debit or Decimal('0')) - (ecriture.credit or Decimal('0'))
                 else:  # Comptes de passif et produits
                     solde += (ecriture.credit or Decimal('0')) - (ecriture.debit or Decimal('0'))
             
-            return solde >= montant
+            # Comparaison explicite : si le montant demandé est strictement supérieur au solde disponible, refuser
+            try:
+                # Normaliser types et éviter erreurs de signe
+                solde = Decimal(solde)
+            except Exception:
+                solde = Decimal(str(solde)) if solde is not None else Decimal('0')
+
+            return montant <= solde
             
         except Exception as e:
             print(f"Erreur lors de la vérification du solde: {e}")
@@ -307,6 +315,53 @@ class AchatController:
             if montant > montant_restant:
                 raise ValueError(f"Le montant du paiement ({montant}) dépasse le montant restant ({montant_restant})")
             
+            # Vérifier le solde du compte financier choisi (si fourni) ou du compte caisse configuré
+            try:
+                # Déterminer le compte de règlement à vérifier
+                config = session.query(ComptaConfig).filter_by(enterprise_id=self.entreprise_id).first()
+                compte_a_verifier = compte_financier_id or (config.compte_caisse_id if config and getattr(config, 'compte_caisse_id', None) else None)
+            except Exception:
+                compte_a_verifier = compte_financier_id
+
+            if compte_a_verifier:
+                # Calculer le solde courant du compte pour afficher un message explicite
+                try:
+                    from sqlalchemy import func
+                    # Récupérer le compte pour afficher son numéro/nom
+                    compte_obj = session.query(ComptaComptes).filter(ComptaComptes.id == compte_a_verifier).first()
+                    balance_expr = (func.coalesce(func.sum(ComptaEcritures.debit), 0) - func.coalesce(func.sum(ComptaEcritures.credit), 0))
+                    bal = session.query(balance_expr).filter(ComptaEcritures.compte_comptable_id == compte_a_verifier).scalar() or 0
+                    try:
+                        current_balance = Decimal(bal)
+                    except Exception:
+                        current_balance = Decimal(str(bal)) if bal is not None else Decimal('0')
+
+                    # Vérifier via la méthode existante (règles métier) et lancer une erreur si insuffisant
+                    ok = self.verify_solde_compte(session, compte_a_verifier, montant)
+                    if not ok:
+                        # Formater les montants avec le contrôleur entreprise si possible
+                        try:
+                            ent_ctrl = EntrepriseController(entreprise_id=self.entreprise_id)
+                            formatted_balance = ent_ctrl.format_amount(current_balance)
+                            formatted_montant = ent_ctrl.format_amount(montant)
+                        except Exception:
+                            formatted_balance = str(current_balance)
+                            formatted_montant = str(montant)
+
+                        compte_num = getattr(compte_obj, 'numero', None) or getattr(compte_obj, 'id', compte_a_verifier)
+                        compte_nom = getattr(compte_obj, 'nom', '') if compte_obj is not None else ''
+
+                        err_msg = (
+                            f"Paiement refusé — fonds insuffisants sur le compte sélectionné.\n"
+                            f"Compte: {compte_num}{(' - ' + compte_nom) if compte_nom else ''}\n"
+                            f"Solde actuel: {formatted_balance} — Montant demandé: {formatted_montant}.\n"
+                            "Actions possibles: approvisionner le compte, sélectionner un autre compte financier, ou contacter l'administrateur."
+                        )
+                        raise ValueError(err_msg)
+                except Exception:
+                    # Remonter l'erreur pour interrompre le flux de paiement
+                    raise
+
             # Créer l'enregistrement de dépense
             depense = AchatDepense(
                 bon_commande_id=commande_id,
