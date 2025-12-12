@@ -28,6 +28,11 @@ class EntreSortieController(QObject):
     def __init__(self, pos_id=1):
         super().__init__()
         self.pos_id = pos_id
+
+    def _local_now(self):
+        """Retourne la date/heure locale (naïve) de la machine."""
+        from datetime import datetime
+        return datetime.now()
         
     def set_pos_id(self, pos_id):
         """Définir l'ID du point de vente"""
@@ -69,13 +74,13 @@ class EntreSortieController(QObject):
                 expense_type=expense_data.get('categorie', 'Dépense générale'),
                 description=expense_data.get('libelle'),
                 amount=expense_data.get('montant'),
-                expense_date=datetime.now(),
+                expense_date=self._local_now(),
                 supplier=expense_data.get('fournisseur'),
                 invoice_number=expense_data.get('facture'),
                 payment_method='Espèces',  # Toujours espèces pour commencer
                 account_id=expense_data.get('compte_id'),
                 created_by=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
-                created_at=datetime.now()
+                created_at=self._local_now()
             )
             
             session.add(expense)
@@ -99,7 +104,7 @@ class EntreSortieController(QObject):
                     reference=f"EXP-{expense.id}",
                     description=f"Dépense ID: {expense.id} - {expense.expense_type}",
                     user_id=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
-                    date_operation=datetime.now()
+                    date_operation=self._local_now()
                 )
                 session.add(journal)
                 session.flush()  # Pour avoir l'id du journal
@@ -422,13 +427,13 @@ class EntreSortieController(QObject):
                 expense_type=f"Annulation - {expense.expense_type}",
                 description=inverse_description,
                 amount=-float(expense.amount),
-                expense_date=datetime.now(),
+                expense_date=self._local_now(),
                 supplier=expense.supplier,
                 invoice_number=expense.invoice_number,
                 payment_method="Annulation",
                 account_id=expense.account_id,
                 created_by=user_id,
-                created_at=datetime.now()
+                created_at=self._local_now()
             )
             session.add(inverse)
             session.flush()
@@ -446,7 +451,7 @@ class EntreSortieController(QObject):
                 reference=f"REV-EXP-{expense.id}",
                 description=f"Annulation écriture liée à la dépense ID {expense.id} - {reason or ''}",
                 user_id=user_id,
-                date_operation=datetime.now()
+                date_operation=self._local_now()
             )
             session.add(journal_rev)
             session.flush()
@@ -458,29 +463,21 @@ class EntreSortieController(QObject):
                     EcritureComptable.journal_id == orig_journal.id
                 ).order_by(EcritureComptable.ordre).all()
 
-                for line in original_lines:
-                    # Inverser débit/credit
-                    if float(line.debit or 0) > 0:
-                        new_debit = 0
-                        new_credit = float(line.debit)
-                        new_ordre = 2
-                    else:
-                        new_debit = float(line.credit or 0)
-                        new_credit = 0
-                        new_ordre = 1
-
+                # Inverser débit/credit et renuméroter séquentiellement
+                for idx, line in enumerate(original_lines, start=1):
                     rev_line = EcritureComptable(
                         journal_id=journal_rev.id,
                         compte_comptable_id=line.compte_comptable_id,
-                        debit=new_debit,
-                        credit=new_credit,
-                        ordre=new_ordre,
+                        debit=(float(line.credit or 0)),
+                        credit=(float(line.debit or 0)),
+                        ordre=idx,
                         libelle=f"Annulation - {line.libelle or ''}".strip()
                     )
                     session.add(rev_line)
 
             session.commit()
             session.refresh(inverse)
+            return True
 
             # Émettre signal
             self.expense_cancelled.emit(inverse)
@@ -493,6 +490,72 @@ class EntreSortieController(QObject):
             print(f"❌ {msg}")
             self.error_occurred.emit(msg)
             return None
+
+        finally:
+            db_manager.close_session()
+
+    def cancel_accounting_entry(self, ecriture_id, user_id=1, reason=None):
+        """
+        Annuler une écriture comptable en créant un journal d'annulation
+        et en inversant toutes les écritures du journal original.
+        """
+        try:
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaEcritures as EcritureComptable,
+                ComptaJournaux as JournalComptable,
+            )
+
+            db_manager = get_database_manager()
+            session = db_manager.get_session()
+
+            # Récupérer l'écriture et le journal original
+            orig_line = session.query(EcritureComptable).filter(EcritureComptable.id == int(ecriture_id)).first()
+            if not orig_line:
+                self.error_occurred.emit(f"Écriture {ecriture_id} introuvable")
+                return False
+
+            orig_journal = session.query(JournalComptable).filter(JournalComptable.id == orig_line.journal_id).first()
+
+            if not orig_journal:
+                self.error_occurred.emit(f"Journal lié à l'écriture {ecriture_id} introuvable")
+                return False
+
+            # Créer un journal d'annulation
+            libelle = f"Annulation - {orig_journal.libelle or ''}".strip()
+            journal_rev = JournalComptable(
+                enterprise_id=getattr(orig_journal, 'enterprise_id', 1),
+                libelle=libelle,
+                montant=abs(orig_journal.montant) if getattr(orig_journal, 'montant', None) is not None else abs(float(orig_line.debit or 0) - float(orig_line.credit or 0)),
+                type_operation="annulation",
+                reference=f"REV-{orig_journal.reference or orig_journal.id}-{ecriture_id}",
+                description=f"Annulation écriture ID {ecriture_id} - {reason or ''}",
+                user_id=user_id,
+                date_operation=self._local_now()
+            )
+            session.add(journal_rev)
+            session.flush()
+
+            # Inverser toutes les écritures du journal original
+            original_lines = session.query(EcritureComptable).filter(EcritureComptable.journal_id == orig_journal.id).order_by(EcritureComptable.ordre).all()
+            # Renuméroter séquentiellement les écritures inverses
+            for idx, line in enumerate(original_lines, start=1):
+                rev_line = EcritureComptable(
+                    journal_id=journal_rev.id,
+                    compte_comptable_id=line.compte_comptable_id,
+                    debit=(float(line.credit or 0)),
+                    credit=(float(line.debit or 0)),
+                    ordre=idx,
+                    libelle=f"Annulation - {line.libelle or ''}".strip()
+                )
+                session.add(rev_line)
+
+            session.commit()
+            return True
+
+        except Exception as e:
+            session.rollback()
+            self.error_occurred.emit(f"Erreur annulation écriture comptable: {e}")
+            return False
 
         finally:
             db_manager.close_session()

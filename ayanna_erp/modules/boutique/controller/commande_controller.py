@@ -10,6 +10,7 @@ from typing import List, Dict, Any, Optional, Union
 from sqlalchemy import text
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ayanna_erp.core.session_manager import SessionManager
 
 
 db = DatabaseManager()
@@ -568,7 +569,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
         # Pour l'instant, retourner un message
         return f"Export {format_type} non implémenté. {len(commandes)} commandes à exporter."
 
-    def export_products_summary(self, date_debut, date_fin, include_services: bool = True) -> str:
+    def export_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = 'boutique') -> str:
         """
         Génère un fichier CSV listant chaque produit/service vendu sur la période avec colonnes:
         No, name, quantite_initiale, quantite_ajoutee, quantite_achats_transferts, total_initial_plus_ajoute,
@@ -598,6 +599,39 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
 
         try:
             with self.db_manager.get_session() as session:
+                # Déterminer l'entrepôt global pour cet export (module -> POS code)
+                enterprise_id = SessionManager.get_current_enterprise_id() or None
+                # module param can be 'boutique' or 'restaurant' (restau)
+                if isinstance(module, str) and module.lower() in ('restaurant', 'restau'):
+                    wh_code = 'POS_4'
+                else:
+                    wh_code = 'POS_2'  # default for boutique exports
+                wid = None
+                try:
+                    r_wh = session.execute(text("SELECT id FROM stock_warehouses WHERE code = :code AND entreprise_id = :eid LIMIT 1"), {'code': wh_code, 'eid': enterprise_id}).fetchone()
+                    wid = int(r_wh.id) if r_wh else None
+                except Exception:
+                    wid = None
+
+                # Charger le dernier inventaire COMPLETED pour cet entrepôt (<= d1)
+                inv_id = None
+                inv_completed_dt = None
+                inv_counts = {}
+                try:
+                    if wid:
+                        r_inv = session.execute(text(
+                            "SELECT id, completed_date FROM stock_inventaire WHERE warehouse_id = :wid AND status = 'COMPLETED' AND completed_date <= :d1 ORDER BY completed_date DESC LIMIT 1"
+                        ), {'wid': wid, 'd1': d1}).fetchone()
+                        if r_inv:
+                            inv_id = int(r_inv.id)
+                            inv_completed_dt = r_inv.completed_date
+                    if inv_id:
+                        rows = session.execute(text("SELECT product_id, counted_stock FROM stock_inventaire_item WHERE inventory_id = :inv_id"), {'inv_id': inv_id}).fetchall()
+                        inv_counts = {int(r.product_id): float(r.counted_stock or 0) for r in rows}
+                except Exception:
+                    inv_id = None
+                    inv_completed_dt = None
+                    inv_counts = {}
                 # Rassembler ventes produits (boutique)
                 q_products = text("""
                     SELECT cp.id as product_id, cp.name as product_name,
@@ -642,13 +676,15 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
 
-                # Agréger produits (boutique + restaurant)
+                # Agréger produits (boutique + restaurant) et tracer ventes par canal
                 items = {}
                 for r in prod_rows:
                     pid = f"P-{r.product_id}"
                     items[pid] = {
                         'name': r.product_name,
                         'sold': float(r.sold_qty or 0),
+                        'sold_boutique': float(r.sold_qty or 0),
+                        'sold_restau': 0.0,
                         'unit_price': float(r.unit_price or 0),
                         'product_id': r.product_id,
                         'is_service': False
@@ -657,10 +693,13 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     pid = f"P-{r.product_id}"
                     if pid in items:
                         items[pid]['sold'] += float(r.sold_qty or 0)
+                        items[pid]['sold_restau'] += float(r.sold_qty or 0)
                     else:
                         items[pid] = {
                             'name': r.product_name,
                             'sold': float(r.sold_qty or 0),
+                            'sold_boutique': 0.0,
+                            'sold_restau': float(r.sold_qty or 0),
                             'unit_price': float(r.unit_price or 0),
                             'product_id': r.product_id,
                             'is_service': False
@@ -676,9 +715,14 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'is_service': True
                     }
 
+                # Préparer enterprise context et cache des entrepôts POS
+                enterprise_id = SessionManager.get_current_enterprise_id() or None
+                warehouse_cache = {}
+
                 # Pour chaque produit/service, calculer quantités stock via stock_mouvements
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
+                    print("DEBUG 1 : Verifier si on entre dans la boucle")
                     if it.get('is_service'):
                         # Pas de stock pour les services
                         initial_q = 0.0
@@ -686,26 +730,101 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         purchases_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # quantité initiale = somme des mouvements avant d1
-                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
+                        # quantité initiale : tenter par entrepôt POS selon canal de vente (boutique->POS_2, restau->POS_4)
+                        # choisir l'entrepôt où l'article est majoritairement vendu
                         try:
-                            r_init = session.execute(q_init, {'pid': pid, 'd1': d1}).fetchone()
-                            initial_q = float(r_init.qty or 0)
+                            print("Debug 1 suis dans try")
+                            # Si on a chargé un inventaire global pour l'entrepôt, l'utiliser
+                            if inv_id and wid:
+                                print("Debug 2 il ya bien inventaire dans wid ")
+                                if pid in inv_counts:
+                                    print("Debug 3 il ya bien pid dans inv counts")
+                                    base = inv_counts.get(pid, 0.0)
+                                else:
+                                    base = None
+
+                                if base is not None and inv_completed_dt:
+                                    # Somme des mouvements entre la date du dernier inventaire et d1 (variations)
+                                    q_var = text("""
+                                        SELECT COALESCE(SUM(CASE
+                                            WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                            WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
+                                            WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                            WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
+                                            WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
+                                            ELSE 0 END),0) as var
+                                        FROM stock_mouvements
+                                        WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
+                                        AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                                    """)
+                                    r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_completed_dt, 'd1': d1, 'wid': wid}).fetchone()
+                                    variation = float(r_var.var or 0)
+                                    print(f'vartiation {pid} est de {variation}')
+                                    initial_q = float(base + variation)
+                                else:
+                                    # Pas d'item dans l'inventaire pour ce produit -> fallback
+                                    if wid:
+                                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1 AND (warehouse_id = :wid OR destination_warehouse_id = :wid)")
+                                        params_init = {'pid': pid, 'd1': d1, 'wid': wid}
+                                    else:
+                                        q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
+                                        params_init = {'pid': pid, 'd1': d1}
+                                    r_init = session.execute(q_init, params_init).fetchone()
+                                    initial_q = float(r_init.qty or 0)
+                            else:
+                                # Aucun inventaire global trouvé -> fallback sur mouvements (filtré si wid connu)
+                                if wid:
+                                    q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1 AND (warehouse_id = :wid OR destination_warehouse_id = :wid)")
+                                    params_init = {'pid': pid, 'd1': d1, 'wid': wid}
+                                else:
+                                    q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
+                                    params_init = {'pid': pid, 'd1': d1}
+                                r_init = session.execute(q_init, params_init).fetchone()
+                                initial_q = float(r_init.qty or 0)
                         except Exception:
                             initial_q = 0.0
 
                         # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
-                        q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')")
                         try:
-                            r_added = session.execute(q_added, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            if wid:
+                                q_added = text("""
+                                    SELECT COALESCE(SUM(CASE
+                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
+                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                        ELSE 0 END),0) as qty
+                                    FROM stock_mouvements
+                                    WHERE product_id = :pid
+                                    AND movement_date >= :d1
+                                    AND movement_date <= :d2
+                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                                """)
+                                r_added = session.execute(q_added, {'pid': pid, 'd1': d1, 'd2': d2, 'wid': wid}).fetchone()
+                            else:
+                                q_added = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT','AJUSTEMENT')")
+                                r_added = session.execute(q_added, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
                             added_q = float(r_added.qty or 0)
                         except Exception:
                             added_q = 0.0
 
                         # achats/transferts (ENTREE or TRANSFERT)
-                        q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')")
                         try:
-                            r_purch = session.execute(q_purch, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
+                            if wid:
+                                q_purch = text("""
+                                    SELECT COALESCE(SUM(CASE
+                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
+                                        ELSE 0 END),0) as qty
+                                    FROM stock_mouvements
+                                    WHERE product_id = :pid
+                                    AND movement_date >= :d1
+                                    AND movement_date <= :d2
+                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                                """)
+                                r_purch = session.execute(q_purch, {'pid': pid, 'd1': d1, 'd2': d2, 'wid': wid}).fetchone()
+                            else:
+                                q_purch = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date >= :d1 AND movement_date <= :d2 AND movement_type IN ('ENTREE','TRANSFERT')")
+                                r_purch = session.execute(q_purch, {'pid': pid, 'd1': d1, 'd2': d2}).fetchone()
                             purchases_q = float(r_purch.qty or 0)
                         except Exception:
                             purchases_q = 0.0
@@ -940,57 +1059,56 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         adjustments_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # QUANTITÉ INITIALE = Stock avant date_debut
-                        # = (ENTREES) - (SORTIES) + (AJUSTEMENTS) + (TRANSFERTS IN) - (TRANSFERTS OUT) + (ANNULATIONS)
-                        # Les ANNULATIONS peuvent être:
-                        #   - Annulation d'une SORTIE → +quantity (remise en stock)
-                        #   - Annulation d'une ENTREE → -quantity (retrait du stock)
-                        # On filtre uniquement les mouvements de cet entrepôt
-                        if warehouse_id:
-                            # Avec filtre entrepôt spécifique
-                            q_init_sql = text("""
-                                SELECT 
-                                    COALESCE(SUM(CASE 
-                                        WHEN movement_type = 'ENTREE' AND warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'ENTREE' AND destination_warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND warehouse_id = :wid THEN -quantity
-                                        WHEN movement_type = 'SORTIE' AND destination_warehouse_id = :wid THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND destination_warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'ANNULATION' AND warehouse_id = :wid THEN quantity
-                                        WHEN movement_type = 'ANNULATION' AND destination_warehouse_id = :wid THEN quantity
-                                        ELSE 0
-                                    END), 0) as qty
-                                FROM stock_mouvements
-                                WHERE product_id = :pid 
-                                AND movement_date < :d1
-                                AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                            """)
-                        else:
-                            # Sans filtre entrepôt (tous les entrepôts)
-                            q_init_sql = text("""
-                                SELECT 
-                                    COALESCE(SUM(CASE 
-                                        WHEN movement_type = 'ENTREE' THEN quantity
-                                        WHEN movement_type = 'SORTIE' THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' THEN 0
-                                        WHEN movement_type = 'ANNULATION' THEN quantity
-                                        ELSE 0
-                                    END), 0) as qty
-                                FROM stock_mouvements
-                                WHERE product_id = :pid 
-                                AND movement_date < :d1
-                            """)
-                        
+                        # QUANTITÉ INITIALE = utiliser le dernier inventaire compté pour l'entrepôt si disponible
                         try:
-                            params_init = {'pid': pid, 'd1': d1}
+                            initial_q = 0.0
                             if warehouse_id:
-                                params_init['wid'] = warehouse_id
-                            r_init = session.execute(q_init_sql, params_init).fetchone()
-                            initial_q = float(r_init.qty or 0)
+                                # Chercher le dernier inventaire COMPLETED pour l'entrepôt avant d1
+                                r_inv = session.execute(text(
+                                    "SELECT id, completed_date FROM stock_inventaire WHERE warehouse_id = :wid AND status = 'COMPLETED' AND completed_date <= :d1 ORDER BY completed_date DESC LIMIT 1"
+                                ), {'wid': warehouse_id, 'd1': d1}).fetchone()
+                                if r_inv:
+                                    inv_id = int(r_inv.id)
+                                    inv_dt = r_inv.completed_date
+                                    # Chercher le comptage de ce produit dans l'inventaire
+                                    r_item = session.execute(text(
+                                        "SELECT counted_stock FROM stock_inventaire_item WHERE inventory_id = :inv_id AND product_id = :pid LIMIT 1"
+                                    ), {'inv_id': inv_id, 'pid': pid}).fetchone()
+                                    if r_item and getattr(r_item, 'counted_stock', None) is not None:
+                                        base = float(r_item.counted_stock or 0)
+                                        # Calculer la variation des mouvements entre inv_dt et d1 pour cet entrepôt
+                                        q_var = text("""
+                                            SELECT COALESCE(SUM(CASE
+                                                WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                                WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
+                                                WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
+                                                WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
+                                                ELSE 0 END),0) as var
+                                            FROM stock_mouvements
+                                            WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
+                                            AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
+                                        """)
+                                        r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_dt, 'd1': d1, 'wid': warehouse_id}).fetchone()
+                                        variation = float(r_var.var or 0)
+                                        initial_q = float(base + variation)
+                                    else:
+                                        # Pas d'item compté pour ce produit -> fallback sur mouvements avant d1 (filtré par entrepôt)
+                                        r_init = session.execute(text(
+                                            "SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1 AND (warehouse_id = :wid OR destination_warehouse_id = :wid)"
+                                        ), {'pid': pid, 'd1': d1, 'wid': warehouse_id}).fetchone()
+                                        initial_q = float(r_init.qty or 0)
+                                else:
+                                    # Aucun inventaire trouvé pour l'entrepôt -> fallback
+                                    r_init = session.execute(text(
+                                        "SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1 AND (warehouse_id = :wid OR destination_warehouse_id = :wid)"
+                                    ), {'pid': pid, 'd1': d1, 'wid': warehouse_id}).fetchone()
+                                    initial_q = float(r_init.qty or 0)
+                            else:
+                                # Sans entrepôt : fallback sur la somme globale des mouvements avant d1
+                                r_init = session.execute(text(
+                                    "SELECT COALESCE(SUM(CASE \n                                        WHEN movement_type = 'ENTREE' THEN quantity\n                                        WHEN movement_type = 'SORTIE' THEN -quantity\n                                        WHEN movement_type = 'AJUSTEMENT' THEN quantity\n                                        WHEN movement_type = 'TRANSFERT' THEN 0\n                                        WHEN movement_type = 'ANNULATION' THEN quantity\n                                        ELSE 0\n                                    END), 0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1"
+                                ), {'pid': pid, 'd1': d1}).fetchone()
+                                initial_q = float(r_init.qty or 0)
                         except Exception as e:
                             print(f"⚠️ Erreur calcul Q initiale pour produit {pid}: {e}")
                             initial_q = 0.0

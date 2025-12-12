@@ -281,7 +281,8 @@ class AchatController:
             return False
     
     def process_paiement_commande(self, session: Session, commande_id: int,
-                                 montant: Decimal, mode_paiement: str, reference: str = None) -> bool:
+                                 montant: Decimal, mode_paiement: str, reference: str = None,
+                                 compte_financier_id: int = None) -> bool:
         try:
             commande = session.query(AchatCommande).get(commande_id)
             if not commande:
@@ -315,6 +316,12 @@ class AchatController:
                 reference=reference,
                 date_paiement=self._local_now()
             )
+            # Enregistrer le compte financier choisi si fourni
+            if compte_financier_id:
+                try:
+                    depense.compte_financier_id = compte_financier_id
+                except Exception:
+                    pass
             session.add(depense)
             session.flush()  # Pour obtenir l'ID
             
@@ -330,8 +337,8 @@ class AchatController:
             # )
             # session.add(event_expense)
             
-            # Créer l'écriture comptable
-            self.create_ecriture_comptable_achat(session, commande, depense)
+            # Créer l'écriture comptable en passant le compte financier sélectionné (si fourni)
+            self.create_ecriture_comptable_achat(session, commande, depense, compte_financier_id=compte_financier_id)
             
             # Si le paiement couvre le montant total, valider la commande
             # Calculer le nouveau total payé et mettre à jour le statut de paiement
@@ -429,7 +436,8 @@ class AchatController:
             
             
     def create_ecriture_comptable_achat(self, session: Session, 
-                                        commande: AchatCommande, depense: AchatDepense):
+                                        commande: AchatCommande, depense: AchatDepense,
+                                        compte_financier_id: int = None):
         """Crée les écritures comptables pour un achat et son paiement éventuel"""
         try:
             # Récupération de la configuration comptable
@@ -468,7 +476,8 @@ class AchatController:
                 session.add(ecriture_debit_paiement)
 
                 # Crédit : Caisse ou banque (sortie d’argent)
-                compte_paiement_id = config.compte_caisse_id
+                # Si un compte financier a été fourni par l'UI, l'utiliser en priorité
+                compte_paiement_id = compte_financier_id or config.compte_caisse_id
                 ecriture_credit_paiement = ComptaEcritures(
                     journal_id=journal_paiement.id,
                     compte_comptable_id=compte_paiement_id,

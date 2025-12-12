@@ -1769,12 +1769,9 @@ Notes: {notes_preview}
                     # Récupérer tous les produits avec leurs catégories
                     all_products = session.query(CoreProduct).all()
                     for prod in all_products:
-                        print('Debug prod1:', prod.id, prod.name, prod.category_id)
                         if prod.category_id:
-                            print('Debug prod2:', prod.id, prod.name, prod.category_id)
                             cat = session.query(CoreProductCategory).get(prod.category_id)
                             if cat:
-                                print('Debug prod3:', prod.id, prod.name, cat.id, cat.name)
                                 product_categories[prod.id] = {
                                     'category_id': cat.id,
                                     'category_name': cat.name

@@ -613,42 +613,76 @@ class EntreeSortieIndex(QWidget):
             entry = filtered[row]
             entry_id = entry.get('id')
 
-            # Ne traiter que les dépenses internes (EventExpense) identifiées par EXP_<id>
-            if not entry_id or not str(entry_id).startswith('EXP_'):
+            # Traiter les différents types d'entrées :
+            # - Dépenses internes : id 'EXP_<id>' -> annulation via cancel_expense
+            # - Écritures comptables : id 'EC_<id>' -> annulation via cancel_accounting_entry
+            if not entry_id:
                 return
 
-            try:
-                expense_id = int(str(entry_id).split('_', 1)[1])
-            except Exception:
-                return
-
-            # Confirmation
-            # Demander la raison d'annulation (optionnelle)
-            ok = False
-            reason = ''
-            reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
-            if not ok:
-                # Utilisateur a annulé la saisie -> on demande une confirmation simple
-                reply = QMessageBox.question(self, 'Annuler la dépense',
-                                             f"Voulez-vous annuler la dépense #{expense_id} ?\nCette opération créera une écriture d'annulation.",
-                                             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-                if reply != QMessageBox.StandardButton.Yes:
+            # Dépenses internes
+            if str(entry_id).startswith('EXP_'):
+                try:
+                    expense_id = int(str(entry_id).split('_', 1)[1])
+                except Exception:
                     return
 
-            # Déterminer user_id (si current_user est un objet avec attribut id)
-            user_id = None
-            try:
-                user_id = getattr(self.current_user, 'id', None) or int(self.current_user)
-            except Exception:
-                user_id = 1
+                # Confirmation
+                ok = False
+                reason = ''
+                reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
+                if not ok:
+                    reply = QMessageBox.question(self, 'Annuler la dépense',
+                                                 f"Voulez-vous annuler la dépense #{expense_id} ?\nCette opération créera une écriture d'annulation.",
+                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
 
-            result = self.expense_controller.cancel_expense(expense_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
-            if result:
-                QMessageBox.information(self, 'Annulation effectuée', f"La dépense #{expense_id} a été annulée et les écritures inverses enregistrées.")
-                # Recharger le journal
-                self.load_journal_data()
-            else:
-                QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la dépense #{expense_id}. Voir logs.")
+                # Déterminer user_id
+                user_id = None
+                try:
+                    user_id = getattr(self.current_user, 'id', None) or int(self.current_user)
+                except Exception:
+                    user_id = 1
+
+                result = self.expense_controller.cancel_expense(expense_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
+                if result:
+                    QMessageBox.information(self, 'Annulation effectuée', f"La dépense #{expense_id} a été annulée et les écritures inverses enregistrées.")
+                    self.load_journal_data()
+                else:
+                    QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler la dépense #{expense_id}. Voir logs.")
+                return
+
+            # Écritures comptables
+            if str(entry_id).startswith('EC_'):
+                try:
+                    ecr_id = int(str(entry_id).split('_', 1)[1])
+                except Exception:
+                    return
+
+                # Confirmation
+                ok = False
+                reason = ''
+                reason, ok = QInputDialog.getText(self, 'Raison annulation', 'Veuillez indiquer une raison d\'annulation (optionnel):')
+                if not ok:
+                    reply = QMessageBox.question(self, 'Annuler écriture',
+                                                 f"Voulez-vous annuler l\'écriture comptable #{ecr_id} ?\nCette opération créera un journal d'annulation.",
+                                                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+
+                user_id = None
+                try:
+                    user_id = getattr(self.current_user, 'id', None) or int(self.current_user)
+                except Exception:
+                    user_id = 1
+
+                result = self.expense_controller.cancel_accounting_entry(ecr_id, user_id=user_id, reason=reason or f"Annulé depuis l'interface par utilisateur {user_id}")
+                if result:
+                    QMessageBox.information(self, 'Annulation effectuée', f"L\'écriture comptable #{ecr_id} a été annulée et les écritures inverses enregistrées.")
+                    self.load_journal_data()
+                else:
+                    QMessageBox.critical(self, 'Erreur', f"Impossible d'annuler l\'écriture #{ecr_id}. Voir logs.")
+                return
 
         except Exception as e:
             print(f"Erreur lors du double-clic journal: {e}")

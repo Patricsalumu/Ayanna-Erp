@@ -16,15 +16,17 @@ from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models.achats_models import AchatCommande, EtatCommande
 from ayanna_erp.core.config import Config
 from ayanna_erp.core.entreprise_controller import EntrepriseController
+from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaConfig
 
 
 class PaiementDialog(QDialog):
-    """Dialog pour saisir un paiement"""
+    """Dialog pour saisir un paiement (avec sélection du compte financier)"""
 
-    def __init__(self, parent=None, commande=None, montant_restant=0):
+    def __init__(self, parent=None, commande=None, montant_restant=0, achat_controller: AchatController = None):
         super().__init__(parent)
         self.commande = commande
         self.montant_restant = montant_restant
+        self.achat_controller = achat_controller
         # Récupérer le symbole de la devise dynamique
         try:
             self.entreprise_ctrl = EntrepriseController()
@@ -32,11 +34,24 @@ class PaiementDialog(QDialog):
         except Exception:
             self.currency = "FC"
         self.setWindowTitle(f"Paiement - Commande {commande.numero}")
-        self.setFixedSize(420, 320)
+        # Fenêtre agrandie et modal
+        self.setMinimumSize(520, 420)
+        self.resize(520, 420)
+        self.setModal(True)
         self.setup_ui()
 
     def setup_ui(self):
+        # Style général et layout
+        self.setStyleSheet("""
+            QWidget { font-family: 'Segoe UI', Arial, sans-serif; font-size: 11px; }
+            QGroupBox { font-weight: 600; font-size: 13px; margin-top: 6px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px 0 3px; }
+            QDialogButtonBox QPushButton { padding: 8px 14px; border-radius: 6px; }
+            QComboBox, QLineEdit, QDoubleSpinBox, QTextEdit { padding: 6px; }
+        """)
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
 
         info = QGroupBox("Informations")
         form = QFormLayout(info)
@@ -54,6 +69,7 @@ class PaiementDialog(QDialog):
         self.montant_spinbox.setValue(float(self.montant_restant))
         # Spinbox suffix: afficher le symbole (sans le montant formaté)
         self.montant_spinbox.setSuffix(f" {self.entreprise_ctrl.get_currency_symbol()}")
+        self.montant_spinbox.setFixedWidth(180)
         pay_form.addRow("Montant*:", self.montant_spinbox)
 
         self.mode_combo = QComboBox()
@@ -62,7 +78,35 @@ class PaiementDialog(QDialog):
 
         self.reference_edit = QLineEdit()
         self.reference_edit.setPlaceholderText("Référence (chèque, virement...)")
+        self.reference_edit.setFixedWidth(320)
         pay_form.addRow("Référence:", self.reference_edit)
+
+        # Compte financier (optionnel) : permettre de choisir le compte à créditer
+        self.compte_financier_combo = QComboBox()
+        self.compte_financier_combo.addItem("-- Sélectionner compte financier --", None)
+        # Charger les comptes financiers (classe 5) depuis la base
+        try:
+            if self.achat_controller and getattr(self.achat_controller, 'db_manager', None):
+                session = self.achat_controller.db_manager.get_session()
+                try:
+                    comptes = session.query(ComptaComptes).filter(ComptaComptes.numero.like('5%')).order_by(ComptaComptes.numero).all()
+                    for c in comptes:
+                        label = f"{c.numero} - {getattr(c, 'nom', None) or getattr(c, 'name', '')}"
+                        self.compte_financier_combo.addItem(label, c.id)
+                    # sélectionner le compte caisse par défaut si présent dans la config
+                    config = session.query(ComptaConfig).filter_by(enterprise_id=getattr(self.achat_controller, 'entreprise_id', None)).first()
+                    if config and config.compte_caisse_id:
+                        idx = self.compte_financier_combo.findData(config.compte_caisse_id)
+                        if idx >= 0:
+                            self.compte_financier_combo.setCurrentIndex(idx)
+                finally:
+                    session.close()
+        except Exception:
+            pass
+
+        # largeur du combo pour meilleure lisibilité
+        self.compte_financier_combo.setFixedWidth(360)
+        pay_form.addRow("Compte financier:", self.compte_financier_combo)
 
         self.commentaire = QTextEdit()
         self.commentaire.setMaximumHeight(60)
@@ -70,10 +114,24 @@ class PaiementDialog(QDialog):
 
         layout.addWidget(pay_group)
 
+        # Boutons OK/Cancel stylés et centrés
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        try:
+            btn_ok = buttons.button(QDialogButtonBox.StandardButton.Ok)
+            if btn_ok:
+                btn_ok.setStyleSheet('background-color: #27AE60; color: white; font-weight:600;')
+            btn_cancel = buttons.button(QDialogButtonBox.StandardButton.Cancel)
+            if btn_cancel:
+                btn_cancel.setStyleSheet('background-color: #E0E0E0;')
+        except Exception:
+            pass
+        btn_holder = QHBoxLayout()
+        btn_holder.addStretch()
+        btn_holder.addWidget(buttons)
+        btn_holder.addStretch()
+        layout.addLayout(btn_holder)
 
     def get_montant(self):
         return Decimal(str(self.montant_spinbox.value()))
@@ -83,6 +141,17 @@ class PaiementDialog(QDialog):
 
     def get_reference(self):
         return self.reference_edit.text().strip()
+
+    def get_compte_financier_id(self):
+        return self.compte_financier_combo.currentData()
+
+    def accept(self) -> None:
+        """Valider le dialogue seulement si un compte financier est sélectionné."""
+        compte_id = self.get_compte_financier_id()
+        if not compte_id:
+            QMessageBox.warning(self, "Attention", "Veuillez sélectionner un compte financier.")
+            return
+        super().accept()
 
 
 class EditCommandeDialog(QDialog):
@@ -394,8 +463,9 @@ class CommandesWidget(QWidget):
         paiements_w = QWidget()
         paiements_v = QVBoxLayout(paiements_w)
         self.paiements_table = QTableWidget()
-        self.paiements_table.setColumnCount(4)
-        self.paiements_table.setHorizontalHeaderLabels(["Date", "Montant", "Mode", "Réf."])
+        # Colonnes : Date, Montant, Mode, Réf., Compte (num - nom)
+        self.paiements_table.setColumnCount(5)
+        self.paiements_table.setHorizontalHeaderLabels(["Date", "Montant", "Mode", "Réf.", "Compte"])
         paiements_v.addWidget(self.paiements_table)
         tabs.addTab(paiements_w, "Paiements")
 
@@ -593,6 +663,16 @@ class CommandesWidget(QWidget):
                     self.paiements_table.setItem(r, 1, QTableWidgetItem(self.entreprise_ctrl.format_amount(getattr(d, 'montant', 0))))
                     self.paiements_table.setItem(r, 2, QTableWidgetItem(d.mode_paiement or "N/A"))
                     self.paiements_table.setItem(r, 3, QTableWidgetItem(d.reference or "N/A"))
+                    # Afficher le compte utilisé si renseigné
+                    compte_label = "-"
+                    try:
+                        if getattr(d, 'compte_financier_id', None):
+                            compte = session.query(ComptaComptes).get(d.compte_financier_id)
+                            if compte:
+                                compte_label = f"{compte.numero} - {getattr(compte, 'intitule', None) or getattr(compte, 'name', '')}"
+                    except Exception:
+                        compte_label = "-"
+                    self.paiements_table.setItem(r, 4, QTableWidgetItem(compte_label))
             except Exception:
                 self.paiements_table.setRowCount(0)
             session.close()
@@ -689,13 +769,14 @@ class CommandesWidget(QWidget):
                 QMessageBox.information(self, "Info", "Commande déjà payée")
                 session.close()
                 return
-            dialog = PaiementDialog(self, cmd, montant_restant)
+            dialog = PaiementDialog(self, cmd, montant_restant, self.achat_controller)
             if dialog.exec() == QDialog.DialogCode.Accepted:
                 montant = dialog.get_montant()
                 mode = dialog.get_mode_paiement()
                 ref = dialog.get_reference()
+                compte_financier_id = dialog.get_compte_financier_id()
                 try:
-                    success = self.achat_controller.process_paiement_commande(session, commande_id, montant, mode, ref)
+                    success = self.achat_controller.process_paiement_commande(session, commande_id, montant, mode, ref, compte_financier_id=compte_financier_id)
                     if success:
                         QMessageBox.information(self, "Succès", f"Paiement de {self.entreprise_ctrl.format_amount(montant)} enregistré")
                         self.refresh_data()
