@@ -1,0 +1,1 @@
+# Contrôleurs centralisés pour les modules core
