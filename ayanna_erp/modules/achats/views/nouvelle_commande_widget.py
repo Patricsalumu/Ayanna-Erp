@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox,
     QComboBox, QLineEdit, QSpinBox, QDoubleSpinBox, QPushButton,
     QTableWidget, QTableWidgetItem, QLabel, QMessageBox, QDialog,
-    QDialogButtonBox, QHeaderView, QDateEdit
+    QDialogButtonBox, QHeaderView, QDateEdit, QCheckBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QDate
 from PyQt6.QtGui import QFont
@@ -15,118 +15,266 @@ from datetime import datetime
 
 from ayanna_erp.modules.achats.controllers import AchatController
 from ayanna_erp.modules.achats.models import CoreFournisseur, EtatCommande
-from ayanna_erp.modules.core.models import CoreProduct
-from ayanna_erp.modules.stock.models import StockWarehouse
+from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
+from ayanna_erp.modules.stock.models import StockWarehouse, StockProduitEntrepot
 from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
 class ProductSelectionDialog(QDialog):
-    """Dialog pour sélectionner des produits à ajouter à la commande"""
+    """Dialog pour sélectionner des produits avec filtres avancés"""
     
-    def __init__(self, achat_controller: AchatController, parent=None):
+    def __init__(self, achat_controller: AchatController, warehouse_id=None, parent=None):
         super().__init__(parent)
         self.achat_controller = achat_controller
+        self.warehouse_id = warehouse_id
         self.selected_products = []
+        
         try:
             self.entreprise_ctrl = EntrepriseController()
             self.currency = self.entreprise_ctrl.get_currency_symbol()
         except Exception:
             self.currency = "FC"
         
-        self.setWindowTitle("Sélectionner des produits")
+        self.setWindowTitle("Sélectionner les produits")
         self.setModal(True)
-        self.setMinimumSize(600, 400)
+        self.setGeometry(250, 100, 700, 600)  # Fenêtre agrandie
         
         self.setup_ui()
-        self.load_products()
+        self.load_data()
     
     def setup_ui(self):
         """Configuration de l'interface"""
         layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+        layout.setContentsMargins(12, 12, 12, 12)
         
-        # Recherche
-        search_layout = QHBoxLayout()
-        search_layout.addWidget(QLabel("Recherche:"))
+        # Filtres
+        filters_layout = QHBoxLayout()
+        
+        # Filtre Catégorie
+        filters_layout.addWidget(QLabel("Catégorie:"))
+        self.category_combo = QComboBox()
+        self.category_combo.addItem("Toutes les catégories", None)
+        self.category_combo.currentIndexChanged.connect(self.apply_filters)
+        filters_layout.addWidget(self.category_combo)
+        
+        # Filtre Niveau de stock
+        filters_layout.addWidget(QLabel("Niveau de stock:"))
+        self.stock_level_combo = QComboBox()
+        self.stock_level_combo.addItems(["Tous", "Rupture", "Faible", "Normal"])
+        self.stock_level_combo.currentIndexChanged.connect(self.apply_filters)
+        filters_layout.addWidget(self.stock_level_combo)
+        
+        # Filtre Recherche
+        filters_layout.addWidget(QLabel("Recherche:"))
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Nom ou code du produit...")
-        self.search_edit.textChanged.connect(self.filter_products)
-        search_layout.addWidget(self.search_edit)
-        layout.addLayout(search_layout)
+        self.search_edit.setPlaceholderText("Nom ou code...")
+        self.search_edit.textChanged.connect(self.apply_filters)
+        filters_layout.addWidget(self.search_edit)
+        
+        filters_layout.addStretch()
+        layout.addLayout(filters_layout)
         
         # Table des produits
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(4)
+        self.products_table.setColumnCount(7)
         self.products_table.setHorizontalHeaderLabels([
-            "Code", "Nom", "Prix", "Sélectionner"
+            "Ajouter", "Code", "Nom", "Catégorie", "Qté Disponible", "Niveau Stock", "Actions"
         ])
+        
+        header = self.products_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(6, QHeaderView.ResizeMode.ResizeToContents)
+        
         self.products_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         layout.addWidget(self.products_table)
         
         # Boutons
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        buttons_layout = QHBoxLayout()
+        
+        add_selected_btn = QPushButton("✅ Ajouter sélectionnés")
+        add_selected_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #219A52;
+            }
+        """)
+        add_selected_btn.clicked.connect(self.accept)
+        
+        cancel_btn = QPushButton("❌ Annuler")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+        
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(add_selected_btn)
+        buttons_layout.addWidget(cancel_btn)
+        layout.addLayout(buttons_layout)
     
-    def load_products(self):
-        """Charge la liste des produits"""
+    def load_data(self):
+        """Charger les produits et catégories"""
         try:
             session = self.achat_controller.db_manager.get_session()
+            
+            # Charger les catégories
+            categories = session.query(CoreProductCategory).filter(CoreProductCategory.is_active == True).order_by(CoreProductCategory.name).all()
+            for cat in categories:
+                self.category_combo.addItem(cat.name, cat.id)
+            
+            # Charger les produits avec leurs stocks
             self.all_products = self.achat_controller.get_produits_disponibles(session)
-            self.populate_products_table()
+            
+            # IMPORTANT: Forcer le chargement des relations AVANT de fermer la session
+            for product in self.all_products:
+                # Accéder à la relation pour la charger
+                _ = product.category
+            
+            self.stock_levels = {}  # Dictionnaire pour stocker les niveaux de stock
+            
+            if self.warehouse_id:
+                stock_entries = session.query(StockProduitEntrepot).filter(
+                    StockProduitEntrepot.warehouse_id == self.warehouse_id
+                ).all()
+                
+                for stock in stock_entries:
+                    self.stock_levels[stock.product_id] = {
+                        'quantity': float(stock.quantity),
+                        'min_level': float(stock.min_stock_level)
+                    }
+            
+            session.close()
+            self.apply_filters()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {str(e)}")
-        finally:
-            session.close()
     
-    def populate_products_table(self):
-        """Remplit la table des produits"""
-        products_to_show = getattr(self, 'filtered_products', self.all_products)
-        self.products_table.setRowCount(len(products_to_show))
+    def apply_filters(self):
+        """Appliquer les filtres et remplir la table"""
+        self.products_table.setRowCount(0)
         
-        for row, product in enumerate(products_to_show):
-            # Code
-            self.products_table.setItem(row, 0, QTableWidgetItem(product.code or ""))
+        category_id = self.category_combo.currentData()
+        stock_level_filter = self.stock_level_combo.currentText()
+        search_text = self.search_edit.text().lower()
+        
+        for product in self.all_products:
+            # Filtre catégorie
+            if category_id is not None and (not product.category or product.category.id != category_id):
+                continue
             
-            # Nom
-            self.products_table.setItem(row, 1, QTableWidgetItem(product.name))
+            # Filtre recherche
+            if search_text and search_text not in product.name.lower() and search_text not in product.code.lower():
+                continue
             
-            # Prix
-            prix_str = self.entreprise_ctrl.format_amount(product.cost) if product.cost else self.entreprise_ctrl.format_amount(0)
-            self.products_table.setItem(row, 2, QTableWidgetItem(prix_str))
+            # Récupérer les infos stock
+            stock_info = self.stock_levels.get(product.id, {'quantity': 0, 'min_level': 0})
+            quantity = stock_info['quantity']
+            min_level = stock_info['min_level']
             
-            # Checkbox pour sélection
+            # Déterminer le niveau
+            if quantity <= 0:
+                level = "Rupture"
+            elif quantity < min_level:
+                level = "Faible"
+            else:
+                level = "Normal"
+            
+            # Filtre niveau de stock
+            if stock_level_filter != "Tous" and level != stock_level_filter:
+                continue
+            
+            # Ajouter la row
+            row = self.products_table.rowCount()
+            self.products_table.insertRow(row)
+            
+            # Checkbox pour sélectionner
+            checkbox = QCheckBox()
+            checkbox.setObjectName(f"checkbox_{product.id}")
             checkbox_widget = QWidget()
             checkbox_layout = QHBoxLayout(checkbox_widget)
-            checkbox_layout.setContentsMargins(0, 0, 0, 0)
+            checkbox_layout.setContentsMargins(4, 0, 4, 0)
+            checkbox_layout.addWidget(checkbox)
+            self.products_table.setCellWidget(row, 0, checkbox_widget)
             
-            select_btn = QPushButton("Ajouter")
-            select_btn.clicked.connect(lambda checked, p=product: self.select_product(p))
-            checkbox_layout.addWidget(select_btn)
+            # Code
+            self.products_table.setItem(row, 1, QTableWidgetItem(product.code or ""))
             
-            self.products_table.setCellWidget(row, 3, checkbox_widget)
+            # Nom
+            self.products_table.setItem(row, 2, QTableWidgetItem(product.name))
+            
+            # Catégorie
+            cat_name = product.category.name if product.category else "N/A"
+            self.products_table.setItem(row, 3, QTableWidgetItem(cat_name))
+            
+            # Quantité disponible
+            qty_item = QTableWidgetItem(f"{quantity:.2f}")
+            qty_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.products_table.setItem(row, 4, qty_item)
+            
+            # Niveau de stock
+            level_item = QTableWidgetItem(level)
+            if level == "Rupture":
+                level_item.setBackground(Qt.GlobalColor.red)
+            elif level == "Faible":
+                level_item.setBackground(Qt.GlobalColor.yellow)
+            else:
+                level_item.setBackground(Qt.GlobalColor.green)
+            self.products_table.setItem(row, 5, level_item)
+            
+            # Bouton action rapide
+            add_btn = QPushButton("➕ Ajouter")
+            add_btn.setMaximumWidth(100)
+            add_btn.clicked.connect(lambda checked, pid=product.id: self.add_product_quick(pid))
+            self.products_table.setCellWidget(row, 6, add_btn)
     
-    def filter_products(self):
-        """Filtre les produits selon la recherche"""
-        search_text = self.search_edit.text().lower()
-        if search_text:
-            self.filtered_products = [
-                p for p in self.all_products
-                if search_text in p.name.lower() or 
-                   (p.code and search_text in p.code.lower())
-            ]
+    def add_product_quick(self, product_id):
+        """Ajouter rapidement un produit avec quantité 1"""
+        stock_info = self.stock_levels.get(product_id, {'quantity': 0, 'min_level': 0})
+        if stock_info['quantity'] > 0:
+            product = next((p for p in self.all_products if p.id == product_id), None)
+            if product and product not in self.selected_products:
+                self.selected_products.append(product)
+                QMessageBox.information(self, "Succès", f"Produit '{product.name}' ajouté avec quantité 1")
         else:
-            self.filtered_products = self.all_products
-        
-        self.populate_products_table()
+            QMessageBox.warning(self, "Attention", "Quantité insuffisante")
     
-    def select_product(self, product):
-        """Sélectionne un produit"""
-        if product not in self.selected_products:
-            self.selected_products.append(product)
-            QMessageBox.information(self, "Produit ajouté", f"Produit '{product.name}' ajouté à la sélection")
+    def get_selected_products(self):
+        """Retourner les produits sélectionnés"""
+        selected = self.selected_products.copy()
+        
+        # Ajouter aussi les produits cochés dans la table
+        for row in range(self.products_table.rowCount()):
+            checkbox = self.products_table.cellWidget(row, 0)
+            if checkbox:
+                checkbox_check = checkbox.findChild(QCheckBox)
+                if checkbox_check and checkbox_check.isChecked():
+                    product_name = self.products_table.item(row, 2).text()
+                    product = next((p for p in self.all_products if p.name == product_name), None)
+                    if product and product not in selected:
+                        selected.append(product)
+        
+        return selected
 
 
 class NouvelleCommandeWidget(QWidget):
@@ -379,9 +527,10 @@ class NouvelleCommandeWidget(QWidget):
     
     def add_products(self):
         """Ouvre le dialog de sélection de produits"""
-        dialog = ProductSelectionDialog(self.achat_controller, self)
+        warehouse_id = self.entrepot_combo.currentData()
+        dialog = ProductSelectionDialog(self.achat_controller, warehouse_id=warehouse_id, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            for product in dialog.selected_products:
+            for product in dialog.get_selected_products():
                 self.add_product_line(product)
     
     def add_product_line(self, product):

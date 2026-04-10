@@ -1,7 +1,7 @@
 from decimal import Decimal
 from datetime import datetime
 from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import and_, or_
 
 from ayanna_erp.database.database_manager import DatabaseManager
@@ -90,22 +90,26 @@ class AchatController:
     # ================== GESTION DES COMMANDES ==================
     
     def generate_numero_commande(self, session: Session) -> str:
-        """Génère un numéro de commande unique"""
+        """Génère un numéro de commande unique et continu (indépendant de la date)"""
         today = self._local_now()
-        prefix = f"CMD{today.strftime('%Y%m%d')}"
+        date_prefix = today.strftime('%Y%m%d')
         
-        # Trouver le dernier numéro du jour
-        last_cmd = session.query(AchatCommande).filter(
-            AchatCommande.numero.like(f"{prefix}%")
-        ).order_by(AchatCommande.numero.desc()).first()
+        # Récupérer tous les numéros de commande pour trouver le plus grand séquentiel
+        all_cmds = session.query(AchatCommande).all()
         
-        if last_cmd:
-            last_num = int(last_cmd.numero.split('-')[-1])
-            next_num = last_num + 1
-        else:
-            next_num = 1
+        max_num = 0
+        for cmd in all_cmds:
+            try:
+                parts = cmd.numero.split('-')
+                if len(parts) == 2:
+                    num = int(parts[1])
+                    if num > max_num:
+                        max_num = num
+            except (ValueError, IndexError):
+                pass
         
-        return f"{prefix}-{next_num:04d}"
+        next_num = max_num + 1
+        return f"{date_prefix}-{next_num:04d}"
     
     def create_commande(self, session: Session, entrepot_id: int, 
                        fournisseur_id: int = None, lignes: List[Dict] = None,
@@ -239,16 +243,41 @@ class AchatController:
         
         return commande.montant_total
     
-    def get_commandes(self, session: Session, etat: EtatCommande = None,
-                     fournisseur_id: int = None, limit: int = 100) -> List[AchatCommande]:
-        """Récupère la liste des commandes avec filtres"""
-        query = session.query(AchatCommande)
-        
+    def get_commandes(
+        self,
+        session: Session,
+        etat: EtatCommande = None,
+        fournisseur_id: int = None,
+        search_text: str = None,
+        limit: int = 100
+    ) -> List[AchatCommande]:
+
+        query = session.query(AchatCommande).options(
+            joinedload(AchatCommande.fournisseur),  # plus efficace ici
+            selectinload(AchatCommande.depenses)
+        )
+
+        # 🔹 Filtres simples
         if etat:
             query = query.filter(AchatCommande.etat == etat)
+
         if fournisseur_id:
             query = query.filter(AchatCommande.fournisseur_id == fournisseur_id)
-        
+
+        # 🔥 Filtrage SQL (remplace ton filtrage Python)
+        if search_text:
+            search = f"%{search_text.lower()}%"
+
+            query = query.join(AchatCommande.fournisseur).filter(
+                or_(
+                    AchatCommande.numero.ilike(search),
+                    # protection si fournisseur null
+                    AchatCommande.fournisseur.has(
+                        CoreFournisseur.nom.ilike(search)
+                    )
+                )
+            )
+
         return query.order_by(AchatCommande.date_commande.desc()).limit(limit).all()
     
     def get_commande_by_id(self, session: Session, commande_id: int) -> Optional[AchatCommande]:
@@ -464,11 +493,11 @@ class AchatController:
             # Débit : Stock (ou compte achat)
             ecriture_debit_achat = ComptaEcritures(
                 journal_id=journal_commande.id,
-                compte_comptable_id=config.compte_stock_id or config.compte_achat_id,
+                compte_comptable_id=config.compte_achat_id,
                 debit=commande.montant_total,
                 credit=Decimal('0'),
                 ordre=1,
-                libelle=f"Achat marchandises - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+                libelle=f"Achat marchandises - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
             )
             session.add(ecriture_debit_achat)
 
@@ -479,7 +508,7 @@ class AchatController:
                 debit=Decimal('0'),
                 credit=commande.montant_total,
                 ordre=2,
-                libelle=f"Dette fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+                libelle=f"Dette fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
             )
             session.add(ecriture_credit_achat)
             try:
@@ -511,11 +540,11 @@ class AchatController:
                 print("⚠️ Configuration comptable manquante pour cette entreprise.")
                 return
 
-            # === JOURNAL 2 : Paiement (fournisseur vs caisse) ===
+            # === JOURNAL 3 : Paiement (fournisseur vs caisse) ===
             if depense and depense.montant and depense.montant > 0:
                 journal_paiement = ComptaJournaux(
                     date_operation=self._local_now(),
-                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'} - {commande.numero}",
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - {commande.numero}",
                     montant=depense.montant,
                     type_operation="Caisse",
                     reference=f"PAY-{commande.numero}",
@@ -533,7 +562,7 @@ class AchatController:
                     debit=depense.montant,
                     credit=Decimal('0'),
                     ordre=1,
-                    libelle=f"Paiement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'}"
+                    libelle=f"Paiement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
                 )
                 session.add(ecriture_debit_paiement)
 
@@ -546,7 +575,7 @@ class AchatController:
                     debit=Decimal('0'),
                     credit=depense.montant,
                     ordre=2,
-                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Divers'} - Commande {commande.numero}"
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - Commande {commande.numero}"
                 )
                 session.add(ecriture_credit_paiement)
 
@@ -565,7 +594,68 @@ class AchatController:
             import traceback
             traceback.print_exc()
 
-        
+    def create_ecriture_comptable_stock(self, session: Session, commande: AchatCommande):
+        """Crée les écritures comptables pour reception stock"""
+        try:
+            # Récupération de la configuration comptable
+            config = session.query(ComptaConfig).filter_by(
+                enterprise_id=self.entreprise_id
+            ).first()
+            if not config:
+                print("⚠️ Configuration comptable manquante pour cette entreprise.")
+                return
+
+            # === JOURNAL 2 : Stock (Stock vs Achat) ===
+    
+            journal_stock = ComptaJournaux(
+                date_operation=self._local_now(),
+                libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - {commande.numero}",
+                montant=commande.montant_total,
+                type_operation="OD",
+                reference=f"OD-{commande.numero}",
+                description=f"Reception stock pour commande {commande.numero}",
+                enterprise_id=self.entreprise_id,
+                user_id=commande.utilisateur_id
+            )
+            session.add(journal_stock)
+            session.flush()
+
+            # Débit : stock
+            ecriture_debit_stock = ComptaEcritures(
+                journal_id=journal_stock.id,
+                compte_comptable_id=config.compte_stock_id,
+                debit=commande.montant_total,
+                credit=Decimal('0'),
+                ordre=1,
+                libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
+            )
+            session.add(ecriture_debit_stock)
+
+            # Crédit : Compte achat marchandise
+            ecriture_credit_paiement = ComptaEcritures(
+                journal_id=journal_stock.id,
+                compte_comptable_id=config.compte_achat_id,
+                debit=Decimal('0'),
+                credit=commande.montant_total,
+                ordre=2,
+                libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - Commande {commande.numero}"
+            )
+            session.add(ecriture_credit_paiement)
+
+            try:
+                ent_ctrl = EntrepriseController(entreprise_id=self.entreprise_id)
+                montant_fmt = ent_ctrl.format_amount(commande.montant_total)
+            except Exception:
+                montant_fmt = str(commande.montant_total)
+            print(f"✅ Journal stock créé (ID {journal_stock.id}) - {montant_fmt}")
+
+            session.flush()
+            print("✅ Toutes les écritures ont été enregistrées avec succès.")
+
+        except Exception as e:
+            print(f"❌ Erreur lors de la création des écritures comptables: {e}")
+            import traceback
+            traceback.print_exc()
     # ================== INTÉGRATION STOCK ==================
     
     def create_mouvements_stock(self, session: Session, commande: AchatCommande):
@@ -862,6 +952,9 @@ class AchatController:
                 commande.etat = EtatCommande.RECEPTIONNE
             except Exception:
                 commande.etat = EtatCommande.VALIDE
+
+        # Créer l'écriture comptable en passant le compte financier sélectionné (si fourni)
+        self.create_ecriture_comptable_stock(session, commande)
 
         session.commit()
         return True

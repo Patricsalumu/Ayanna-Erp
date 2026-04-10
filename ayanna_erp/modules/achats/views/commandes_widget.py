@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QTabWidget, QGroupBox, QFormLayout, QTextEdit, QDialog,
     QDialogButtonBox, QDoubleSpinBox, QFileDialog
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QThread, QObject
 from decimal import Decimal
 from datetime import datetime
 import os
@@ -21,6 +21,43 @@ from ayanna_erp.modules.achats.models.achats_models import AchatCommande, EtatCo
 from ayanna_erp.core.config import Config
 from ayanna_erp.core.entreprise_controller import EntrepriseController
 from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaConfig
+
+
+class LoadDataWorker(QObject):
+    """Worker pour charger les données en arrière-plan dans un thread séparé"""
+    finished = pyqtSignal(list, str, int)  # commandes, search_text, etat_filter
+    error = pyqtSignal(str)
+    
+    def __init__(self, achat_controller, etat_filter=None, search_text=""):
+        super().__init__()
+        self.achat_controller = achat_controller
+        self.etat_filter = etat_filter
+        self.search_text = search_text
+        
+    def run(self):
+        """Charger les données (optimisé et sécurisé)"""
+        session = None
+        try:
+            # 🔹 Ouverture session
+            session = self.achat_controller.db_manager.get_session()
+
+            # 🔹 Appel optimisé (filtrage SQL inclus)
+            commandes = self.achat_controller.get_commandes(
+                session=session,
+                etat=self.etat_filter,
+                search_text=self.search_text,
+                limit=25  # Limite pour éviter surcharge, pagination à implémenter si besoin
+            )
+
+            # 🔥 DÉTACHER les objets AVANT fermeture session
+            for cmd in commandes:
+                session.expunge(cmd)
+            # 🔹 Émission résultat
+            self.finished.emit(commandes, self.search_text, self.etat_filter)
+
+        except Exception as e:
+            # 🔥 Toujours capturer proprement les erreurs
+            self.error.emit(str(e))
 
 
 class PaiementDialog(QDialog):
@@ -400,10 +437,11 @@ class CommandesWidget(QWidget):
         except Exception:
             self.currency = "FC"
         self.current_commandes = []
-        # Timer pour différer le refresh (non-bloquant)
-        self._refresh_timer = QTimer()
-        self._refresh_timer.setSingleShot(True)
-        self._refresh_timer.timeout.connect(self._do_refresh_data)
+        
+        # Thread pour le chargement des données
+        self.data_thread = None
+        self.data_worker = None
+        
         self.setup_ui()
         self._schedule_refresh()
     
@@ -461,7 +499,7 @@ class CommandesWidget(QWidget):
         self.table = QTableWidget()
         # Colonnes simplifiées: ID, Date, Montant, Payé, Statut Paiement, État, Utilisateur
         self.table.setColumnCount(7)
-        self.table.setHorizontalHeaderLabels(["ID", "Date", "Montant", "Payé", "Statut paiement", "État", "Utilisateur"])
+        self.table.setHorizontalHeaderLabels(["N° Commande", "Date", "Montant", "Payé", "Statut paiement", "État", "Utilisateur"])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # ID
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Date
@@ -575,31 +613,45 @@ class CommandesWidget(QWidget):
         return details
 
     def _schedule_refresh(self):
-        """Programmer un refresh non-bloquant (avec délai de 200ms)"""
-        self._refresh_timer.stop()
-        self._refresh_timer.start(200)  # Délai de 200ms
+        """Lancer le chargement des données dans un thread séparé"""
+        # Arrêter le thread précédent s'il est encore actif
+        if self.data_thread is not None and self.data_thread.isRunning():
+            self.data_thread.quit()
+            self.data_thread.wait()
+        
+        # Créer et configurer le worker
+        etat_filter = self.etat_combo.currentData() if hasattr(self, 'etat_combo') else None
+        search_text = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
+        
+        self.data_worker = LoadDataWorker(self.achat_controller, etat_filter, search_text)
+        self.data_thread = QThread()
+        self.data_worker.moveToThread(self.data_thread)
+        
+        # Connecter les signaux
+        self.data_thread.started.connect(self.data_worker.run)
+        self.data_worker.finished.connect(self._on_data_loaded)
+        self.data_worker.error.connect(self._on_data_error)
+        self.data_worker.finished.connect(self.data_thread.quit)
+        
+        # Démarrer le thread
+        self.data_thread.start()
 
     def refresh_data(self):
-        """Appel public pour rafraîchir les données (non-bloquant)"""
+        """Appel public pour rafraîchir les données (dans un thread)"""
         self._schedule_refresh()
+    
+    def _on_data_loaded(self, commandes, search_text, etat_filter):
+        """Callback appelé quand les données sont chargées"""
+        self.current_commandes = commandes
+        self.populate_table()
+    
+    def _on_data_error(self, error_msg):
+        """Callback appelé en cas d'erreur de chargement"""
+        QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {error_msg}")
 
     def _do_refresh_data(self):
         """Effectuer le refresh réel en arrière-plan"""
-        try:
-            session = self.achat_controller.db_manager.get_session()
-            etat_filter = self.etat_combo.currentData() if hasattr(self, 'etat_combo') else None
-            self.current_commandes = self.achat_controller.get_commandes(session, etat=etat_filter, limit=200)
-            search_text = self.search_edit.text().strip().lower() if hasattr(self, 'search_edit') else ""
-            if search_text:
-                self.current_commandes = [c for c in self.current_commandes if search_text in c.numero.lower() or (c.fournisseur and search_text in c.fournisseur.nom.lower())]
-            self.populate_table()
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement: {e}")
-        finally:
-            try:
-                session.close()
-            except:
-                pass
+        self._schedule_refresh()
 
     def populate_table(self):
         self.table.setRowCount(len(self.current_commandes))
@@ -607,8 +659,8 @@ class CommandesWidget(QWidget):
         session = self.achat_controller.db_manager.get_session()
         try:
             for row, commande in enumerate(self.current_commandes):
-                # Colonne ID
-                self.table.setItem(row, 0, QTableWidgetItem(str(commande.id)))
+                # Colonne N° Commande
+                self.table.setItem(row, 0, QTableWidgetItem(commande.numero))
                 
                 # Colonne Date
                 date_str = commande.date_commande.strftime("%d/%m/%Y %H:%M") if commande.date_commande else ""

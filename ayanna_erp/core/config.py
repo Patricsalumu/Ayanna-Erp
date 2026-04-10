@@ -25,15 +25,18 @@ class Config:
     # Notes de version
     VERSION_NOTES = {
         "1.9": {
-            "date": "Avril 2026",
+            "date": "10 Avril 2026",
             "titre": "Corrections et Améliorations d'Export",
             "changements": [
-                "🐛 BUGFIX: Correction de l'affichage des remises dans l'export produits",
-                "🐛 BUGFIX: Correction du calcul du montant en espèce dans le rapport quotidien",
-                "✨ AMÉLIORATION: Ajout du solde et des remises dans l'export des commandes",
-                "📊 AMÉLIORATION: Meilleure visibilité globale de l'activité via les documents d'export",
-                "📋 AMÉLIORATION: Affichage de la version sur le login et main window",
-                "📋 AMÉLIORATION: Diminution de la taille de la fenêtre modale création produit"
+                "BUGFIX: Correction de l'affichage des remises dans l'export produits",
+                "BUGFIX: Correction du calcul du montant en espèce dans le rapport quotidien",
+                "AMÉLIORATION: Ajout du solde et des remises dans l'export des commandes",
+                "AMÉLIORATION: Meilleure visibilité globale de l'activité via les documents d'export",
+                "AMÉLIORATION: Affichage de la version sur le login et main window",
+                "AMÉLIORATION: Diminution de la taille de la fenêtre modale création produit"
+                "AMELIORATION: Fenetre modale selection produit aggrandie, avec filtre par categorie et quantite stock"
+                "BUGFIX: Chargement des commandes limités à 25"
+                "AMELIORATION: Geration des numero commande unique"
             ]
         },
         "1.8": {
