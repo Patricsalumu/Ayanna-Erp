@@ -184,7 +184,7 @@ class ProductSelectionDialog(QDialog):
                 continue
             
             # Filtre recherche
-            if search_text and search_text not in product.name.lower() and search_text not in product.code.lower():
+            if search_text and search_text not in (product.name or '').lower() and search_text not in (product.code or '').lower():
                 continue
             
             # Récupérer les infos stock

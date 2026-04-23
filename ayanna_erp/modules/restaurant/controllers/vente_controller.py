@@ -199,7 +199,10 @@ class VenteController:
                 total_final = float(panier.total_final or 0.0)
             except Exception:
                 total_final = 0.0
-            
+
+            # Sauvegarder le statut original avant modification (pour détecter la première finalisation)
+            original_status = getattr(panier, 'status', 'en_cours')
+
             # Logique de détermination du payment_method final
             # Si Crédit pur (amount=0) → enregistrer comme Crédit
             # Si paiement partiel (total_paid < total_final) → convertir en Crédit pour la partie impayée
@@ -211,7 +214,7 @@ class VenteController:
             else:
                 # Paiement complet avec la méthode choisie
                 panier.payment_method = payment_method
-            
+
             panier.status = 'valide'
             panier.updated_at = datetime.now()
             # try to refresh the payment instance; if it's detached for any reason, re-query it
@@ -235,15 +238,12 @@ class VenteController:
                         user_id=user_id,
                         created_at=datetime.now()
                     )
-            # after successful commit, if panier is now 'valide' (paid or partial), finalize sale (accounting & stock)
+            # Finaliser la vente (écritures comptables + stock) uniquement lors du premier passage à 'valide'
+            # Si le panier était déjà 'valide', finalize_sale a déjà été appelé et a traité la vente.
             try:
-                # compute total paid
-                # call finalize_sale in a safe way (it opens its own session)
-                if getattr(panier, 'status', None) == 'valide':
+                if original_status != 'valide':
                     try:
-                        # IMPORTANT: Commit the panier status change to DB before calling finalize_sale
-                        # finalize_sale() opens its own session and re-queries the panier, so it needs to see
-                        # the committed status='valide' in the database
+                        # IMPORTANT: Commit avant finalize_sale (ouvre sa propre session et lit depuis la DB)
                         session.commit()
                         ok, msg = self.finalize_sale(panier_id, amount, payment_method=payment_method, user_id=user_id)
                         print(f"DEBUG: finalize_sale result for panier {panier_id}: {ok} - {msg}")
@@ -458,9 +458,17 @@ class VenteController:
 
             compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id = cfg
 
-            # Prevent duplicate processing: if a sale journal for this panier already exists, skip
-            existing = session.execute(text("SELECT COUNT(1) FROM compta_journaux WHERE reference = :ref AND type_operation = 'vente'"), {'ref': f"CMD-{panier.id}"}).fetchone()
-            if existing and existing[0] and int(existing[0]) > 0:
+            # Eviter le double traitement : vérifier que le journal de vente ET les mouvements de stock existent.
+            # Si le journal existe mais pas les mouvements (échec partiel précédent), on relance le traitement complet.
+            existing_journal = session.execute(text(
+                "SELECT COUNT(1) FROM compta_journaux WHERE reference = :ref AND type_operation = 'Vente'"
+            ), {'ref': f"CMD-{panier.id}"}).fetchone()
+            existing_stock = session.execute(text(
+                "SELECT COUNT(1) FROM stock_mouvements WHERE reference = :ref AND movement_type = 'SORTIE'"
+            ), {'ref': f"CMD-{panier.id}"}).fetchone()
+            already_journalized = existing_journal and int(existing_journal[0]) > 0
+            already_stocked = existing_stock and int(existing_stock[0]) > 0
+            if already_journalized and already_stocked:
                 return True, f"Vente CMD-{panier.id} déjà traitée"
 
             # 1) Journal de vente

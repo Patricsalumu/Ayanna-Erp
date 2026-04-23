@@ -2240,14 +2240,16 @@ Notes: {notes_preview}
                 total_remises = 0.0
 
             # Calculs finaux
-            total_ca_brut = stats.get('total_ca', 0)
-            total_vente = total_ca_brut - total_remises
+            # total_ca depuis les stats est déjà net (après remises) car basé sur total_final des paniers
+            total_ca_net = float(stats.get('total_ca', 0))
+            total_ca_brut = total_ca_net + total_remises  # reconstruire le brut avant remises
+            total_vente = total_ca_net                    # = total_ca_brut - total_remises
             total_creances = stats.get('total_unpaid', 0)
             solde_net = total_vente - total_creances - total_depenses
 
             stats_data = [
                 ['Statistiques générales', ''],
-                ['Total CA brut:', _fmt_local(total_ca_brut)],
+                ["Chiffre d'affaires brut:", _fmt_local(total_ca_brut)],
                 ['Remises:', _fmt_local(total_remises)],
                 ['Total vente (après remises):', _fmt_local(total_vente)],
                 ['Total payés:', _fmt_local(stats.get('total_paid', 0))],
@@ -2605,7 +2607,7 @@ Notes: {notes_preview}
                 traceback.print_exc()
                 total_remises = 0.0
             
-            total_vente = ca
+            total_vente = ca - total_remises  # CA brut moins remises
             # On garde dépenses, créances, solde net comme avant
             try:
                 from ayanna_erp.modules.salle_fete.controller.entre_sortie_controller import EntreSortieController
