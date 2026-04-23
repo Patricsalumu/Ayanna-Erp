@@ -330,9 +330,10 @@ class CaisseView(QWidget):
                 fmt_amount(total, sym), '', '', '', '', '', '',
             ])
 
-            cws = [1.2*cm, 2.8*cm, 4.5*cm, 3.2*cm, 2.8*cm, 3.5*cm,
-                   2.8*cm, 2.8*cm, 2.8*cm, 3.5*cm]
-            tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
+            cws = [1.0*cm, 2.5*cm, 4.0*cm, 2.8*cm, 2.5*cm, 3.0*cm,
+                   2.5*cm, 2.5*cm, 2.5*cm, 3.2*cm]
+            tbl = Table(tbl_data, colWidths=cws, repeatRows=1,
+                        hAlign='CENTER')
             tbl.setStyle(TableStyle([
                 ('BACKGROUND',     (0, 0),  (-1, 0),  HexColor('#2C3E50')),
                 ('TEXTCOLOR',      (0, 0),  (-1, 0),  white),

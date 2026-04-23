@@ -45,6 +45,23 @@ def _ensure_tables():
     except Exception as e:
         log.exception(f"Erreur création tables hôtel : {e}")
 
+    # Migration : ajout des colonnes pays et carte_identite sur shop_clients si absentes
+    try:
+        db2 = get_database_manager()
+        engine2 = db2.engine
+        with engine2.connect() as conn:
+            for col_def in [
+                "ALTER TABLE shop_clients ADD COLUMN pays TEXT",
+                "ALTER TABLE shop_clients ADD COLUMN carte_identite TEXT",
+            ]:
+                try:
+                    conn.execute(text(col_def))
+                    conn.commit()
+                except Exception:
+                    pass   # Colonne déjà existante
+    except Exception as e:
+        log.warning(f"Migration pays/carte_identite ignorée : {e}")
+
     # Enregistrer les modèles ORM dans la métadonnée SQLAlchemy
     try:
         from ayanna_erp.modules.hotel.models.model import (

@@ -145,6 +145,13 @@ class ReservationDetailDialog(QDialog):
         row_info("Créé par :",
                  r.get('created_by_name') or '-', '#8E44AD')
         row_info("Date de réservation :", _fmt_dt(r.get('created_at')))
+        # Pays et pièce d'identité
+        pays_val = r.get('pays', '').strip()
+        ci_val   = r.get('carte_identite', '').strip()
+        if pays_val:
+            row_info("Pays :", pays_val)
+        if ci_val:
+            row_info("Pièce d'identité :", ci_val)
         vbox.addSpacing(4)
 
         # ── Section dates ────────────────────────────────────────────────────
@@ -799,7 +806,7 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
                        if isinstance(solde, (int, float)) else '-')
             tbl_data.append([
                 r['code'],
-                (r['client_name'] or '')[:20],
+                (r['client_name'] or '')[:18],
                 r['room'],
                 fmt_date(r['date_entree_prevue']),
                 fmt_date(r['date_sortie_prevue']),
@@ -824,11 +831,13 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
             fmt_amount(tot_paid, sym), '', '',
         ])
 
-        cws = [2.0*cm, 4.0*cm, 1.8*cm,
-               2.2*cm, 2.2*cm, 1.4*cm,
-               2.4*cm, 2.4*cm, 1.6*cm,
-               2.8*cm, 2.8*cm, 2.8*cm, 2.4*cm, 2.0*cm]
-        tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
+        # Colonnes réduites – largeur totale ≈ 24 cm, table centrée avec marges
+        cws = [1.7*cm, 3.5*cm, 1.5*cm,
+               2.0*cm, 2.0*cm, 1.2*cm,
+               2.0*cm, 2.0*cm, 1.3*cm,
+               2.4*cm, 2.4*cm, 2.4*cm, 2.0*cm, 1.6*cm]
+        tbl = Table(tbl_data, colWidths=cws, repeatRows=1,
+                    hAlign='CENTER')
         tbl.setStyle(TableStyle([
             ('BACKGROUND',     (0, 0),  (-1, 0),  HexColor('#2C3E50')),
             ('TEXTCOLOR',      (0, 0),  (-1, 0),  white),

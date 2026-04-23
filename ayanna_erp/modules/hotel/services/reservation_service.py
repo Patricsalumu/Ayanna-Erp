@@ -428,6 +428,8 @@ class ReservationService:
                     'montant_reel': montant_reel,
                     'solde': solde,
                     'price_per_night': price_per_night,
+                    'pays': (r.client.pays or '') if r.client else '',
+                    'carte_identite': (r.client.carte_identite or '') if r.client else '',
                     'created_at': r.created_at,
                     'user_id': r.user_id,
                     'created_by_name': _user_name(session, r.user_id),

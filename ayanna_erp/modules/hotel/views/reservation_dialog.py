@@ -39,6 +39,14 @@ class _QuickClientDialog(QDialog):
         self.tel_edit = QLineEdit()
         form.addRow("Téléphone :", self.tel_edit)
 
+        self.pays_edit = QLineEdit()
+        self.pays_edit.setPlaceholderText("Ex : France, DRC, USA\u2026")
+        form.addRow("Pays :", self.pays_edit)
+
+        self.carte_edit = QLineEdit()
+        self.carte_edit.setPlaceholderText("N\u00b0 pi\u00e8ce d'identit\u00e9 / passeport")
+        form.addRow("Pi\u00e8ce d'identit\u00e9 :", self.carte_edit)
+
         btns = QHBoxLayout()
         btn_cancel = QPushButton("Annuler")
         btn_cancel.clicked.connect(self.reject)
@@ -64,6 +72,8 @@ class _QuickClientDialog(QDialog):
             self.nom_edit.text().strip(),
             self.prenom_edit.text().strip(),
             self.tel_edit.text().strip(),
+            self.pays_edit.text().strip(),
+            self.carte_edit.text().strip(),
         )
 
 
@@ -220,7 +230,7 @@ class ReservationDialog(QDialog):
         dlg = _QuickClientDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        nom, prenom, telephone = dlg.get_data()
+        nom, prenom, telephone, pays, carte_identite = dlg.get_data()
         if not nom:
             return
         db = get_database_manager()
@@ -233,6 +243,8 @@ class ReservationDialog(QDialog):
                     nom=nom,
                     prenom=prenom or None,
                     telephone=telephone or None,
+                    pays=pays or None,
+                    carte_identite=carte_identite or None,
                     is_active=True,
                 )
                 session.add(client)

@@ -34,6 +34,8 @@ class ShopClient(Base):
     credit_limit = Column(Numeric(15, 2), default=0.0)  # Limite de crédit
     balance = Column(Numeric(15, 2), default=0.0)  # Solde du compte client
     notes = Column(Text)
+    pays = Column(String(100), nullable=True)
+    carte_identite = Column(String(100), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
     
