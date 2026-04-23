@@ -20,7 +20,8 @@ from ayanna_erp.modules.hotel.views.reservation_dialog import (
 from ayanna_erp.modules.hotel.views.payment_dialog import PaymentDialog
 from ayanna_erp.modules.hotel.utils.helpers import (
     fmt_date, fmt_datetime, reservation_status_label, payment_status_label,
-    RESERVATION_STATUS_COLORS, PAYMENT_STATUS_COLORS
+    RESERVATION_STATUS_COLORS, PAYMENT_STATUS_COLORS,
+    get_hotel_company_info, fmt_amount, build_pdf_company_header,
 )
 
 _res_svc  = ReservationService()
@@ -132,6 +133,8 @@ class ReservationDetailDialog(QDialog):
         price       = r.get('price_per_night', 0)
         reduction   = r.get('reduction', 0)
         nuitees     = r.get('nuitees', '-')
+        _ci  = get_hotel_company_info()
+        _sym = _ci.get('currency_symbol', '$')
 
         # ── Section réservation ──────────────────────────────────────────────
         section("  Informations de réservation")
@@ -164,17 +167,17 @@ class ReservationDetailDialog(QDialog):
         if status == 'en_cours':
             row_info("Jours réels passés :",
                      str(jr) if jr != '-' else 'N/A', '#1976D2', bold=True)
-        row_info("Prix / nuit :",         f"{price:,.0f}")
-        row_info("Réduction :",           f"{reduction:,.0f}")
+        row_info("Prix / nuit :",         fmt_amount(price, _sym))
+        row_info("Réduction :",           fmt_amount(reduction, _sym))
         row_info("Montant réel à payer :",
-                 f"{montant_reel:,.0f}", '#1976D2', bold=True)
-        row_info("Déjà payé :",           f"{paid:,.0f}", '#27AE60')
+                 fmt_amount(montant_reel, _sym), '#1976D2', bold=True)
+        row_info("Déjà payé :",           fmt_amount(paid, _sym), '#27AE60')
 
         if isinstance(solde, (int, float)):
             if solde > 0:
-                row_info("Reste à payer :", f"+{solde:,.0f}", '#E74C3C', bold=True)
+                row_info("Reste à payer :", fmt_amount(solde, _sym), '#E74C3C', bold=True)
             elif solde < 0:
-                row_info("Crédit (trop payé) :", f"{abs(solde):,.0f}", '#27AE60', bold=True)
+                row_info("Crédit (trop payé) :", fmt_amount(abs(solde), _sym), '#27AE60', bold=True)
             else:
                 row_info("Solde :", "Soldé ✓", '#27AE60', bold=True)
         vbox.addSpacing(4)
@@ -208,7 +211,7 @@ class ReservationDetailDialog(QDialog):
                 dt_str = (p['created_at'].strftime('%d/%m/%Y %H:%M')
                           if hasattr(p.get('created_at'), 'strftime')
                           else str(p.get('created_at', '-')))
-                amt_str = f"{p['amount']:,.0f}" if isinstance(
+                amt_str = fmt_amount(p['amount'], _sym) if isinstance(
                     p.get('amount'), (int, float)) else '-'
                 for col, val in enumerate([
                     str(i + 1), dt_str, amt_str,
@@ -437,25 +440,29 @@ class _PrintFormatDialog(QDialog):
 def _print_checkout_pdf(row: dict, fmt: str = 'a4', parent=None):
     """Génère et ouvre la fiche de check-out (A4 ou ticket 80 mm)."""
     try:
-        import os, subprocess, sys
+        import os, subprocess, sys, tempfile
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import mm, cm
         from reportlab.platypus import (
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle)
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-        from reportlab.lib.colors import HexColor, black
+        from reportlab.lib.colors import HexColor, black, white
         from reportlab.lib.enums import TA_CENTER
+        from reportlab.pdfgen import canvas as pdfcanvas
 
         now = datetime.now()
-        r = row
-        jr = r.get('jours_reels', '-')
+        r   = row
+        ci  = get_hotel_company_info()
+        sym = ci.get('currency_symbol', '$')
+
+        jr           = r.get('jours_reels', '-')
         montant_reel = r.get('montant_reel', r.get('total', 0))
-        paid = r.get('paid', 0)
-        solde = r.get('solde', montant_reel - paid)
+        paid         = r.get('paid', 0)
+        solde        = r.get('solde', montant_reel - paid)
         if isinstance(solde, (int, float)) and solde > 0:
-            solde_str = f"Reste à payer : {solde:,.0f}"
+            solde_str = f"Reste à payer : {fmt_amount(solde, sym)}"
         elif isinstance(solde, (int, float)) and solde < 0:
-            solde_str = f"Crédit : {abs(solde):,.0f}"
+            solde_str = f"Crédit : {fmt_amount(abs(solde), sym)}"
         else:
             solde_str = "Soldé"
 
@@ -468,114 +475,245 @@ def _print_checkout_pdf(row: dict, fmt: str = 'a4', parent=None):
 
         styles = getSampleStyleSheet()
 
+        # ==============================================================
+        # FORMAT A4
+        # ==============================================================
         if fmt == 'a4':
-            doc = SimpleDocTemplate(fname, pagesize=A4,
-                                    leftMargin=2*cm, rightMargin=2*cm,
-                                    topMargin=2*cm, bottomMargin=2*cm)
-            els = []
-            els.append(Paragraph("<b>FICHE DE CHECK-OUT – HÔTEL</b>",
-                                  styles['Title']))
-            els.append(Spacer(1, 0.4*cm))
+            LM = RM = TM = BM = 2 * cm
+            avail_w_cm = (A4[0] - LM - RM) / cm
 
-            def _h3(t): return Paragraph(f"<b>{t}</b>", styles['Heading3'])
+            doc = SimpleDocTemplate(fname, pagesize=A4,
+                                    leftMargin=LM, rightMargin=RM,
+                                    topMargin=TM, bottomMargin=BM)
+            els = []
+
+            # En-tête entreprise
+            logo_path = build_pdf_company_header(els, styles, ci, avail_w_cm)
+
+            styles.add(ParagraphStyle('CkTitle', parent=styles['Title'],
+                                      fontSize=14, alignment=1, spaceAfter=6))
+            styles.add(ParagraphStyle('SmInfo', parent=styles['Normal'],
+                                      fontSize=7, textColor=HexColor('#666666')))
+            els.append(Paragraph("<b>FICHE DE CHECK-OUT – HÔTEL</b>",
+                                 styles['CkTitle']))
+            els.append(Spacer(1, 0.3 * cm))
+
+            def _h3(t):
+                return Paragraph(f"<b>{t}</b>", styles['Heading3'])
 
             els.append(_h3("Informations de réservation"))
             els.append(_pdf_table([
-                ["Code réservation",  r['code']],
-                ["Client",             r['client_name']],
-                ["Catégorie",          r['category']],
-                ["Chambre",            r['room']],
+                ["Code réservation", r['code']],
+                ["Client",           r['client_name']],
+                ["Catégorie",        r['category']],
+                ["Chambre",          r['room']],
             ]))
-            els.append(Spacer(1, 0.3*cm))
+            els.append(Spacer(1, 0.3 * cm))
 
             els.append(_h3("Dates"))
             els.append(_pdf_table([
-                ["Entrée prévue",    fmt_date(r['date_entree_prevue'])],
-                ["Sortie prévue",    fmt_date(r['date_sortie_prevue'])],
+                ["Entrée prévue",   fmt_date(r['date_entree_prevue'])],
+                ["Sortie prévue",   fmt_date(r['date_sortie_prevue'])],
                 ["Nuitées prévues", str(r.get('nuitees', '-'))],
-                ["Entrée réelle",    fmt_datetime(r.get('date_entree_reelle'))],
-                ["Check-out",          now.strftime('%d/%m/%Y %H:%M')],
+                ["Entrée réelle",   fmt_datetime(r.get('date_entree_reelle'))],
+                ["Check-out",       now.strftime('%d/%m/%Y %H:%M')],
             ]))
-            els.append(Spacer(1, 0.3*cm))
+            els.append(Spacer(1, 0.3 * cm))
 
             els.append(_h3("Récapitulatif financier"))
             els.append(_pdf_table([
-                ["Jours réels passés",   str(jr)],
-                ["Prix / nuit",            f"{r.get('price_per_night', 0):,.0f}"],
-                ["Réduction",             f"{r.get('reduction', 0):,.0f}"],
-                ["Montant réel à payer",  f"{montant_reel:,.0f}"],
-                ["Déjà payé",            f"{paid:,.0f}"],
-                ["Solde",                  solde_str],
+                ["Jours réels passés",  str(jr)],
+                ["Prix / nuit",         fmt_amount(r.get('price_per_night', 0), sym)],
+                ["Réduction",           fmt_amount(r.get('reduction', 0), sym)],
+                ["Montant réel à payer",fmt_amount(montant_reel, sym)],
+                ["Déjà payé",           fmt_amount(paid, sym)],
+                ["Solde",               solde_str],
             ]))
-            els.append(Spacer(1, 1*cm))
+            els.append(Spacer(1, 0.8 * cm))
             els.append(Paragraph("<i>Merci pour votre séjour.</i>",
-                                  styles['Italic']))
+                                 styles['Italic']))
+            els.append(Spacer(1, 0.3 * cm))
+            els.append(Paragraph(
+                f"Informatisé par Ayanna ERP – {now.strftime('%d/%m/%Y %H:%M')}",
+                styles['SmInfo']))
+
             doc.build(els)
 
-        else:  # 80 mm ticket
-            W = 80 * mm
-            M = 4 * mm
-            cw = W - 2 * M
-            doc = SimpleDocTemplate(fname, pagesize=(W, 400 * mm),
-                                    leftMargin=M, rightMargin=M,
-                                    topMargin=M, bottomMargin=M)
-            c_style = ParagraphStyle('c', parent=styles['Normal'],
-                                     alignment=TA_CENTER, fontSize=9)
-            bc_style = ParagraphStyle('bc', parent=styles['Normal'],
-                                      alignment=TA_CENTER, fontSize=11,
-                                      fontName='Helvetica-Bold')
-            n_style = ParagraphStyle('n', parent=styles['Normal'], fontSize=8)
+            # Nettoyage logo
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception:
+                    pass
 
-            def _row80(lbl, val):
-                t = Table([[lbl, val]], colWidths=[cw * 0.48, cw * 0.52])
-                t.setStyle(TableStyle([
-                    ('FONTSIZE',  (0, 0), (-1, -1), 8),
-                    ('FONTNAME',  (0, 0), (0, 0), 'Helvetica-Bold'),
-                    ('BOTTOMPADDING', (0, 0), (-1, -1), 2),
-                    ('TOPPADDING',    (0, 0), (-1, -1), 2),
-                ]))
-                return t
+        # ==============================================================
+        # FORMAT 80 mm (ticket thermique)
+        # ==============================================================
+        else:
+            TICKET_W = 80 * mm
+            LEFT_M   = 3 * mm
+            cw       = TICKET_W - 2 * LEFT_M
 
-            sep = Paragraph("-" * 44, n_style)
-            els = []
-            els.append(Paragraph("<b>HÔTEL</b>", bc_style))
-            els.append(Paragraph("FICHE DE CHECK-OUT", c_style))
-            els.append(Spacer(1, 2 * mm))
-            els.append(sep)
-            for lbl, val in [
-                ("Code :",       r['code']),
-                ("Client :",     r['client_name']),
-                ("Catégorie :",  r['category']),
-                ("Chambre :",    r['room']),
-            ]:
-                els.append(_row80(lbl, val))
-            els.append(Spacer(1, 1 * mm))
-            els.append(sep)
-            for lbl, val in [
-                ("Entrée prévue :",  fmt_date(r['date_entree_prevue'])),
-                ("Sortie prévue :",  fmt_date(r['date_sortie_prevue'])),
-                ("Nuitées :",         str(r.get('nuitees', '-'))),
-                ("Entrée réelle :",  fmt_datetime(r.get('date_entree_reelle'))),
-                ("Check-out :",       now.strftime('%d/%m/%Y %H:%M')),
-            ]:
-                els.append(_row80(lbl, val))
-            els.append(Spacer(1, 1 * mm))
-            els.append(sep)
-            for lbl, val in [
-                ("Jours réels :",    str(jr)),
-                ("Prix/nuit :",       f"{r.get('price_per_night', 0):,.0f}"),
-                ("Réduction :",       f"{r.get('reduction', 0):,.0f}"),
-                ("Montant réel :",    f"{montant_reel:,.0f}"),
-                ("Déjà payé :",      f"{paid:,.0f}"),
-                ("Solde :",           solde_str),
-            ]:
-                els.append(_row80(lbl, val))
-            els.append(Spacer(1, 3 * mm))
-            els.append(sep)
-            els.append(Paragraph("Merci pour votre séjour !", c_style))
-            els.append(Spacer(1, 6 * mm))
-            doc.build(els)
+            # --- Créer logo temporaire ---
+            logo_path = None
+            if ci.get('logo'):
+                try:
+                    with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as f:
+                        f.write(ci['logo'])
+                        logo_path = f.name
+                except Exception:
+                    logo_path = None
 
+            # --- Estimation hauteur ---
+            y_sim = 120 * mm
+            if logo_path:
+                y_sim += 18 * mm
+            for k in ['address', 'phone', 'id_nat', 'rccm']:
+                if ci.get(k):
+                    y_sim += 3 * mm
+            slogan = ci.get('slogan', '').strip()
+            if slogan:
+                words = slogan.split()
+                lines = 1
+                cur_w = 0
+                max_c = int(cw / (2.5 * mm))
+                for w in words:
+                    if cur_w + len(w) + 1 > max_c:
+                        lines += 1
+                        cur_w = len(w)
+                    else:
+                        cur_w += len(w) + 1
+                y_sim += max(5 * mm, lines * 3.5 * mm)
+            TICKET_HEIGHT = max(y_sim, 80 * mm)
+
+            c = pdfcanvas.Canvas(fname, pagesize=(TICKET_W, TICKET_HEIGHT))
+            y = TICKET_HEIGHT - 5 * mm
+
+            def _cstr(text, font, size, y_pos, center=False):
+                c.setFont(font, size)
+                if center:
+                    c.drawCentredString(TICKET_W / 2, y_pos, str(text)[:40])
+                else:
+                    c.drawString(LEFT_M, y_pos, str(text)[:40])
+                return y_pos - (size * 0.4 * mm + 1.5 * mm)
+
+            def _draw_wrapped(text, font, size, y_pos, center=False, leading=3.5*mm):
+                words = (text or '').split()
+                cur = ''
+                lines = []
+                max_c = int(cw / (size * 0.5 * mm))
+                for w in words:
+                    test = (cur + ' ' + w).strip()
+                    if len(test) <= max_c:
+                        cur = test
+                    else:
+                        if cur:
+                            lines.append(cur)
+                        cur = w
+                if cur:
+                    lines.append(cur)
+                c.setFont(font, size)
+                for line in lines:
+                    if center:
+                        c.drawCentredString(TICKET_W / 2, y_pos, line)
+                    else:
+                        c.drawString(LEFT_M, y_pos, line)
+                    y_pos -= leading
+                return y_pos
+
+            # Logo
+            if logo_path and os.path.exists(logo_path):
+                c.drawImage(logo_path, (TICKET_W - 15*mm) / 2, y - 15*mm,
+                            width=15*mm, height=15*mm, preserveAspectRatio=True)
+                y -= 18 * mm
+
+            # Nom entreprise
+            c.setFont('Helvetica-Bold', 9)
+            c.drawCentredString(TICKET_W / 2, y, ci.get('name', 'HÔTEL')[:30])
+            y -= 4 * mm
+            c.setFont('Helvetica', 7)
+            for k, prefix in [('address', ''), ('phone', 'Tél : '),
+                               ('rccm', 'RCCM : '), ('id_nat', 'ID : ')]:
+                v = ci.get(k, '').strip()
+                if v:
+                    c.drawCentredString(TICKET_W / 2, y, f"{prefix}{v}"[:42])
+                    y -= 3 * mm
+
+            if slogan:
+                y = _draw_wrapped(slogan, 'Helvetica', 7, y, center=True)
+
+            c.setFont('Helvetica', 7)
+            c.drawCentredString(TICKET_W / 2, y,
+                                f"Devise : {ci.get('currency', 'USD')} ({sym})")
+            y -= 4 * mm
+
+            # Séparateur
+            c.line(LEFT_M, y, TICKET_W - LEFT_M, y)
+            y -= 4 * mm
+
+            # Titre
+            c.setFont('Helvetica-Bold', 10)
+            c.drawCentredString(TICKET_W / 2, y, "FICHE DE CHECK-OUT")
+            y -= 5 * mm
+
+            def _row80(lbl, val, y_pos):
+                c.setFont('Helvetica-Bold', 8)
+                c.drawString(LEFT_M, y_pos, lbl)
+                c.setFont('Helvetica', 8)
+                c.drawRightString(TICKET_W - LEFT_M, y_pos, str(val))
+                return y_pos - 4 * mm
+
+            c.line(LEFT_M, y, TICKET_W - LEFT_M, y)
+            y -= 3 * mm
+            for lbl, val in [
+                ("Code :",      r['code']),
+                ("Client :",    r['client_name']),
+                ("Chambre :",   r['room']),
+                ("Catégorie :", r['category']),
+            ]:
+                y = _row80(lbl, val, y)
+
+            c.line(LEFT_M, y, TICKET_W - LEFT_M, y)
+            y -= 3 * mm
+            for lbl, val in [
+                ("Entrée prévue :", fmt_date(r['date_entree_prevue'])),
+                ("Sortie prévue :", fmt_date(r['date_sortie_prevue'])),
+                ("Nuitées :",       str(r.get('nuitees', '-'))),
+                ("Entrée réelle :", fmt_datetime(r.get('date_entree_reelle'))),
+                ("Check-out :",     now.strftime('%d/%m/%Y %H:%M')),
+            ]:
+                y = _row80(lbl, val, y)
+
+            c.line(LEFT_M, y, TICKET_W - LEFT_M, y)
+            y -= 3 * mm
+            for lbl, val in [
+                ("Jours réels :",  str(jr)),
+                ("Prix/nuit :",    fmt_amount(r.get('price_per_night', 0), sym)),
+                ("Réduction :",    fmt_amount(r.get('reduction', 0), sym)),
+                ("Montant réel :", fmt_amount(montant_reel, sym)),
+                ("Déjà payé :",   fmt_amount(paid, sym)),
+                ("Solde :",        solde_str),
+            ]:
+                y = _row80(lbl, val, y)
+
+            c.line(LEFT_M, y, TICKET_W - LEFT_M, y)
+            y -= 4 * mm
+            c.setFont('Helvetica', 8)
+            c.drawCentredString(TICKET_W / 2, y, "Merci pour votre séjour !")
+            y -= 5 * mm
+            c.setFont('Helvetica', 6)
+            c.drawCentredString(TICKET_W / 2, y,
+                                f"Informatisé par Ayanna ERP {now.strftime('%d/%m/%Y %H:%M')}")
+            c.save()
+
+            # Nettoyage logo
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception:
+                    pass
+
+        # Ouvrir le fichier
         if os.name == 'nt':
             os.startfile(fname)
         elif sys.platform == 'darwin':
@@ -601,8 +739,9 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
         from reportlab.lib.units import cm
         from reportlab.platypus import (
             SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle)
-        from reportlab.lib.styles import getSampleStyleSheet
-        from reportlab.lib.colors import HexColor
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.colors import HexColor, white
+        from reportlab.lib.enums import TA_CENTER
 
         now = datetime.now()
         export_dir = os.path.join(os.getcwd(), 'exports_commandes')
@@ -611,39 +750,56 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
             export_dir,
             f"hotel_reservations_{now.strftime('%Y%m%d%H%M%S')}.pdf")
 
-        doc = SimpleDocTemplate(fname, pagesize=landscape(A4),
-                                leftMargin=1.5*cm, rightMargin=1.5*cm,
-                                topMargin=1.5*cm, bottomMargin=1.5*cm)
+        # A4 paysage : marges 1.5 cm → largeur utile ≈ 29.7 − 3 = 26.7 cm
+        PAGE = landscape(A4)
+        LM = RM = 1.5 * cm
+        TM = BM = 1.5 * cm
+        avail_w = PAGE[0] - LM - RM   # points
+
+        doc = SimpleDocTemplate(fname, pagesize=PAGE,
+                                leftMargin=LM, rightMargin=RM,
+                                topMargin=TM, bottomMargin=BM)
         styles = getSampleStyleSheet()
+        styles.add(ParagraphStyle('RptTitle', parent=styles['Title'],
+                                  fontSize=13, alignment=1, spaceAfter=4))
+        styles.add(ParagraphStyle('RptSub', parent=styles['Normal'],
+                                  fontSize=8, alignment=1, spaceAfter=6))
+        styles.add(ParagraphStyle('SmallInfo', parent=styles['Normal'],
+                                  fontSize=7, textColor=HexColor('#555555')))
         els = []
+
+        # ── En-tête entreprise ──────────────────────────────────────────────
+        ci = get_hotel_company_info()
+        sym = ci.get('currency_symbol', '$')
+        avail_w_cm = (PAGE[0] - LM - RM) / cm
+        logo_path = build_pdf_company_header(els, styles, ci, avail_w_cm)
 
         d_from_s = date_from.strftime('%d/%m/%Y') if hasattr(date_from, 'strftime') else str(date_from)
         d_to_s   = date_to.strftime('%d/%m/%Y')   if hasattr(date_to,   'strftime') else str(date_to)
 
-        els.append(Paragraph("<b>RAPPORT RÉSERVATIONS HÔTEL</b>",
-                              styles['Title']))
+        els.append(Paragraph("<b>RAPPORT RÉSERVATIONS HÔTEL</b>", styles['RptTitle']))
         els.append(Paragraph(
             f"Période : {d_from_s} – {d_to_s}  |  Statut : {status_lbl}  |  "
             f"Généré le : {now.strftime('%d/%m/%Y %H:%M')}",
-            styles['Normal']))
-        els.append(Spacer(1, 0.4*cm))
+            styles['RptSub']))
+        els.append(Spacer(1, 0.3 * cm))
 
-        # --- Tableau ---
+        # ── Tableau ─────────────────────────────────────────────────────────
         headers = ['Code', 'Client', 'Chambre',
                    'Entrée prévue', 'Sortie prévue', 'Nuitées',
                    'Entrée réelle', 'Sortie réelle', 'Jours réels',
                    'Total prévu', 'Montant réel', 'Payé', 'Solde', 'Statut']
         tbl_data = [headers]
 
-        tot_brut = tot_reduc = tot_net = tot_paid = tot_reste = 0.0
+        tot_brut = tot_reduc = tot_net = tot_paid = 0.0
         for r in rows:
-            mr = r.get('montant_reel', r.get('total', 0))
+            mr    = r.get('montant_reel', r.get('total', 0))
             solde = r.get('solde', mr - r.get('paid', 0))
-            solde_s = (f"{abs(solde):,.0f}" if isinstance(solde, (int, float))
-                       else '-')
+            solde_s = (fmt_amount(abs(solde), sym)
+                       if isinstance(solde, (int, float)) else '-')
             tbl_data.append([
                 r['code'],
-                (r['client_name'] or '')[:22],
+                (r['client_name'] or '')[:20],
                 r['room'],
                 fmt_date(r['date_entree_prevue']),
                 fmt_date(r['date_sortie_prevue']),
@@ -651,9 +807,9 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
                 fmt_datetime(r.get('date_entree_reelle')),
                 fmt_datetime(r.get('date_sortie_reelle')),
                 str(r.get('jours_reels', '-')),
-                f"{r['total']:,.0f}",
-                f"{mr:,.0f}" if isinstance(mr, (int, float)) else '-',
-                f"{r['paid']:,.0f}",
+                fmt_amount(r['total'], sym),
+                fmt_amount(mr, sym) if isinstance(mr, (int, float)) else '-',
+                fmt_amount(r['paid'], sym),
                 solde_s,
                 reservation_status_label(r['status']),
             ])
@@ -661,50 +817,48 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
             tot_reduc += r.get('reduction', 0)
             tot_net   += r.get('total', 0)
             tot_paid  += r.get('paid', 0)
-            tot_reste += r.get('reste', 0)
 
-        # Ligne totaux
         tbl_data.append([
             f"TOTAL ({len(rows)})", '', '', '', '', '', '', '', '',
-            f"{tot_net:,.0f}", f"{tot_net:,.0f}",
-            f"{tot_paid:,.0f}", '', '',
+            fmt_amount(tot_net, sym), fmt_amount(tot_net, sym),
+            fmt_amount(tot_paid, sym), '', '',
         ])
 
-        cws = [2.2*cm, 4.5*cm, 2*cm,
-               2.4*cm, 2.4*cm, 1.5*cm,
-               2.4*cm, 2.4*cm, 1.8*cm,
-               2.6*cm, 2.6*cm, 2.4*cm, 2.2*cm, 2.2*cm]
+        cws = [2.0*cm, 4.0*cm, 1.8*cm,
+               2.2*cm, 2.2*cm, 1.4*cm,
+               2.4*cm, 2.4*cm, 1.6*cm,
+               2.8*cm, 2.8*cm, 2.8*cm, 2.4*cm, 2.0*cm]
         tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
         tbl.setStyle(TableStyle([
-            ('BACKGROUND',    (0, 0), (-1, 0),  HexColor('#34495E')),
-            ('TEXTCOLOR',     (0, 0), (-1, 0),  HexColor('#FFFFFF')),
-            ('FONTNAME',      (0, 0), (-1, 0),  'Helvetica-Bold'),
-            ('FONTSIZE',      (0, 0), (-1, -1), 7),
-            ('GRID',          (0, 0), (-1, -1), 0.3, HexColor('#CCCCCC')),
-            ('ROWBACKGROUNDS',(1, 1), (-2, -1),
+            ('BACKGROUND',     (0, 0),  (-1, 0),  HexColor('#2C3E50')),
+            ('TEXTCOLOR',      (0, 0),  (-1, 0),  white),
+            ('FONTNAME',       (0, 0),  (-1, 0),  'Helvetica-Bold'),
+            ('FONTSIZE',       (0, 0),  (-1, -1), 7),
+            ('GRID',           (0, 0),  (-1, -1), 0.3, HexColor('#CCCCCC')),
+            ('ROWBACKGROUNDS', (1, 1),  (-2, -1),
              [HexColor('#FFFFFF'), HexColor('#F5F6FA')]),
-            ('BACKGROUND',    (0, -1), (-1, -1), HexColor('#2C3E50')),
-            ('TEXTCOLOR',     (0, -1), (-1, -1), HexColor('#FFFFFF')),
-            ('FONTNAME',      (0, -1), (-1, -1), 'Helvetica-Bold'),
-            ('ALIGN',         (0, 0), (-1, -1), 'CENTER'),
-            ('VALIGN',        (0, 0), (-1, -1), 'MIDDLE'),
-            ('ROWHEIGHT',     (0, 0), (-1, -1), 0.5*cm),
-            ('PADDING',       (0, 0), (-1, -1), 3),
+            ('BACKGROUND',     (0, -1), (-1, -1), HexColor('#1976D2')),
+            ('TEXTCOLOR',      (0, -1), (-1, -1), white),
+            ('FONTNAME',       (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('ALIGN',          (0, 0),  (-1, -1), 'CENTER'),
+            ('VALIGN',         (0, 0),  (-1, -1), 'MIDDLE'),
+            ('ROWHEIGHT',      (0, 0),  (-1, -1), 0.5 * cm),
+            ('PADDING',        (0, 0),  (-1, -1), 3),
         ]))
         els.append(tbl)
-        els.append(Spacer(1, 0.5*cm))
+        els.append(Spacer(1, 0.4 * cm))
 
-        # --- Résumé financier ---
+        # ── Résumé financier ─────────────────────────────────────────────────
         els.append(Paragraph("<b>Résumé financier</b>", styles['Heading3']))
         sum_data = [
-            ["Total réservations",    str(len(rows))],
-            ["Montant prévu (brut)",  f"{tot_brut:,.0f}"],
-            ["Total réductions",      f"{tot_reduc:,.0f}"],
-            ["Net montant",            f"{tot_net:,.0f}"],
-            ["Total payé",            f"{tot_paid:,.0f}"],
-            ["Non payé (reste)",      f"{tot_reste:,.0f}"],
+            ["Total réservations",   str(len(rows))],
+            ["Montant prévu (brut)", fmt_amount(tot_brut, sym)],
+            ["Total réductions",     fmt_amount(tot_reduc, sym)],
+            ["Net montant",          fmt_amount(tot_net, sym)],
+            ["Total payé",           fmt_amount(tot_paid, sym)],
+            ["Non payé (reste)",     fmt_amount(max(0.0, tot_net - tot_paid), sym)],
         ]
-        sum_tbl = Table(sum_data, colWidths=[5.5*cm, 5*cm])
+        sum_tbl = Table(sum_data, colWidths=[5.5 * cm, 6 * cm])
         sum_tbl.setStyle(TableStyle([
             ('GRID',       (0, 0), (-1, -1), 0.4, HexColor('#CCCCCC')),
             ('BACKGROUND', (0, 0), (0, -1),  HexColor('#ECF0F1')),
@@ -713,8 +867,20 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
             ('PADDING',    (0, 0), (-1, -1), 5),
         ]))
         els.append(sum_tbl)
+        els.append(Spacer(1, 0.3 * cm))
+        els.append(Paragraph(
+            f"Informatisé par Ayanna ERP – {now.strftime('%d/%m/%Y %H:%M')}",
+            styles['SmallInfo']))
 
         doc.build(els)
+
+        # Nettoyage logo
+        if logo_path and os.path.exists(logo_path):
+            try:
+                os.unlink(logo_path)
+            except Exception:
+                pass
+
         if os.name == 'nt':
             os.startfile(fname)
         elif sys.platform == 'darwin':
@@ -754,6 +920,9 @@ class ReservationView(QWidget):
         super().__init__(parent)
         self.current_user = current_user
         self._data: list = []
+        _ci = get_hotel_company_info()
+        self._sym = _ci.get('currency_symbol', '$')
+        self._company_info = _ci
         self._build_ui()
         self.refresh()
 
@@ -914,13 +1083,13 @@ class ReservationView(QWidget):
             # Montant réel
             montant_reel = row.get('montant_reel', None)
             montant_reel_str = (
-                f"{montant_reel:,.0f}" if isinstance(montant_reel, (int, float))
+                fmt_amount(montant_reel, self._sym) if isinstance(montant_reel, (int, float))
                 else '-')
 
             # Solde
             solde = row.get('solde', None)
             if isinstance(solde, (int, float)):
-                solde_str = f"{abs(solde):,.0f}"
+                solde_str = fmt_amount(abs(solde), self._sym)
             else:
                 solde_str = '-'
 
@@ -934,9 +1103,9 @@ class ReservationView(QWidget):
                 fmt_datetime(row['date_entree_reelle']),  # 6
                 fmt_datetime(row['date_sortie_reelle']),  # 7
                 str(row.get('jours_reels', '-')),     # 8
-                f"{row['total']:,.0f}",        # 9
+                fmt_amount(row['total'], self._sym),   # 9
                 montant_reel_str,              # 10
-                f"{row['paid']:,.0f}",         # 11
+                fmt_amount(row['paid'], self._sym),    # 11
                 solde_str,                     # 12
                 reservation_status_label(row['status']),  # 13
             ]
@@ -987,11 +1156,11 @@ class ReservationView(QWidget):
         tot_paid  = sum(r.get('paid', 0) for r in rows)
         tot_reste = sum(r.get('reste', 0) for r in rows)
         self.lbl_count.setText(f"📋 {len(rows)} rés.")
-        self.lbl_brut.setText(f"Brut : {tot_brut:,.0f}")
-        self.lbl_reduc.setText(f"Réd. : {tot_reduc:,.0f}")
-        self.lbl_net.setText(f"Net : {tot_net:,.0f}")
-        self.lbl_paid_sum.setText(f"✅ Payé : {tot_paid:,.0f}")
-        self.lbl_reste_sum.setText(f"❗ Reste : {tot_reste:,.0f}")
+        self.lbl_brut.setText(f"Brut : {fmt_amount(tot_brut, self._sym)}")
+        self.lbl_reduc.setText(f"Réd. : {fmt_amount(tot_reduc, self._sym)}")
+        self.lbl_net.setText(f"Net : {fmt_amount(tot_net, self._sym)}")
+        self.lbl_paid_sum.setText(f"✅ Payé : {fmt_amount(tot_paid, self._sym)}")
+        self.lbl_reste_sum.setText(f"❗ Reste : {fmt_amount(tot_reste, self._sym)}")
 
     def _selected_row(self) -> dict | None:
         row = self.table.currentRow()

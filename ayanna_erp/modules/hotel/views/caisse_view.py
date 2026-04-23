@@ -15,7 +15,9 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtGui import QFont, QColor, QBrush
 
 from ayanna_erp.modules.hotel.services.payment_service import PaymentService
-from ayanna_erp.modules.hotel.utils.helpers import fmt_datetime
+from ayanna_erp.modules.hotel.utils.helpers import (
+    fmt_datetime, get_hotel_company_info, fmt_amount, build_pdf_company_header,
+)
 
 _svc = PaymentService()
 
@@ -33,6 +35,9 @@ class CaisseView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._data: list = []
+        _ci = get_hotel_company_info()
+        self._sym = _ci.get('currency_symbol', '$')
+        self._company_info = _ci
         self._build_ui()
         self.refresh()
 
@@ -183,7 +188,7 @@ class CaisseView(QWidget):
                 str(idx),
                 pay.get('reservation_code', '-'),
                 pay.get('client', '-'),
-                f"{amt:,.0f}" if isinstance(amt, (int, float)) else '-',
+                fmt_amount(amt, self._sym) if isinstance(amt, (int, float)) else '-',
                 method_label,
                 pay.get('user_name', str(pay.get('user_id', '-'))),
                 _fmtd(pay.get('date_reservation')),
@@ -208,10 +213,10 @@ class CaisseView(QWidget):
                 totals[method] += float(amt or 0)
 
         self.lbl_count.setText(f"📋 {len(rows)} paiements")
-        self.lbl_cash.setText(f"💵 Espèces : {totals['cash']:,.0f}")
-        self.lbl_mobile.setText(f"📱 Mobile : {totals['mobile_money']:,.0f}")
-        self.lbl_carte.setText(f"💳 Carte : {totals['carte']:,.0f}")
-        self.lbl_total.setText(f"✅ TOTAL : {total:,.0f}")
+        self.lbl_cash.setText(f"💵 Espèces : {fmt_amount(totals['cash'], self._sym)}")
+        self.lbl_mobile.setText(f"📱 Mobile : {fmt_amount(totals['mobile_money'], self._sym)}")
+        self.lbl_carte.setText(f"💳 Carte : {fmt_amount(totals['carte'], self._sym)}")
+        self.lbl_total.setText(f"✅ TOTAL : {fmt_amount(total, self._sym)}")
 
     # ------------------------------------------------------------------
     def _on_export_pdf(self):
@@ -236,8 +241,8 @@ class CaisseView(QWidget):
             from reportlab.lib.units import cm
             from reportlab.platypus import (
                 SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle)
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.colors import HexColor
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.colors import HexColor, white
 
             now      = datetime.now()
             d_from_s = self.date_from.date().toPyDate().strftime('%d/%m/%Y')
@@ -249,20 +254,39 @@ class CaisseView(QWidget):
                 export_dir,
                 f"hotel_caisse_{now.strftime('%Y%m%d%H%M%S')}.pdf")
 
-            doc = SimpleDocTemplate(fname, pagesize=landscape(A4),
-                                    leftMargin=1.5*cm, rightMargin=1.5*cm,
-                                    topMargin=1.5*cm, bottomMargin=1.5*cm)
+            # A4 paysage : marges 1.5 cm → largeur utile ≈ 26.7 cm
+            PAGE = landscape(A4)
+            LM = RM = 1.5 * cm
+            TM = BM = 1.5 * cm
+            avail_w_cm = (PAGE[0] - LM - RM) / cm
+
+            doc = SimpleDocTemplate(fname, pagesize=PAGE,
+                                    leftMargin=LM, rightMargin=RM,
+                                    topMargin=TM, bottomMargin=BM)
             styles = getSampleStyleSheet()
+            styles.add(ParagraphStyle('CTitle', parent=styles['Title'],
+                                      fontSize=13, alignment=1, spaceAfter=4))
+            styles.add(ParagraphStyle('CSub', parent=styles['Normal'],
+                                      fontSize=8, alignment=1, spaceAfter=6))
+            styles.add(ParagraphStyle('SmallInfo', parent=styles['Normal'],
+                                      fontSize=7,
+                                      textColor=HexColor('#555555')))
             els = []
 
+            # ── En-tête entreprise ──────────────────────────────────────
+            ci  = self._company_info
+            sym = self._sym
+            logo_path = build_pdf_company_header(els, styles, ci, avail_w_cm)
+
             els.append(Paragraph("<b>CAISSE HÔTEL – RAPPORT PAIEMENTS</b>",
-                                  styles['Title']))
+                                  styles['CTitle']))
             els.append(Paragraph(
                 f"Période : {d_from_s} – {d_to_s}  |  "
                 f"Généré le : {now.strftime('%d/%m/%Y %H:%M')}",
-                styles['Normal']))
-            els.append(Spacer(1, 0.4*cm))
+                styles['CSub']))
+            els.append(Spacer(1, 0.3 * cm))
 
+            # ── Tableau ─────────────────────────────────────────────────
             headers = ['#', 'Réservation', 'Client', 'Montant',
                        'Méthode', 'Reçu par',
                        'Dt. Réservation', 'Check-in', 'Check-out',
@@ -288,10 +312,10 @@ class CaisseView(QWidget):
                 tbl_data.append([
                     str(idx),
                     pay.get('reservation_code', '-'),
-                    (pay.get('client') or '')[:28],
-                    f"{amt:,.0f}" if isinstance(amt, (int, float)) else '-',
+                    (pay.get('client') or '')[:26],
+                    fmt_amount(amt, sym) if isinstance(amt, (int, float)) else '-',
                     METHOD_LABELS.get(method, method),
-                    (pay.get('user_name') or str(pay.get('user_id', '-')))[:22],
+                    (pay.get('user_name') or str(pay.get('user_id', '-')))[:20],
                     _fmtd(pay.get('date_reservation')),
                     _fmtd(pay.get('date_checkin')),
                     _fmtd(pay.get('date_checkout')),
@@ -302,55 +326,67 @@ class CaisseView(QWidget):
                     totals[method] += float(amt or 0)
 
             tbl_data.append([
-                f"TOTAL ({len(rows)})", '', '', f"{total:,.0f}", '', '', '', '', '', '',
+                f"TOTAL ({len(rows)})", '', '',
+                fmt_amount(total, sym), '', '', '', '', '', '',
             ])
 
-            cws = [1.2*cm, 3*cm, 5*cm, 2.8*cm, 2.8*cm, 4*cm,
-                   2.8*cm, 2.8*cm, 2.8*cm, 3.8*cm]
+            cws = [1.2*cm, 2.8*cm, 4.5*cm, 3.2*cm, 2.8*cm, 3.5*cm,
+                   2.8*cm, 2.8*cm, 2.8*cm, 3.5*cm]
             tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
             tbl.setStyle(TableStyle([
-                ('BACKGROUND',     (0, 0), (-1, 0),  HexColor('#34495E')),
-                ('TEXTCOLOR',      (0, 0), (-1, 0),  HexColor('#FFFFFF')),
-                ('FONTNAME',       (0, 0), (-1, 0),  'Helvetica-Bold'),
-                ('FONTSIZE',       (0, 0), (-1, -1), 8),
-                ('GRID',           (0, 0), (-1, -1), 0.3, HexColor('#CCCCCC')),
-                ('ROWBACKGROUNDS', (1, 1), (-2, -1),
+                ('BACKGROUND',     (0, 0),  (-1, 0),  HexColor('#2C3E50')),
+                ('TEXTCOLOR',      (0, 0),  (-1, 0),  white),
+                ('FONTNAME',       (0, 0),  (-1, 0),  'Helvetica-Bold'),
+                ('FONTSIZE',       (0, 0),  (-1, -1), 7.5),
+                ('GRID',           (0, 0),  (-1, -1), 0.3, HexColor('#CCCCCC')),
+                ('ROWBACKGROUNDS', (1, 1),  (-2, -1),
                  [HexColor('#FFFFFF'), HexColor('#F5F6FA')]),
-                ('BACKGROUND',     (0, -1), (-1, -1), HexColor('#2C3E50')),
-                ('TEXTCOLOR',      (0, -1), (-1, -1), HexColor('#FFFFFF')),
+                ('BACKGROUND',     (0, -1), (-1, -1), HexColor('#1976D2')),
+                ('TEXTCOLOR',      (0, -1), (-1, -1), white),
                 ('FONTNAME',       (0, -1), (-1, -1), 'Helvetica-Bold'),
-                ('ALIGN',          (0, 0), (-1, -1), 'CENTER'),
-                ('VALIGN',         (0, 0), (-1, -1), 'MIDDLE'),
-                ('ROWHEIGHT',      (0, 0), (-1, -1), 0.55*cm),
-                ('PADDING',        (0, 0), (-1, -1), 3),
+                ('ALIGN',          (0, 0),  (-1, -1), 'CENTER'),
+                ('VALIGN',         (0, 0),  (-1, -1), 'MIDDLE'),
+                ('ROWHEIGHT',      (0, 0),  (-1, -1), 0.55 * cm),
+                ('PADDING',        (0, 0),  (-1, -1), 3),
             ]))
             els.append(tbl)
-            els.append(Spacer(1, 0.5*cm))
+            els.append(Spacer(1, 0.4 * cm))
 
-            # Résumé par méthode
+            # ── Résumé par méthode ───────────────────────────────────────
             els.append(Paragraph("<b>Résumé par méthode</b>", styles['Heading3']))
             sum_data = [
                 ["Total transactions",  str(len(rows))],
-                ["Espèces",             f"{totals['cash']:,.0f}"],
-                ["Mobile Money",        f"{totals['mobile_money']:,.0f}"],
-                ["Carte",               f"{totals['carte']:,.0f}"],
-                ["TOTAL",               f"{total:,.0f}"],
+                ["Espèces",             fmt_amount(totals['cash'], sym)],
+                ["Mobile Money",        fmt_amount(totals['mobile_money'], sym)],
+                ["Carte",               fmt_amount(totals['carte'], sym)],
+                ["TOTAL",               fmt_amount(total, sym)],
             ]
-            sum_tbl = Table(sum_data, colWidths=[5*cm, 4*cm])
+            sum_tbl = Table(sum_data, colWidths=[5 * cm, 5 * cm])
             sum_tbl.setStyle(TableStyle([
-                ('GRID',       (0, 0), (-1, -1), 0.4, HexColor('#CCCCCC')),
-                ('BACKGROUND', (0, 0), (0, -2),  HexColor('#ECF0F1')),
-                ('BACKGROUND', (0, -1), (-1, -1), HexColor('#1976D2')),
-                ('TEXTCOLOR',  (0, -1), (-1, -1), HexColor('#FFFFFF')),
-                ('FONTNAME',   (0, 0), (0, -1),  'Helvetica-Bold'),
+                ('GRID',       (0, 0),  (-1, -1), 0.4, HexColor('#CCCCCC')),
+                ('BACKGROUND', (0, 0),  (0, -2),  HexColor('#ECF0F1')),
+                ('BACKGROUND', (0, -1), (-1, -1), HexColor('#27AE60')),
+                ('TEXTCOLOR',  (0, -1), (-1, -1), white),
+                ('FONTNAME',   (0, 0),  (0, -1),  'Helvetica-Bold'),
                 ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE',   (0, 0), (-1, -1), 9),
-                ('PADDING',    (0, 0), (-1, -1), 5),
-                ('ALIGN',      (1, 0), (1, -1),  'RIGHT'),
+                ('FONTSIZE',   (0, 0),  (-1, -1), 9),
+                ('PADDING',    (0, 0),  (-1, -1), 5),
+                ('ALIGN',      (1, 0),  (1, -1),  'RIGHT'),
             ]))
             els.append(sum_tbl)
+            els.append(Spacer(1, 0.3 * cm))
+            els.append(Paragraph(
+                f"Informatisé par Ayanna ERP – {now.strftime('%d/%m/%Y %H:%M')}",
+                styles['SmallInfo']))
 
             doc.build(els)
+
+            # Nettoyage logo
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception:
+                    pass
 
             if os.name == 'nt':
                 os.startfile(fname)
