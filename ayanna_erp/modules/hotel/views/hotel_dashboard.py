@@ -234,6 +234,27 @@ class RoomCard(QFrame):
             layout.addWidget(btn)
 
 
+_CARD_W = 175
+_CARD_H = 170
+_CARD_SPACING = 12
+
+
+class _CardsContainer(QWidget):
+    """Container qui recalcule les colonnes à chaque redimensionnement."""
+
+    def __init__(self, rebuild_cb, parent=None):
+        super().__init__(parent)
+        self._rebuild_cb = rebuild_cb
+        self._last_col_max = -1
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        col_max = max(1, self.width() // (_CARD_W + _CARD_SPACING))
+        if col_max != self._last_col_max:
+            self._last_col_max = col_max
+            self._rebuild_cb(col_max)
+
+
 class HotelDashboard(QWidget):
 
     def __init__(self, current_user=None, parent=None):
@@ -242,6 +263,7 @@ class HotelDashboard(QWidget):
         self._selected_cat_id = None
         self._categories = []
         self._rooms = []
+        self._cached_cards = []   # list of RoomCard widgets (current filter)
         self._build_ui()
         self.refresh()
 
@@ -283,9 +305,9 @@ class HotelDashboard(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setStyleSheet("QScrollArea{border:none;}")
-        self.cards_container = QWidget()
+        self.cards_container = _CardsContainer(self._apply_col_max)
         self.cards_layout = QGridLayout(self.cards_container)
-        self.cards_layout.setSpacing(12)
+        self.cards_layout.setSpacing(_CARD_SPACING)
         self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         scroll.setWidget(self.cards_container)
         root.addWidget(scroll)
@@ -341,11 +363,13 @@ class HotelDashboard(QWidget):
         self._rebuild_cards()
 
     def _rebuild_cards(self):
-        # Nettoyer
+        """Reconstruit la liste de cartes (avec appels DB) puis place dans la grille."""
+        # Supprimer les cartes existantes
         while self.cards_layout.count():
             item = self.cards_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
+        self._cached_cards.clear()
 
         rooms = self._rooms
         if self._selected_cat_id is not None:
@@ -356,16 +380,33 @@ class HotelDashboard(QWidget):
         dispo = sum(1 for r in rooms if r.status == 'disponible')
         occupee = sum(1 for r in rooms if r.status == 'occupee')
 
-        col_max = 5
-        for idx, room in enumerate(rooms):
-            # Chercher réservation active
+        for room in rooms:
             res = _room_svc.get_room_with_active_reservation(room.id)
             card = RoomCard(room, res, self._on_assign, self)
-            self.cards_layout.addWidget(card, idx // col_max, idx % col_max)
+            self._cached_cards.append(card)
+
+        # Placement initial selon la largeur courante
+        col_max = max(1, self.cards_container.width() // (_CARD_W + _CARD_SPACING))
+        if col_max < 1:
+            col_max = 4  # valeur par défaut avant premier resize
+        self._place_cards(col_max)
 
         self.stat_bar.setText(
             f"Total : {total}  |  Disponibles : {dispo}  |  "
             f"Occupées : {occupee}  |  Autres : {total - dispo - occupee}")
+
+    def _place_cards(self, col_max):
+        """Place les cartes en cache dans la grille avec col_max colonnes."""
+        while self.cards_layout.count():
+            item = self.cards_layout.takeAt(0)
+            # Ne pas deleteLater – les widgets sont en cache
+        for idx, card in enumerate(self._cached_cards):
+            self.cards_layout.addWidget(card, idx // col_max, idx % col_max)
+
+    def _apply_col_max(self, col_max):
+        """Appelé par _CardsContainer.resizeEvent – replace sans requête DB."""
+        if self._cached_cards:
+            self._place_cards(col_max)
 
     def _on_assign(self, room):
         """Ouvre le dialogue de check-in pour sélectionner une réservation."""

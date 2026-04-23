@@ -19,7 +19,7 @@ from ayanna_erp.modules.hotel.views.reservation_dialog import (
 )
 from ayanna_erp.modules.hotel.views.payment_dialog import PaymentDialog
 from ayanna_erp.modules.hotel.utils.helpers import (
-    fmt_date, reservation_status_label, payment_status_label,
+    fmt_date, fmt_datetime, reservation_status_label, payment_status_label,
     RESERVATION_STATUS_COLORS, PAYMENT_STATUS_COLORS
 )
 
@@ -150,13 +150,13 @@ class ReservationDetailDialog(QDialog):
         row_info("Sortie prévue :",    fmt_date(r['date_sortie_prevue']))
         row_info("Nuitées prévues :",  str(nuitees))
         row_info("Entrée réelle :",
-                 fmt_date(r.get('date_entree_reelle')), '#27AE60')
+                 fmt_datetime(r.get('date_entree_reelle')), '#27AE60')
         if status == 'en_cours':
             row_info("Check-out (maintenant) :",
                      now.strftime('%d/%m/%Y %H:%M'), '#E74C3C', bold=True)
         elif r.get('date_sortie_reelle'):
             row_info("Sortie réelle :",
-                     fmt_date(r['date_sortie_reelle']), '#E74C3C')
+                     fmt_datetime(r['date_sortie_reelle']), '#E74C3C')
         vbox.addSpacing(4)
 
         # ── Section financière ───────────────────────────────────────────────
@@ -493,7 +493,7 @@ def _print_checkout_pdf(row: dict, fmt: str = 'a4', parent=None):
                 ["Entrée prévue",    fmt_date(r['date_entree_prevue'])],
                 ["Sortie prévue",    fmt_date(r['date_sortie_prevue'])],
                 ["Nuitées prévues", str(r.get('nuitees', '-'))],
-                ["Entrée réelle",    fmt_date(r.get('date_entree_reelle'))],
+                ["Entrée réelle",    fmt_datetime(r.get('date_entree_reelle'))],
                 ["Check-out",          now.strftime('%d/%m/%Y %H:%M')],
             ]))
             els.append(Spacer(1, 0.3*cm))
@@ -555,7 +555,7 @@ def _print_checkout_pdf(row: dict, fmt: str = 'a4', parent=None):
                 ("Entrée prévue :",  fmt_date(r['date_entree_prevue'])),
                 ("Sortie prévue :",  fmt_date(r['date_sortie_prevue'])),
                 ("Nuitées :",         str(r.get('nuitees', '-'))),
-                ("Entrée réelle :",  fmt_date(r.get('date_entree_reelle'))),
+                ("Entrée réelle :",  fmt_datetime(r.get('date_entree_reelle'))),
                 ("Check-out :",       now.strftime('%d/%m/%Y %H:%M')),
             ]:
                 els.append(_row80(lbl, val))
@@ -629,32 +629,33 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
         els.append(Spacer(1, 0.4*cm))
 
         # --- Tableau ---
-        headers = ['Code', 'Client', 'Catégorie', 'Chambre',
+        headers = ['Code', 'Client', 'Chambre',
                    'Entrée prévue', 'Sortie prévue', 'Nuitées',
-                   'Statut', 'Total prévu', 'Montant réel', 'Payé', 'Reste', 'Solde']
+                   'Entrée réelle', 'Sortie réelle', 'Jours réels',
+                   'Total prévu', 'Montant réel', 'Payé', 'Solde', 'Statut']
         tbl_data = [headers]
 
         tot_brut = tot_reduc = tot_net = tot_paid = tot_reste = 0.0
         for r in rows:
             mr = r.get('montant_reel', r.get('total', 0))
             solde = r.get('solde', mr - r.get('paid', 0))
-            solde_s = (f"+{solde:,.0f}" if isinstance(solde, (int, float)) and solde > 0
-                       else f"{solde:,.0f}" if isinstance(solde, (int, float))
+            solde_s = (f"{abs(solde):,.0f}" if isinstance(solde, (int, float))
                        else '-')
             tbl_data.append([
                 r['code'],
                 (r['client_name'] or '')[:22],
-                (r['category']    or '')[:16],
                 r['room'],
                 fmt_date(r['date_entree_prevue']),
                 fmt_date(r['date_sortie_prevue']),
                 str(r.get('nuitees', '-')),
-                reservation_status_label(r['status']),
+                fmt_datetime(r.get('date_entree_reelle')),
+                fmt_datetime(r.get('date_sortie_reelle')),
+                str(r.get('jours_reels', '-')),
                 f"{r['total']:,.0f}",
                 f"{mr:,.0f}" if isinstance(mr, (int, float)) else '-',
                 f"{r['paid']:,.0f}",
-                f"{r['reste']:,.0f}",
                 solde_s,
+                reservation_status_label(r['status']),
             ])
             tot_brut  += r.get('total', 0) + r.get('reduction', 0)
             tot_reduc += r.get('reduction', 0)
@@ -664,14 +665,15 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
 
         # Ligne totaux
         tbl_data.append([
-            f"TOTAL ({len(rows)})", '', '', '', '', '', '', '',
+            f"TOTAL ({len(rows)})", '', '', '', '', '', '', '', '',
             f"{tot_net:,.0f}", f"{tot_net:,.0f}",
-            f"{tot_paid:,.0f}", f"{tot_reste:,.0f}", '',
+            f"{tot_paid:,.0f}", '', '',
         ])
 
-        cws = [2.2*cm, 4.2*cm, 3*cm, 1.8*cm,
+        cws = [2.2*cm, 4.5*cm, 2*cm,
                2.4*cm, 2.4*cm, 1.5*cm,
-               2.2*cm, 2.6*cm, 2.6*cm, 2.6*cm, 2.4*cm, 2.4*cm]
+               2.4*cm, 2.4*cm, 1.8*cm,
+               2.6*cm, 2.6*cm, 2.4*cm, 2.2*cm, 2.2*cm]
         tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
         tbl.setStyle(TableStyle([
             ('BACKGROUND',    (0, 0), (-1, 0),  HexColor('#34495E')),
@@ -730,21 +732,18 @@ def _export_reservations_pdf(rows: list, date_from, date_to,
 COLUMNS = [
     'Code',           # 0
     'Client',         # 1
-    'Catégorie',      # 2
-    'Chambre',        # 3
-    'Entrée prévue',  # 4
-    'Sortie prévue',  # 5
-    'Nuitée',         # 6
-    'Entrée réelle',  # 7
-    'Sortie réelle',  # 8
-    'Jours réels',    # 9
-    'Statut',         # 10
-    'Paiement',       # 11
-    'Total prévu',    # 12
-    'Montant réel',   # 13
-    'Payé',           # 14
-    'Reste',          # 15
-    'Solde',          # 16
+    'Chambre',        # 2
+    'Entrée prévue',  # 3
+    'Sortie prévue',  # 4
+    'Nuitée',         # 5
+    'Entrée réelle',  # 6
+    'Sortie réelle',  # 7
+    'Jours réels',    # 8
+    'Total prévu',    # 9
+    'Montant réel',   # 10
+    'Payé',           # 11
+    'Solde',          # 12
+    'Statut',         # 13
 ]
 _COLUMNS_LABELS = [c.split('#')[0].strip() for c in COLUMNS]
 
@@ -921,29 +920,25 @@ class ReservationView(QWidget):
             # Solde
             solde = row.get('solde', None)
             if isinstance(solde, (int, float)):
-                solde_str = (f"+{solde:,.0f}" if solde > 0
-                             else f"{solde:,.0f}")
+                solde_str = f"{abs(solde):,.0f}"
             else:
                 solde_str = '-'
 
             cells = [
                 row['code'],           # 0
                 row['client_name'],    # 1
-                row['category'],       # 2
-                row['room'],           # 3
-                fmt_date(row['date_entree_prevue']),  # 4
-                fmt_date(row['date_sortie_prevue']),  # 5
-                nuitees_str,           # 6
-                fmt_date(row['date_entree_reelle']),  # 7
-                fmt_date(row['date_sortie_reelle']),  # 8
-                str(row.get('jours_reels', '-')),     # 9
-                reservation_status_label(row['status']),       # 10
-                payment_status_label(row['statut_paiement']),  # 11
-                f"{row['total']:,.0f}",        # 12
-                montant_reel_str,              # 13
-                f"{row['paid']:,.0f}",         # 14
-                f"{row['reste']:,.0f}",        # 15
-                solde_str,                     # 16
+                row['room'],           # 2
+                fmt_date(row['date_entree_prevue']),  # 3
+                fmt_date(row['date_sortie_prevue']),  # 4
+                nuitees_str,           # 5
+                fmt_datetime(row['date_entree_reelle']),  # 6
+                fmt_datetime(row['date_sortie_reelle']),  # 7
+                str(row.get('jours_reels', '-')),     # 8
+                f"{row['total']:,.0f}",        # 9
+                montant_reel_str,              # 10
+                f"{row['paid']:,.0f}",         # 11
+                solde_str,                     # 12
+                reservation_status_label(row['status']),  # 13
             ]
             for col, val in enumerate(cells):
                 item = QTableWidgetItem(str(val))
@@ -952,26 +947,24 @@ class ReservationView(QWidget):
                     item.setData(Qt.ItemDataRole.UserRole, row['id'])
                 self.table.setItem(r, col, item)
 
-            # Coloration statut (col 10) et paiement (col 11)
+            # Coloration statut (col 13)
             s_color = RESERVATION_STATUS_COLORS.get(row['status'], '#333')
-            p_color = PAYMENT_STATUS_COLORS.get(row['statut_paiement'], '#333')
-            self.table.item(r, 10).setForeground(QBrush(QColor(s_color)))
-            self.table.item(r, 11).setForeground(QBrush(QColor(p_color)))
+            self.table.item(r, 13).setForeground(QBrush(QColor(s_color)))
 
-            # Jours réels en bleu si en cours (col 9)
+            # Jours réels en bleu si en cours (col 8)
             if row['status'] == 'en_cours' and row.get('jours_reels', '-') != '-':
-                jr_item = self.table.item(r, 9)
+                jr_item = self.table.item(r, 8)
                 if jr_item:
                     jr_item.setForeground(QBrush(QColor('#1976D2')))
                     jr_item.setFont(QFont('', -1, QFont.Weight.Bold))
 
-            # Montant réel en bleu (col 13)
-            mr_item = self.table.item(r, 13)
+            # Montant réel en bleu (col 10)
+            mr_item = self.table.item(r, 10)
             if mr_item and montant_reel_str != '-':
                 mr_item.setForeground(QBrush(QColor('#1976D2')))
 
-            # Solde : rouge si positif (doit encore payer), vert si négatif (crédit)
-            solde_item = self.table.item(r, 16)
+            # Solde : rouge si positif, vert si négatif (col 12)
+            solde_item = self.table.item(r, 12)
             if solde_item and isinstance(solde, (int, float)):
                 if solde > 0:
                     solde_item.setForeground(QBrush(QColor('#E74C3C')))
@@ -1163,15 +1156,18 @@ class ReservationView(QWidget):
             QMessageBox.warning(self, "Erreur", msg)
 
     def _on_export_pdf(self):
-        """Exporte les réservations affichées (après filtres) en PDF A4."""
-        s = self.search_input.text().strip().lower()
+        """Exporte les réservations affichées (après tous les filtres) en PDF A4."""
+        # Appliquer recherche texte + filtre statut sur self._data
+        s      = self.search_input.text().strip().lower()
+        status = self.status_filter.currentData()
+        rows   = self._data
+        if status:
+            rows = [r for r in rows if r['status'] == status]
         if s:
-            rows = [r for r in self._data
+            rows = [r for r in rows
                     if s in r['code'].lower()
                     or s in r['client_name'].lower()
                     or s in r['room'].lower()]
-        else:
-            rows = self._data
         if not rows:
             QMessageBox.information(self, "Export PDF",
                                     "Aucune réservation à exporter.")

@@ -151,5 +151,8 @@ class PaymentService:
                     'created_at': p.created_at,
                     'user_id': p.user_id,
                     'user_name': _uname(p.user_id),
+                    'date_reservation': res.created_at if res else None,
+                    'date_checkin': res.date_entree_reelle if res else None,
+                    'date_checkout': res.date_sortie_reelle if res else None,
                 })
             return result

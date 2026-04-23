@@ -19,7 +19,8 @@ from ayanna_erp.modules.hotel.utils.helpers import fmt_datetime
 
 _svc = PaymentService()
 
-COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Reçu par', 'Date / Heure']
+COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Reçu par',
+           'Dt. Réservation', 'Check-in', 'Check-out', 'Date / Heure paiement']
 METHOD_LABELS = {
     'cash':         'Espèces',
     'mobile_money': 'Mobile Money',
@@ -168,6 +169,15 @@ class CaisseView(QWidget):
             dt_str = (pay['created_at'].strftime('%d/%m/%Y %H:%M')
                       if hasattr(pay.get('created_at'), 'strftime')
                       else str(pay.get('created_at', '-')))
+
+            def _fmtd(v):
+                if v is None:
+                    return '-'
+                try:
+                    return v.strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    return str(v)
+
             amt = pay.get('amount', 0)
             vals = [
                 str(idx),
@@ -176,6 +186,9 @@ class CaisseView(QWidget):
                 f"{amt:,.0f}" if isinstance(amt, (int, float)) else '-',
                 method_label,
                 pay.get('user_name', str(pay.get('user_id', '-'))),
+                _fmtd(pay.get('date_reservation')),
+                _fmtd(pay.get('date_checkin')),
+                _fmtd(pay.get('date_checkout')),
                 dt_str,
             ]
             for col, val in enumerate(vals):
@@ -251,10 +264,20 @@ class CaisseView(QWidget):
             els.append(Spacer(1, 0.4*cm))
 
             headers = ['#', 'Réservation', 'Client', 'Montant',
-                       'Méthode', 'Reçu par', 'Date / Heure']
+                       'Méthode', 'Reçu par',
+                       'Dt. Réservation', 'Check-in', 'Check-out',
+                       'Date / Heure paiement']
             tbl_data = [headers]
             total = 0.0
             totals = {'cash': 0.0, 'mobile_money': 0.0, 'carte': 0.0}
+
+            def _fmtd(v):
+                if v is None:
+                    return '-'
+                try:
+                    return v.strftime('%d/%m/%Y %H:%M')
+                except Exception:
+                    return str(v)
 
             for idx, pay in enumerate(rows, start=1):
                 dt_str = (pay['created_at'].strftime('%d/%m/%Y %H:%M')
@@ -269,6 +292,9 @@ class CaisseView(QWidget):
                     f"{amt:,.0f}" if isinstance(amt, (int, float)) else '-',
                     METHOD_LABELS.get(method, method),
                     (pay.get('user_name') or str(pay.get('user_id', '-')))[:22],
+                    _fmtd(pay.get('date_reservation')),
+                    _fmtd(pay.get('date_checkin')),
+                    _fmtd(pay.get('date_checkout')),
                     dt_str,
                 ])
                 total += float(amt or 0)
@@ -276,10 +302,11 @@ class CaisseView(QWidget):
                     totals[method] += float(amt or 0)
 
             tbl_data.append([
-                f"TOTAL ({len(rows)})", '', '', f"{total:,.0f}", '', '', '',
+                f"TOTAL ({len(rows)})", '', '', f"{total:,.0f}", '', '', '', '', '', '',
             ])
 
-            cws = [1.2*cm, 3.2*cm, 5.5*cm, 3*cm, 3*cm, 4.5*cm, 4*cm]
+            cws = [1.2*cm, 3*cm, 5*cm, 2.8*cm, 2.8*cm, 4*cm,
+                   2.8*cm, 2.8*cm, 2.8*cm, 3.8*cm]
             tbl = Table(tbl_data, colWidths=cws, repeatRows=1)
             tbl.setStyle(TableStyle([
                 ('BACKGROUND',     (0, 0), (-1, 0),  HexColor('#34495E')),
