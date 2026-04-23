@@ -95,6 +95,33 @@ def payment_status_label(status: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Calcul jours réels de séjour
+# ---------------------------------------------------------------------------
+
+def jours_reels(date_entree) -> int:
+    """Calcule le nombre de jours réels de séjour depuis l'entrée jusqu'à maintenant.
+
+    Règles :
+    - Le premier jour (même calendaire que l'entrée) compte toujours 1.
+    - Chaque jour calendaire supplémentaire ne compte comme complet
+      que si l'heure courante est >= 10h00.
+    Exemples :
+      Entrée 18h00 → à 18h01              : 1 jour
+      Entrée 18h00 → lendemain 09h59      : 1 jour
+      Entrée 18h00 → lendemain 10h00+     : 2 jours
+    """
+    if date_entree is None:
+        return 0
+    now = datetime.now()
+    delta_days = (now.date() - date_entree.date()).days
+    if delta_days <= 0:
+        return 1
+    if now.hour >= 10:
+        return delta_days + 1
+    return delta_days
+
+
+# ---------------------------------------------------------------------------
 # Calcul nombre de nuits
 # ---------------------------------------------------------------------------
 

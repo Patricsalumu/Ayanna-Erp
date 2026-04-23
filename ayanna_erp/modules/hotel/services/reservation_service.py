@@ -13,9 +13,26 @@ from ayanna_erp.modules.hotel.models.model import (
     HotelReservation, HotelRoom, HotelCategory, HotelPayment
 )
 from ayanna_erp.modules.hotel.services.room_service import RoomService
+from ayanna_erp.modules.hotel.utils.helpers import jours_reels as _jours_reels
 
 log = logging.getLogger(__name__)
 _room_svc = RoomService()
+
+
+def _user_name(session, user_id) -> str:
+    """Récupère le nom d'un utilisateur depuis core_users (safe)."""
+    if not user_id:
+        return '-'
+    try:
+        from ayanna_erp.database.database_manager import get_database_manager as _gdb
+        from sqlalchemy import text
+        row = session.execute(
+            text("SELECT name FROM core_users WHERE id = :uid"),
+            {'uid': user_id}
+        ).fetchone()
+        return row[0] if row else str(user_id)
+    except Exception:
+        return str(user_id)
 
 
 def _gen_code() -> str:
@@ -137,12 +154,15 @@ class ReservationService:
     # ------------------------------------------------------------------
 
     def checkin(self, reservation_id: int,
+                checkin_date: Optional[datetime] = None,
                 user_id: Optional[int] = None) -> Tuple[bool, str]:
         """
         Effectue le check-in : affecte une chambre disponible,
         met à jour les statuts et enregistre la date d'entrée réelle.
+        checkin_date : date/heure du check-in (défaut = maintenant).
         """
         try:
+            effective_date = checkin_date or datetime.now()
             db = get_database_manager()
             with db.session_scope() as session:
                 res = session.query(HotelReservation).filter_by(
@@ -166,7 +186,7 @@ class ReservationService:
 
                 # Affecter la chambre
                 res.room_id = room.id
-                res.date_entree_reelle = datetime.now()
+                res.date_entree_reelle = effective_date
                 res.status = 'en_cours'
 
                 # Mettre la chambre en occupée
@@ -188,7 +208,8 @@ class ReservationService:
                  user_id: Optional[int] = None) -> Tuple[bool, str]:
         """
         Effectue le check-out.
-        Autorisé uniquement si statut_paiement = 'paye' ou 'credit'.
+        Recalcule le total sur la base des jours réellement passés,
+        puis autorise le check-out uniquement si statut_paiement = 'paye' ou 'credit'.
         """
         try:
             db = get_database_manager()
@@ -199,10 +220,29 @@ class ReservationService:
                     return False, "Réservation introuvable."
                 if res.status != 'en_cours':
                     return False, f"Check-out impossible : statut = {res.status}."
+
+                # --- Recalcul sur jours réels ---
+                d_entree = res.date_entree_reelle or res.date_entree_prevue
+                jours = _jours_reels(d_entree)
+                cat = session.query(HotelCategory).filter_by(
+                    id=res.hotel_category_id).first()
+                price_per_night = cat.price_per_night if cat else 0.0
+                new_total = max(jours * price_per_night - float(res.reduction or 0), 0.0)
+
+                # Mettre à jour le total et le statut paiement
+                res.total_amount = new_total
+                self._refresh_payment_status(session, res)
+                session.flush()
+
+                paid = sum(p.amount for p in res.payments)
+                reste = max(new_total - paid, 0.0)
+
                 if res.statut_paiement not in ('paye', 'credit'):
+                    # Total mis à jour, mais checkout bloqué
                     return (False,
-                            "Check-out refusé : le solde doit être intégralement "
-                            "réglé ou mis en crédit avant de libérer la chambre.")
+                            f"Solde recalculé sur {jours} jour(s) réel(s) : "
+                            f"total {new_total:,.0f} – payé {paid:,.0f} = "
+                            f"reste à payer {reste:,.0f}.")
 
                 res.date_sortie_reelle = datetime.now()
                 res.status = 'terminee'
@@ -211,9 +251,11 @@ class ReservationService:
                     room = session.query(HotelRoom).filter_by(
                         id=res.room_id).first()
                     if room:
-                        room.status = 'menage'   # chambre passe en ménage
+                        room.status = 'menage'
 
-                return True, "Check-out effectué. La chambre est passée en ménage."
+                return (True,
+                        f"Check-out effectué ({jours} jour(s) réel(s)). "
+                        "La chambre est passée en ménage.")
 
         except Exception as e:
             log.exception("Erreur checkout")
@@ -337,6 +379,32 @@ class ReservationService:
                         r.client.prenom or '')
                 room_number = r.room.number if r.room else '-'
                 cat_name = r.category.name if r.category else '-'
+                d_entree_reelle = r.date_entree_reelle
+                jr = (_jours_reels(d_entree_reelle)
+                      if r.status == 'en_cours' and d_entree_reelle
+                      else '-')
+
+                # Nuitées prévues (entrée prévue → sortie prévue)
+                nuitees = (
+                    _nb_nuits(r.date_entree_prevue, r.date_sortie_prevue)
+                    if r.date_entree_prevue and r.date_sortie_prevue
+                    else '-'
+                )
+
+                # Montant réel : jours_reels × prix_catégorie − réduction
+                price_per_night = r.category.price_per_night if r.category else 0.0
+                if r.status == 'en_cours' and isinstance(jr, int):
+                    montant_reel = max(
+                        jr * price_per_night - float(r.reduction or 0), 0.0)
+                else:
+                    # terminée : total_amount déjà recalculé au checkout
+                    montant_reel = float(r.total_amount or 0.0)
+
+                # Solde = montant_reel − payé
+                # > 0 : client doit encore payer
+                # < 0 : client a trop payé (crédit)
+                solde = montant_reel - paid
+
                 row = {
                     'id': r.id,
                     'code': r.reservation_code,
@@ -355,6 +423,14 @@ class ReservationService:
                     'reste': max(r.total_amount - paid, 0.0),
                     'notes': r.notes or '',
                     'reduction': r.reduction,
+                    'jours_reels': jr,
+                    'nuitees': nuitees,
+                    'montant_reel': montant_reel,
+                    'solde': solde,
+                    'price_per_night': price_per_night,
+                    'created_at': r.created_at,
+                    'user_id': r.user_id,
+                    'created_by_name': _user_name(session, r.user_id),
                 }
                 if search:
                     s = search.lower()

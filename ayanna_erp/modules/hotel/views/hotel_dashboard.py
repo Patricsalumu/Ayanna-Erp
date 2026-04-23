@@ -4,20 +4,163 @@ HotelDashboard – onglet 1 : vue d'ensemble des chambres par catégorie.
 from datetime import datetime
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QScrollArea,
-    QPushButton, QLabel, QFrame, QGridLayout, QButtonGroup,
-    QSizePolicy, QMessageBox
+    QPushButton, QLabel, QFrame, QGridLayout,
+    QSizePolicy, QMessageBox, QDialog, QLineEdit,
+    QTableWidget, QTableWidgetItem, QHeaderView,
+    QAbstractItemView, QDateTimeEdit, QFormLayout
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtCore import Qt, QTimer, QDateTime
+from PyQt6.QtGui import QFont, QColor, QBrush
 
 from ayanna_erp.modules.hotel.services.room_service import RoomService
 from ayanna_erp.modules.hotel.services.reservation_service import ReservationService
 from ayanna_erp.modules.hotel.utils.helpers import (
-    room_status_label, ROOM_STATUS_COLORS, fmt_date
+    room_status_label, ROOM_STATUS_COLORS, fmt_date, fmt_datetime
 )
 
 _room_svc = RoomService()
 _res_svc  = ReservationService()
+
+
+class CheckinDialog(QDialog):
+    """Dialogue de recherche et sélection de réservation pour le check-in."""
+
+    def __init__(self, room, current_user=None, parent=None):
+        super().__init__(parent)
+        self.room = room
+        self.current_user = current_user
+        self._is_super_admin = (
+            isinstance(current_user, dict)
+            and current_user.get('role') == 'super_admin'
+        )
+        self.setWindowTitle(f"Check-in – Chambre {room.number}")
+        self.setMinimumSize(640, 420)
+        self.setModal(True)
+        self._reservations = []
+        self._build_ui()
+        self._load_reservations()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        # En-tête
+        lbl = QLabel(
+            f"Sélectionnez une réservation à affecter à la chambre "
+            f"<b>{self.room.number}</b> "
+            f"(catégorie : {self.room.category.name if self.room.category else '-'})"
+        )
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        # Barre de recherche
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("🔍 Rechercher (code, client)…")
+        self.search.setFixedHeight(32)
+        self.search.textChanged.connect(self._filter)
+        layout.addWidget(self.search)
+
+        # Tableau réservations
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(
+            ['Code', 'Client', 'Catégorie', 'Entrée prévue', 'Sortie prévue'])
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setStyleSheet(
+            "QHeaderView::section{background:#34495E;color:white;"
+            "padding:5px;font-weight:bold;}")
+        self.table.doubleClicked.connect(self._accept_selection)
+        layout.addWidget(self.table)
+
+        # Date check-in
+        form = QFormLayout()
+        self.dt_checkin = QDateTimeEdit(QDateTime.currentDateTime())
+        self.dt_checkin.setCalendarPopup(True)
+        self.dt_checkin.setDisplayFormat("dd/MM/yyyy HH:mm")
+        if not self._is_super_admin:
+            self.dt_checkin.setReadOnly(True)
+            self.dt_checkin.setStyleSheet("background:#ECF0F1;color:#888;")
+            note = QLabel("(Date fixée à aujourd'hui pour cet utilisateur)")
+            note.setStyleSheet("color:#888;font-size:10px;")
+            form.addRow("Date check-in :", self.dt_checkin)
+            form.addRow("", note)
+        else:
+            form.addRow("Date check-in :", self.dt_checkin)
+        layout.addLayout(form)
+
+        # Boutons
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("Annuler")
+        btn_cancel.clicked.connect(self.reject)
+        self.btn_ok = QPushButton("✅ Check-in")
+        self.btn_ok.setEnabled(False)
+        self.btn_ok.setStyleSheet(
+            "QPushButton{background:#1976D2;color:white;padding:6px 18px;"
+            "border-radius:4px;}QPushButton:hover{background:#1565C0;}"
+            "QPushButton:disabled{background:#BDC3C7;}")
+        self.btn_ok.clicked.connect(self._accept_selection)
+        self.table.selectionModel().selectionChanged.connect(
+            lambda: self.btn_ok.setEnabled(
+                self.table.currentRow() >= 0))
+        btn_row.addWidget(btn_cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_ok)
+        layout.addLayout(btn_row)
+
+    def _load_reservations(self, search: str = ''):
+        cat_name = self.room.category.name if self.room.category else ''
+        all_res = (_res_svc.get_all_reservations(status='en_attente') +
+                   _res_svc.get_all_reservations(status='confirmee'))
+        # Filtre catégorie de la chambre
+        self._reservations = [
+            r for r in all_res if r['category'] == cat_name]
+        self._fill_table(search)
+
+    def _filter(self, text: str):
+        self._fill_table(text.strip().lower())
+
+    def _fill_table(self, search: str = ''):
+        self.table.setRowCount(0)
+        for res in self._reservations:
+            if search and (
+                search not in res['code'].lower()
+                and search not in res['client_name'].lower()
+            ):
+                continue
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            vals = [
+                res['code'], res['client_name'], res['category'],
+                fmt_date(res['date_entree_prevue']),
+                fmt_date(res['date_sortie_prevue']),
+            ]
+            for col, val in enumerate(vals):
+                item = QTableWidgetItem(str(val))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setData(Qt.ItemDataRole.UserRole, res['id'])
+                self.table.setItem(r, col, item)
+
+    def _accept_selection(self):
+        if self.table.currentRow() < 0:
+            QMessageBox.information(self, "Sélection",
+                                    "Veuillez sélectionner une réservation.")
+            return
+        self.accept()
+
+    def get_reservation_id(self) -> int:
+        item = self.table.item(self.table.currentRow(), 0)
+        return item.data(Qt.ItemDataRole.UserRole)
+
+    def get_checkin_datetime(self) -> datetime:
+        qdt = self.dt_checkin.dateTime().toPyDateTime()
+        return qdt
 
 
 class RoomCard(QFrame):
@@ -54,9 +197,16 @@ class RoomCard(QFrame):
         top.addWidget(badge, 0, Qt.AlignmentFlag.AlignRight)
         layout.addLayout(top)
 
-        # Catégorie
-        cat_name = self.room.category.name if self.room.category else '-'
-        layout.addWidget(QLabel(f"<span style='color:#888;font-size:11px;'>{cat_name}</span>"))
+        # Catégorie (si libre) ou code réservation (si occupée)
+        if self.reservation:
+            res_code = getattr(self.reservation, 'reservation_code', '-')
+            layout.addWidget(QLabel(
+                f"<span style='color:#E74C3C;font-size:11px;font-weight:bold;'"
+                f">🔑 {res_code}</span>"))
+        else:
+            cat_name = self.room.category.name if self.room.category else '-'
+            layout.addWidget(QLabel(
+                f"<span style='color:#888;font-size:11px;'>{cat_name}</span>"))
 
         # Info réservation active
         if self.reservation:
@@ -76,7 +226,7 @@ class RoomCard(QFrame):
         else:
             layout.addWidget(QLabel("<span style='color:#27AE60;'>Libre</span>"))
             layout.addStretch()
-            btn = QPushButton("Affecter réservation")
+            btn = QPushButton("✅ Check-in")
             btn.setStyleSheet(
                 "QPushButton{background:#1976D2;color:white;border-radius:4px;"
                 "padding:4px;font-size:10px;}QPushButton:hover{background:#1565C0;}")
@@ -218,20 +368,16 @@ class HotelDashboard(QWidget):
             f"Occupées : {occupee}  |  Autres : {total - dispo - occupee}")
 
     def _on_assign(self, room):
-        """Affecte la première réservation en attente de cette catégorie à la chambre."""
-        from ayanna_erp.modules.hotel.services.reservation_service import ReservationService
-        reservations = ReservationService().get_all_reservations(status='en_attente')
-        cat_reservations = [
-            r for r in reservations
-            if r['category'] == (room.category.name if room.category else '')]
-        if not cat_reservations:
-            QMessageBox.information(
-                self, "Aucune réservation",
-                "Aucune réservation en attente pour cette catégorie.")
+        """Ouvre le dialogue de check-in pour sélectionner une réservation."""
+        dlg = CheckinDialog(room, self.current_user, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        # Prendre la plus ancienne
-        target = cat_reservations[0]
-        ok, msg = ReservationService().checkin(target['id'])
+        res_id = dlg.get_reservation_id()
+        checkin_dt = dlg.get_checkin_datetime()
+        uid = (self.current_user.get('id')
+               if isinstance(self.current_user, dict) else None)
+        ok, msg = ReservationService().checkin(
+            res_id, checkin_date=checkin_dt, user_id=uid)
         if ok:
             QMessageBox.information(self, "Check-in", msg)
             self.refresh()

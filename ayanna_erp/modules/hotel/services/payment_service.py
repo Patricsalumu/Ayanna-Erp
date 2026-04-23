@@ -77,12 +77,25 @@ class PaymentService:
                     .filter_by(reservation_id=reservation_id)
                     .order_by(HotelPayment.created_at)
                     .all())
+            from sqlalchemy import text
+            def _uname(uid):
+                if not uid:
+                    return '-'
+                try:
+                    row = session.execute(
+                        text("SELECT name FROM core_users WHERE id = :uid"),
+                        {'uid': uid}).fetchone()
+                    return row[0] if row else str(uid)
+                except Exception:
+                    return str(uid)
             result = [
                 {
                     'id': p.id,
                     'amount': p.amount,
                     'method': p.method,
                     'created_at': p.created_at,
+                    'user_id': p.user_id,
+                    'user_name': _uname(p.user_id),
                 }
                 for p in pays
             ]
