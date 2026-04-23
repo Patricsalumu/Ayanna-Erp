@@ -102,14 +102,33 @@ class PaymentService:
             return result
 
     def get_daily_payments(
-            self, target_date: Optional[datetime] = None
+            self, target_date: Optional[datetime] = None,
+            date_to: Optional[datetime] = None,
     ) -> List[Dict[str, Any]]:
-        """Retourne tous les paiements d'une journée donnée (aujourd'hui par défaut)."""
+        """
+        Retourne les paiements entre date_from et date_to (inclus).
+        Si date_to est omis, retourne seulement la journée target_date.
+        """
         db = get_database_manager()
         target_date = target_date or datetime.now()
         d_start = datetime(target_date.year, target_date.month, target_date.day, 0, 0, 0)
-        d_end   = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
+        if date_to:
+            d_end = datetime(date_to.year, date_to.month, date_to.day, 23, 59, 59)
+        else:
+            d_end = datetime(target_date.year, target_date.month, target_date.day, 23, 59, 59)
         with db.session_scope() as session:
+            from sqlalchemy import text
+            def _uname(uid):
+                if not uid:
+                    return '-'
+                try:
+                    row = session.execute(
+                        text("SELECT name FROM core_users WHERE id = :uid"),
+                        {'uid': uid}).fetchone()
+                    return row[0] if row else str(uid)
+                except Exception:
+                    return str(uid)
+
             pays = (session.query(HotelPayment)
                     .filter(HotelPayment.created_at >= d_start,
                             HotelPayment.created_at <= d_end)
@@ -130,5 +149,7 @@ class PaymentService:
                     'amount': p.amount,
                     'method': p.method,
                     'created_at': p.created_at,
+                    'user_id': p.user_id,
+                    'user_name': _uname(p.user_id),
                 })
             return result
