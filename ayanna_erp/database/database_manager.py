@@ -73,6 +73,14 @@ except ImportError:
     # Les modèles achats ne sont pas encore disponibles
     pass
 
+# Import des modèles hôtel pour qu'ils soient inclus dans Base.metadata
+try:
+    from ayanna_erp.modules.hotel.models.model import (
+        HotelCategory, HotelRoom, HotelReservation, HotelPayment
+    )
+except ImportError:
+    pass
+
 
 
 class DatabaseManager:

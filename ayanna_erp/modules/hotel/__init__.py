@@ -1,3 +1,1 @@
-"""
-Module Hôtel pour Ayanna ERP
-"""
+# Hotel module

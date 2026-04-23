@@ -20,23 +20,18 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "1.9"
+    APP_VERSION = "1.9.1"
     
     # Notes de version
     VERSION_NOTES = {
-        "1.9": {
-            "date": "10 Avril 2026",
-            "titre": "Corrections et Améliorations d'Export",
+        "1.9.1": {
+            "date": "23 Avril 2026",
+            "titre": "Corrections bugs sur la vente, synthèse export et recherche produit",
             "changements": [
-                "BUGFIX: Correction de l'affichage des remises dans l'export produits",
-                "BUGFIX: Correction du calcul du montant en espèce dans le rapport quotidien",
-                "AMÉLIORATION: Ajout du solde et des remises dans l'export des commandes",
-                "AMÉLIORATION: Meilleure visibilité globale de l'activité via les documents d'export",
-                "AMÉLIORATION: Affichage de la version sur le login et main window",
-                "AMÉLIORATION: Diminution de la taille de la fenêtre modale création produit"
-                "AMELIORATION: Fenetre modale selection produit aggrandie, avec filtre par categorie et quantite stock"
-                "BUGFIX: Chargement des commandes limités à 25"
-                "AMELIORATION: Geration des numero commande unique"
+                "BUGFIX: Correction sur la déduction du stock lors de la vente",
+                "BUGFIX: Correction sur l'écriture comptable lors de la vente",
+                "AMÉLIORATION: prise en compte de la remise dans le calcul de la vente en export produit et commandes",
+                "AMÉLIORATION: Correction bugs sur la recherche ",
             ]
         },
         "1.8": {
