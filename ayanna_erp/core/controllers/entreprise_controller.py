@@ -407,7 +407,8 @@ class EntrepriseController(QObject):
                 id_nat=data.get('id_nat', ''),
                 logo=data.get('logo'),  # BLOB au lieu de logo_path
                 slogan=data.get('slogan', ''),
-                currency=data.get('currency', 'USD')
+                currency=data.get('currency', 'USD'),
+                taux_de_change=data.get('taux_de_change')
             )
 
             session.add(enterprise)

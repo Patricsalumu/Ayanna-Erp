@@ -24,9 +24,15 @@ _svc = PaymentService()
 COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Reçu par',
            'Dt. Réservation', 'Check-in', 'Check-out', 'Date / Heure paiement']
 METHOD_LABELS = {
-    'cash':         'Espèces',
-    'mobile_money': 'Mobile Money',
-    'carte':        'Carte',
+    'cash':'Espèces',
+    'airtelmoney':'Airtel Money',
+    'orangemoney':'Orange Money',
+    'mpesa':'M pesa',
+    'equitybcdc':'Eauity Bcdc',
+    'tmb':'Tmb',
+    'rawbank':'Raw bank',
+    'smico':'Smico',
+    'credit':'Crédit (dette)',
 }
 
 

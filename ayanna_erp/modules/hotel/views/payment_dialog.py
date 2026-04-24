@@ -13,8 +13,13 @@ class PaymentDialog(QDialog):
 
     METHODS = [
         ('cash',         'Espèces'),
-        ('mobile_money', 'Mobile Money'),
-        ('carte',        'Carte bancaire'),
+        ('airtelmoney', 'Airtel Money'),
+        ('orangemoney', 'Orange Money'),
+        ('mpesa', 'M pesa'),
+        ('equitybcdc',        'Eauity Bcdc'),
+        ('tmb',        'Tmb'),
+        ('rawbank',        'Raw bank'),
+        ('smico',        'Smico'),
         ('credit',       'Crédit (dette)'),
     ]
 

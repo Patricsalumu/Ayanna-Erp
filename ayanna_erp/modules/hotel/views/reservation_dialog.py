@@ -164,8 +164,15 @@ class ReservationDialog(QDialog):
         # Méthode acompte
         self.method_combo = QComboBox()
         for code, label in [('cash', 'Espèces'),
-                             ('mobile_money', 'Mobile Money'),
-                             ('carte', 'Carte bancaire')]:
+        ('airtelmoney', 'Airtel Money'),
+        ('orangemoney', 'Orange Money'),
+        ('mpesa', 'M pesa'),
+        ('equitybcdc',        'Eauity Bcdc'),
+        ('tmb',        'Tmb'),
+        ('rawbank',        'Raw bank'),
+        ('smico',        'Smico'),
+        ('credit',       'Crédit (dette)'),
+        ]:
             self.method_combo.addItem(label, code)
         form.addRow("Méthode acompte :", self.method_combo)
 

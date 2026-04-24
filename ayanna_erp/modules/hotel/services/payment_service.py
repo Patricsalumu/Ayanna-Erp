@@ -154,7 +154,7 @@ class PaymentService:
                     'date_reservation': res.created_at if res else None,
                     'date_checkin': res.date_entree_reelle if res else None,
                     'date_checkout': res.date_sortie_reelle if res else None,
-                    'pays': (res.pays or '') if res else '',
-                    'carte_identite': (res.carte_identite or '') if res else '',
+                    'pays': (res.client.pays or '') if (res and res.client) else '',
+                    'carte_identite': (res.client.carte_identite or '') if (res and res.client) else '',
                 })
             return result

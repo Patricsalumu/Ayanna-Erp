@@ -429,9 +429,9 @@ class EnterpriseFormWidget(QDialog):
             'logo': self.logo_blob  # BLOB data ou None
         }
         
-        # Nettoyer les champs texte vides
+        # Nettoyer les champs texte vides (exclure logo et champs numériques)
         for key, value in data.items():
-            if key != 'logo' and (not value or value == 'None'):
+            if key not in ('logo', 'taux_de_change') and (not value or value == 'None'):
                 data[key] = ''
         
         return data
