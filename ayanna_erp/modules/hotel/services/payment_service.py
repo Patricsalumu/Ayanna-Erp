@@ -7,8 +7,10 @@ from typing import List, Dict, Any, Optional, Tuple
 
 from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.hotel.models.model import HotelPayment, HotelReservation
+from ayanna_erp.modules.hotel.services.hotel_accounting_service import get_hotel_accounting_service
 
 log = logging.getLogger(__name__)
+_acc = get_hotel_accounting_service()
 
 
 class PaymentService:
@@ -73,7 +75,22 @@ class PaymentService:
                 else:
                     res.statut_paiement = 'paye'
 
-                return True, f"Paiement de {amount:,.0f} enregistré."
+                _res_code = res.reservation_code
+                _client_id = res.client_id
+
+            # --- écriture comptable paiement (hors session) ---
+            try:
+                from ayanna_erp.database.database_manager import get_database_manager as _gdb2
+                from ayanna_erp.modules.boutique.model.models import ShopClient
+                with _gdb2().session_scope() as _s:
+                    _cl = _s.query(ShopClient).filter_by(id=_client_id).first()
+                    _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else ''
+                _acc.on_paiement(_res_code, amount, method, _cname, user_id)
+            except Exception:
+                pass
+            # ------------------------------------------------
+
+            return True, f"Paiement de {amount:,.0f} enregistré."
 
         except Exception as e:
             log.exception("Erreur add_payment")

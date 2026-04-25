@@ -14,9 +14,11 @@ from ayanna_erp.modules.hotel.models.model import (
 )
 from ayanna_erp.modules.hotel.services.room_service import RoomService
 from ayanna_erp.modules.hotel.utils.helpers import jours_reels as _jours_reels
+from ayanna_erp.modules.hotel.services.hotel_accounting_service import get_hotel_accounting_service
 
 log = logging.getLogger(__name__)
 _room_svc = RoomService()
+_acc = get_hotel_accounting_service()
 
 
 def _user_name(session, user_id) -> str:
@@ -143,6 +145,19 @@ class ReservationService:
                 res_code = res.reservation_code
 
             log.info(f"Réservation {res_code} créée (id={res_id}).")
+
+            # --- écriture comptable (hors session pour éviter les verrous) ---
+            try:
+                from ayanna_erp.database.database_manager import get_database_manager as _gdb2
+                from ayanna_erp.modules.boutique.model.models import ShopClient
+                with _gdb2().session_scope() as _s:
+                    _cl = _s.query(ShopClient).filter_by(id=client_id).first()
+                    _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else str(client_id)
+                _acc.on_reservation(res_code, total, _cname, user_id)
+            except Exception:
+                pass
+            # -----------------------------------------------------------------
+
             return True, f"Réservation {res_code} créée avec succès.", res
 
         except Exception as e:
@@ -213,6 +228,8 @@ class ReservationService:
         """
         try:
             db = get_database_manager()
+            _checkout_msg = None
+            _acc_co = None
             with db.session_scope() as session:
                 res = session.query(HotelReservation).filter_by(
                     id=reservation_id).first()
@@ -228,6 +245,8 @@ class ReservationService:
                     id=res.hotel_category_id).first()
                 price_per_night = cat.price_per_night if cat else 0.0
                 new_total = max(jours * price_per_night - float(res.reduction or 0), 0.0)
+
+                original_total = float(res.total_amount or 0.0)  # avant recalcul
 
                 # Mettre à jour le total et le statut paiement
                 res.total_amount = new_total
@@ -259,9 +278,34 @@ class ReservationService:
                     if room:
                         room.status = 'disponible'
 
-                return (True,
-                        f"Check-out effectué ({jours} jour(s) réel(s)). "
-                        "La chambre est maintenant disponible.")
+                _checkout_msg = (
+                    True,
+                    f"Check-out effectué ({jours} jour(s) réel(s)). "
+                    "La chambre est maintenant disponible."
+                )
+                _acc_co = {
+                    'code': res.reservation_code,
+                    'client_id': res.client_id,
+                    'original_total': original_total,
+                    'new_total': new_total,
+                }
+
+            # --- écriture comptable checkout (hors session) ---
+            if _acc_co:
+                try:
+                    from ayanna_erp.database.database_manager import get_database_manager as _gdb2
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    with _gdb2().session_scope() as _s:
+                        _cl = _s.query(ShopClient).filter_by(id=_acc_co['client_id']).first()
+                        _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else ''
+                    avoir = _acc_co['original_total'] - _acc_co['new_total']
+                    if avoir > 0:
+                        _acc.on_checkout_avoir(_acc_co['code'], avoir, _cname, user_id)
+                except Exception:
+                    pass
+            # ---------------------------------------------------
+
+            return _checkout_msg
 
         except Exception as e:
             log.exception("Erreur checkout")
@@ -281,6 +325,8 @@ class ReservationService:
         try:
             new_date_sortie = _to_datetime(new_date_sortie)
             db = get_database_manager()
+            _extend_msg = None
+            _acc_ext = None
             with db.session_scope() as session:
                 res = session.query(HotelReservation).filter_by(
                     id=reservation_id).first()
@@ -315,6 +361,9 @@ class ReservationService:
                 new_total = nuits * cat.price_per_night - res.reduction
                 new_total = max(new_total, 0.0)
 
+                old_total = float(res.total_amount or 0.0)
+                delta = max(new_total - old_total, 0.0)
+
                 res.date_sortie_prevue = new_date_sortie
                 res.date_sortie_reelle = None  # reset – sortie non encore faite
                 res.total_amount = new_total
@@ -322,7 +371,23 @@ class ReservationService:
                 # Recalculer statut paiement
                 self._refresh_payment_status(session, res)
 
-                return True, f"Séjour prolongé jusqu'au {new_date_sortie.strftime('%d/%m/%Y')}."
+                _extend_msg = f"Séjour prolongé jusqu'au {new_date_sortie.strftime('%d/%m/%Y')}."
+                _acc_ext = {'code': res.reservation_code, 'client_id': res.client_id, 'delta': delta}
+
+            # --- écriture comptable prolongement (hors session) ---
+            if _acc_ext and _acc_ext['delta'] > 0:
+                try:
+                    from ayanna_erp.database.database_manager import get_database_manager as _gdb2
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    with _gdb2().session_scope() as _s:
+                        _cl = _s.query(ShopClient).filter_by(id=_acc_ext['client_id']).first()
+                        _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else ''
+                    _acc.on_prolongement(_acc_ext['code'], _acc_ext['delta'], _cname, user_id)
+                except Exception:
+                    pass
+            # -------------------------------------------------------
+
+            return True, _extend_msg
 
         except Exception as e:
             log.exception("Erreur extend_stay")
@@ -336,6 +401,8 @@ class ReservationService:
                             user_id=None) -> Tuple[bool, str]:
         try:
             db = get_database_manager()
+            _cancel_msg = None
+            _acc_cancel = None
             with db.session_scope() as session:
                 res = session.query(HotelReservation).filter_by(
                     id=reservation_id).first()
@@ -349,6 +416,13 @@ class ReservationService:
                     p.amount for p in res.payments
                     if p.method != 'credit' and (p.amount or 0) > 0
                 )
+
+                _acc_cancel = {
+                    'code': res.reservation_code,
+                    'client_id': res.client_id,
+                    'montant': float(res.total_amount or 0.0),
+                    'paid_real': float(paid_real),
+                }
 
                 res.status = 'annulee'
                 res.statut_paiement = 'rembourse' if paid_real > 0 else res.statut_paiement
@@ -369,13 +443,30 @@ class ReservationService:
                         user_id=user_id,
                     )
                     session.add(refund)
-                    return True, (
+                    _cancel_msg = (
                         f"Réservation annulée.\n"
                         f"Remboursement enregistré : -{paid_real:,.0f} "
                         f"(visible dans la caisse)."
                     )
+                else:
+                    _cancel_msg = "Réservation annulée."
 
-                return True, "Réservation annulée."
+            # --- écritures comptables annulation (hors session) ---
+            if _acc_cancel:
+                try:
+                    from ayanna_erp.database.database_manager import get_database_manager as _gdb2
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    with _gdb2().session_scope() as _s:
+                        _cl = _s.query(ShopClient).filter_by(id=_acc_cancel['client_id']).first()
+                        _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else ''
+                    _acc.on_annulation(_acc_cancel['code'], _acc_cancel['montant'], _cname, user_id)
+                    if _acc_cancel['paid_real'] > 0:
+                        _acc.on_remboursement(_acc_cancel['code'], _acc_cancel['paid_real'], _cname, user_id)
+                except Exception:
+                    pass
+            # -------------------------------------------------------
+
+            return True, _cancel_msg
         except Exception as e:
             log.exception("Erreur cancel_reservation")
             return False, f"Erreur annulation : {e}"
