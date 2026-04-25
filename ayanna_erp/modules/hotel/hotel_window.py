@@ -16,8 +16,37 @@ from ayanna_erp.modules.hotel.views.reservation_view import ReservationView
 from ayanna_erp.modules.hotel.views.category_view    import CategoryView
 from ayanna_erp.modules.hotel.views.room_view        import RoomView
 from ayanna_erp.modules.hotel.views.caisse_view      import CaisseView
+from ayanna_erp.modules.salle_fete.view.entreSortie_index import EntreeSortieIndex
 
 log = logging.getLogger(__name__)
+
+
+def _get_hotel_pos_id() -> int:
+    """Retourne l'ID du POS Hôtel (ou 1 en fallback)."""
+    try:
+        from ayanna_erp.database.database_manager import POSPoint, Module
+        from ayanna_erp.core.session_manager import SessionManager
+        db = get_database_manager()
+        eid = SessionManager.get_current_enterprise_id() or 1
+        with db.session_scope() as session:
+            row = (
+                session.query(POSPoint)
+                .join(Module, POSPoint.module_id == Module.id)
+                .filter(
+                    POSPoint.enterprise_id == eid,
+                    Module.name.ilike('%hotel%'),
+                )
+                .first()
+            )
+            return row.id if row else 1
+    except Exception:
+        return 1
+
+
+class _HotelPosWrapper:
+    """Wrapper minimal pour passer le pos_id hôtel à EntreeSortieIndex."""
+    def __init__(self, pos_id: int):
+        self.pos_id = pos_id
 
 
 def _ensure_tables():
@@ -61,6 +90,21 @@ def _ensure_tables():
                     pass   # Colonne déjà existante
     except Exception as e:
         log.warning(f"Migration pays/carte_identite ignorée : {e}")
+
+    # Migration : ajout de la colonne reference sur hotel_payments si absente
+    try:
+        db3 = get_database_manager()
+        with db3.engine.connect() as conn:
+            try:
+                conn.execute(text(
+                    "ALTER TABLE hotel_payments ADD COLUMN reference TEXT"
+                ))
+                conn.commit()
+                log.info("Colonne 'reference' ajoutée à hotel_payments.")
+            except Exception:
+                pass  # Colonne déjà existante
+    except Exception as e:
+        log.warning(f"Migration reference hotel_payments ignorée : {e}")
 
     # Enregistrer les modèles ORM dans la métadonnée SQLAlchemy
     try:
@@ -116,13 +160,16 @@ class HotelWindow(QMainWindow):
         self.reservations_tab  = ReservationView(self.current_user)
         self.categories_tab    = CategoryView()
         self.rooms_tab         = RoomView()
-        self.caisse_tab        = CaisseView()
+        self.caisse_tab        = EntreeSortieIndex(
+            _HotelPosWrapper(_get_hotel_pos_id()), self.current_user)
+        self.paiements_tab     = CaisseView()
 
         self.tabs.addTab(self.dashboard_tab,    "🏨  Tableau de bord")
         self.tabs.addTab(self.reservations_tab, "📋  Réservations")
+        self.tabs.addTab(self.paiements_tab,    "💰  Paiements")
         self.tabs.addTab(self.categories_tab,   "🏷️  Catégories")
         self.tabs.addTab(self.rooms_tab,        "🛏️  Chambres")
-        self.tabs.addTab(self.caisse_tab,       "💰  Caisse")
+        self.tabs.addTab(self.caisse_tab,       "📥📤 Caisse")
 
         # Rafraîchir les onglets concernés quand on les affiche
         self.tabs.currentChanged.connect(self._on_tab_changed)

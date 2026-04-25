@@ -329,7 +329,7 @@ class ReservationDetailDialog(QDialog):
             return
         ok, msg = _pay_svc.add_payment(
             self._row['id'], dlg.get_amount(), dlg.get_method(),
-            self._get_uid())
+            self._get_uid(), reference=dlg.get_reference())
         if ok:
             QMessageBox.information(self, "Paiement", msg)
             # Recharger les données du paiement et rafraîchir la vue parente
@@ -973,15 +973,17 @@ class ReservationView(QWidget):
         self.date_from = QDateEdit(first_of_month)
         self.date_from.setCalendarPopup(True)
         self.date_from.setDisplayFormat("dd/MM/yyyy")
+        self.date_from.setToolTip("Filtrer par date de réservation (création)")
         self.date_from.dateChanged.connect(self.refresh)
-        toolbar.addWidget(QLabel("Du :"))
+        toolbar.addWidget(QLabel("Réservé du :"))
         toolbar.addWidget(self.date_from)
 
         self.date_to = QDateEdit(last_of_month)
         self.date_to.setCalendarPopup(True)
         self.date_to.setDisplayFormat("dd/MM/yyyy")
+        self.date_to.setToolTip("Filtrer par date de réservation (création)")
         self.date_to.dateChanged.connect(self.refresh)
-        toolbar.addWidget(QLabel("Au :"))
+        toolbar.addWidget(QLabel("au :"))
         toolbar.addWidget(self.date_to)
 
         btn_refresh = QPushButton("↻")
@@ -1240,7 +1242,8 @@ class ReservationView(QWidget):
         if dlg.exec() != PaymentDialog.DialogCode.Accepted:
             return
         ok, msg = _pay_svc.add_payment(
-            row['id'], dlg.get_amount(), dlg.get_method(), self._uid())
+            row['id'], dlg.get_amount(), dlg.get_method(), self._uid(),
+            reference=dlg.get_reference())
         if ok:
             QMessageBox.information(self, "Paiement", msg)
             self.refresh()

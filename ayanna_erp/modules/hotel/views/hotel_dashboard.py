@@ -29,10 +29,11 @@ class CheckinDialog(QDialog):
         super().__init__(parent)
         self.room = room
         self.current_user = current_user
-        self._is_super_admin = (
-            isinstance(current_user, dict)
-            and current_user.get('role') == 'super_admin'
-        )
+        if isinstance(current_user, dict):
+            _role = current_user.get('role', '')
+        else:
+            _role = getattr(current_user, 'role', '')
+        self._is_super_admin = (_role == 'super_admin')
         self.setWindowTitle(f"Check-in – Chambre {room.number}")
         self.setMinimumSize(640, 420)
         self.setModal(True)
@@ -87,12 +88,28 @@ class CheckinDialog(QDialog):
         if not self._is_super_admin:
             self.dt_checkin.setReadOnly(True)
             self.dt_checkin.setStyleSheet("background:#ECF0F1;color:#888;")
-            note = QLabel("(Date fixée à aujourd'hui pour cet utilisateur)")
+            note = QLabel("(Date fixée à maintenant — réservé au super administrateur)")
             note.setStyleSheet("color:#888;font-size:10px;")
             form.addRow("Date check-in :", self.dt_checkin)
             form.addRow("", note)
         else:
+            # Super admin : peut antidater librement — pas de borne minimale
+            from PyQt6.QtCore import QDateTime as _QDT
+            self.dt_checkin.setMinimumDateTime(_QDT(
+                _QDT.fromString("2000-01-01 00:00", "yyyy-MM-dd HH:mm")))
+            # Pas de borne maximale stricte : le super admin peut aussi saisir
+            # la date réelle passée (antidatage) ou l'heure actuelle
+            self.dt_checkin.clearMaximumDateTime()
+            self.dt_checkin.setToolTip(
+                "Super admin : vous pouvez antidater le check-in.\n"
+                "Utilisez le calendrier ou saisissez directement la date.")
+            self.dt_checkin.setStyleSheet(
+                "QDateTimeEdit{background:#FFF9C4;border:1px solid #F9A825;"
+                "border-radius:4px;padding:2px 6px;}")
+            note_admin = QLabel("⚠️ Antidatage autorisé — super administrateur uniquement")
+            note_admin.setStyleSheet("color:#E65100;font-size:10px;font-weight:bold;")
             form.addRow("Date check-in :", self.dt_checkin)
+            form.addRow("", note_admin)
         layout.addLayout(form)
 
         # Boutons

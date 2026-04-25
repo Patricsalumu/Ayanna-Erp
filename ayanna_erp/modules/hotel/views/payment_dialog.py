@@ -3,9 +3,12 @@ PaymentDialog – dialogue d'ajout de paiement / mise en crédit.
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout,
-    QLabel, QDoubleSpinBox, QComboBox, QPushButton, QMessageBox
+    QLabel, QDoubleSpinBox, QComboBox, QPushButton, QMessageBox, QLineEdit
 )
 from PyQt6.QtCore import Qt
+
+# Méthodes qui exigent une référence de transaction
+_REF_METHODS = {'airtelmoney', 'orangemoney', 'mpesa', 'equitybcdc', 'tmb', 'rawbank', 'smico'}
 
 
 class PaymentDialog(QDialog):
@@ -65,10 +68,19 @@ class PaymentDialog(QDialog):
         for code, label in self.METHODS:
             self.method_combo.addItem(label, code)
         form.addRow("Méthode :", self.method_combo)
+
+        # Référence transaction (mobile money / banque)
+        self.ref_label = QLabel("Référence :")
+        self.ref_input = QLineEdit()
+        self.ref_input.setPlaceholderText("Ex : TXN-123456789")
+        self.ref_input.setMaxLength(200)
+        form.addRow(self.ref_label, self.ref_input)
+
         layout.addLayout(form)
 
-        # Gestion crédit : griser le montant
+        # Gestion crédit : griser le montant ; référence : visible si mobile/banque
         self.method_combo.currentIndexChanged.connect(self._on_method_change)
+        self._on_method_change()  # état initial
 
         # Boutons
         btn_row = QHBoxLayout()
@@ -86,14 +98,25 @@ class PaymentDialog(QDialog):
         layout.addLayout(btn_row)
 
     def _on_method_change(self):
-        is_credit = self.method_combo.currentData() == 'credit'
+        method = self.method_combo.currentData()
+        is_credit = (method == 'credit')
+        needs_ref = method in _REF_METHODS
         self.amount_spin.setEnabled(not is_credit)
+        self.ref_label.setVisible(needs_ref)
+        self.ref_input.setVisible(needs_ref)
+        if not needs_ref:
+            self.ref_input.clear()
 
     def _validate(self):
         method = self.method_combo.currentData()
         if method != 'credit' and self.amount_spin.value() <= 0:
             QMessageBox.warning(self, "Montant invalide",
                                 "Le montant doit être supérieur à 0.")
+            return
+        if method in _REF_METHODS and not self.ref_input.text().strip():
+            QMessageBox.warning(self, "Référence manquante",
+                                f"Veuillez saisir la référence de la transaction "
+                                f"{self.method_combo.currentText()}.")
             return
         self.accept()
 
@@ -107,3 +130,7 @@ class PaymentDialog(QDialog):
 
     def get_method(self) -> str:
         return self.method_combo.currentData()
+
+    def get_reference(self) -> str:
+        """Retourne la référence de transaction (vide si méthode sans référence)."""
+        return self.ref_input.text().strip()

@@ -487,10 +487,10 @@ class ReservationService:
                 q = q.filter(HotelReservation.status == status)
             if date_from:
                 q = q.filter(
-                    HotelReservation.date_entree_prevue >= _to_datetime(date_from))
+                    HotelReservation.created_at >= _to_datetime(date_from))
             if date_to:
                 q = q.filter(
-                    HotelReservation.date_sortie_prevue <= datetime(
+                    HotelReservation.created_at <= datetime(
                         date_to.year, date_to.month, date_to.day, 23, 59, 59))
             reservations = q.order_by(
                 HotelReservation.created_at.desc()).all()

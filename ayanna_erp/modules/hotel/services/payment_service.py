@@ -21,6 +21,7 @@ class PaymentService:
         amount: float,
         method: str = 'cash',
         user_id: Optional[int] = None,
+        reference: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Enregistre un paiement et met à jour le statut de paiement.
@@ -45,6 +46,7 @@ class PaymentService:
                         reservation_id=reservation_id,
                         amount=0.0,
                         method='credit',
+                        reference=None,
                         created_at=datetime.now(),
                         user_id=user_id,
                     )
@@ -59,6 +61,7 @@ class PaymentService:
                     reservation_id=reservation_id,
                     amount=amount,
                     method=method,
+                    reference=(reference.strip() if reference else None),
                     created_at=datetime.now(),
                     user_id=user_id,
                 )
@@ -120,6 +123,7 @@ class PaymentService:
                     'id': p.id,
                     'amount': p.amount,
                     'method': p.method,
+                    'reference': p.reference or '',
                     'created_at': p.created_at,
                     'user_id': p.user_id,
                     'user_name': _uname(p.user_id),
@@ -175,6 +179,7 @@ class PaymentService:
                     'client': client_name.strip(),
                     'amount': p.amount,
                     'method': p.method,
+                    'reference': p.reference or '',
                     'created_at': p.created_at,
                     'user_id': p.user_id,
                     'user_name': _uname(p.user_id),

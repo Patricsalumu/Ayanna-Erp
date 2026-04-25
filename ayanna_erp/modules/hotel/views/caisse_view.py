@@ -21,8 +21,9 @@ from ayanna_erp.modules.hotel.utils.helpers import (
 
 _svc = PaymentService()
 
-COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Reçu par',
-           'Dt. Réservation', 'Check-in', 'Check-out', 'Date / Heure paiement']
+COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Référence',
+           'Reçu par', 'Dt. Réservation', 'Check-in', 'Check-out',
+           'Date / Heure paiement']
 
 METHOD_LABELS = {
     'cash':           'Espèces',
@@ -232,6 +233,7 @@ class CaisseView(QWidget):
                 pay.get('client', '-'),
                 fmt_amount(amt, self._sym) if isinstance(amt, (int, float)) else '-',
                 method_label,
+                pay.get('reference') or '-',
                 pay.get('user_name', str(pay.get('user_id', '-'))),
                 _fmtd(pay.get('date_reservation')),
                 _fmtd(pay.get('date_checkin')),
@@ -332,7 +334,7 @@ class CaisseView(QWidget):
 
             # ── Tableau ─────────────────────────────────────────────────
             headers = ['#', 'Réservation', 'Client', 'Montant',
-                       'Méthode', 'Reçu par',
+                       'Méthode', 'Référence', 'Reçu par',
                        'Dt. Réservation', 'Check-in', 'Check-out',
                        'Date / Heure paiement']
             tbl_data = [headers]
@@ -360,6 +362,7 @@ class CaisseView(QWidget):
                     (pay.get('client') or '')[:26],
                     fmt_amount(amt, sym) if isinstance(amt, (int, float)) else '-',
                     METHOD_LABELS.get(method, method),
+                    (pay.get('reference') or '-')[:24],
                     (pay.get('user_name') or str(pay.get('user_id', '-')))[:20],
                     _fmtd(pay.get('date_reservation')),
                     _fmtd(pay.get('date_checkin')),
@@ -373,11 +376,11 @@ class CaisseView(QWidget):
 
             tbl_data.append([
                 f"TOTAL ({len(rows)})", '', '',
-                fmt_amount(total, sym), '', '', '', '', '', '',
+                fmt_amount(total, sym), '', '', '', '', '', '', '',
             ])
 
-            cws = [1.0*cm, 2.5*cm, 4.0*cm, 2.8*cm, 2.5*cm, 3.0*cm,
-                   2.5*cm, 2.5*cm, 2.5*cm, 3.2*cm]
+            cws = [1.0*cm, 2.5*cm, 3.5*cm, 2.5*cm, 2.3*cm, 3.0*cm, 2.5*cm,
+                   2.5*cm, 2.5*cm, 2.5*cm, 3.0*cm]
             tbl = Table(tbl_data, colWidths=cws, repeatRows=1,
                         hAlign='CENTER')
             tbl.setStyle(TableStyle([

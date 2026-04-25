@@ -82,6 +82,7 @@ class HotelPayment(Base):
     amount         = Column(Float, nullable=False)
     # cash | mobile_money | carte
     method         = Column(String(50), default='cash')
+    reference      = Column(String(200), nullable=True)   # référence transaction mobile/banque
     created_at     = Column(DateTime, default=datetime.now)
     user_id        = Column(Integer, nullable=True)
 
