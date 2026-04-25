@@ -238,11 +238,17 @@ class ReservationService:
                 reste = max(new_total - paid, 0.0)
 
                 if res.statut_paiement not in ('paye', 'credit'):
-                    # Total mis à jour, mais checkout bloqué
-                    return (False,
-                            f"Solde recalculé sur {jours} jour(s) réel(s) : "
-                            f"total {new_total:,.0f} – payé {paid:,.0f} = "
-                            f"reste à payer {reste:,.0f}.")
+                    return (
+                        False,
+                        f"FACTURE NON RÉGLÉE – Check-out impossible !\n\n"
+                        f"  • Jours réels de séjour : {jours} jour(s)\n"
+                        f"  • Total à payer         : {new_total:,.0f}\n"
+                        f"  • Total payé            : {paid:,.0f}\n"
+                        f"  • Reste à payer         : {reste:,.0f}\n\n"
+                        f"Seul un paiement enregistré en Crédit permet\n"
+                        f"le check-out avec solde impayé.\n"
+                        f"Veuillez d'abord régler ou enregistrer en Crédit."
+                    )
 
                 res.date_sortie_reelle = datetime.now()
                 res.status = 'terminee'
@@ -251,11 +257,11 @@ class ReservationService:
                     room = session.query(HotelRoom).filter_by(
                         id=res.room_id).first()
                     if room:
-                        room.status = 'menage'
+                        room.status = 'disponible'
 
                 return (True,
                         f"Check-out effectué ({jours} jour(s) réel(s)). "
-                        "La chambre est passée en ménage.")
+                        "La chambre est maintenant disponible.")
 
         except Exception as e:
             log.exception("Erreur checkout")
@@ -326,7 +332,8 @@ class ReservationService:
     # Annulation
     # ------------------------------------------------------------------
 
-    def cancel_reservation(self, reservation_id: int) -> Tuple[bool, str]:
+    def cancel_reservation(self, reservation_id: int,
+                            user_id=None) -> Tuple[bool, str]:
         try:
             db = get_database_manager()
             with db.session_scope() as session:
@@ -336,12 +343,38 @@ class ReservationService:
                     return False, "Réservation introuvable."
                 if res.status in ('terminee', 'annulee'):
                     return False, f"Impossible d'annuler : statut = {res.status}."
+
+                # Calcul du montant réellement encaissé (hors lignes crédit à 0)
+                paid_real = sum(
+                    p.amount for p in res.payments
+                    if p.method != 'credit' and (p.amount or 0) > 0
+                )
+
                 res.status = 'annulee'
+                res.statut_paiement = 'rembourse' if paid_real > 0 else res.statut_paiement
+
                 if res.room_id:
                     room = session.query(HotelRoom).filter_by(
                         id=res.room_id).first()
                     if room:
                         room.status = 'disponible'
+
+                # Écriture de remboursement négative si des paiements réels existent
+                if paid_real > 0:
+                    refund = HotelPayment(
+                        reservation_id=reservation_id,
+                        amount=-paid_real,
+                        method='remboursement',
+                        created_at=datetime.now(),
+                        user_id=user_id,
+                    )
+                    session.add(refund)
+                    return True, (
+                        f"Réservation annulée.\n"
+                        f"Remboursement enregistré : -{paid_real:,.0f} "
+                        f"(visible dans la caisse)."
+                    )
+
                 return True, "Réservation annulée."
         except Exception as e:
             log.exception("Erreur cancel_reservation")
@@ -380,20 +413,23 @@ class ReservationService:
                 room_number = r.room.number if r.room else '-'
                 cat_name = r.category.name if r.category else '-'
                 d_entree_reelle = r.date_entree_reelle
-                jr = (_jours_reels(d_entree_reelle)
-                      if r.status == 'en_cours' and d_entree_reelle
-                      else '-')
+                if r.status == 'en_cours' and d_entree_reelle:
+                    jr = max(_jours_reels(d_entree_reelle), 1)
+                elif r.status == 'terminee' and r.date_entree_reelle and r.date_sortie_reelle:
+                    jr = max(_nb_nuits(r.date_entree_reelle, r.date_sortie_reelle), 1)
+                else:
+                    jr = 1
 
                 # Nuitées prévues (entrée prévue → sortie prévue)
                 nuitees = (
-                    _nb_nuits(r.date_entree_prevue, r.date_sortie_prevue)
+                    max(_nb_nuits(r.date_entree_prevue, r.date_sortie_prevue), 1)
                     if r.date_entree_prevue and r.date_sortie_prevue
-                    else '-'
+                    else 1
                 )
 
                 # Montant réel : jours_reels × prix_catégorie − réduction
                 price_per_night = r.category.price_per_night if r.category else 0.0
-                if r.status == 'en_cours' and isinstance(jr, int):
+                if r.status == 'en_cours':
                     montant_reel = max(
                         jr * price_per_night - float(r.reduction or 0), 0.0)
                 else:
@@ -456,7 +492,16 @@ class ReservationService:
 
     @staticmethod
     def _refresh_payment_status(session, res: HotelReservation):
-        """Met à jour statut_paiement à partir des paiements existants."""
+        """Met à jour statut_paiement à partir des paiements existants.
+        
+        Si la réservation est en crédit (une ligne method='credit' existe),
+        le statut 'credit' est préservé et ne peut pas être écrasé.
+        """
+        # Préserver le statut crédit
+        has_credit = any(p.method == 'credit' for p in res.payments)
+        if has_credit:
+            res.statut_paiement = 'credit'
+            return
         paid = sum(p.amount for p in res.payments)
         total = res.total_amount or 0.0
         if paid <= 0:

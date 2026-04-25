@@ -113,7 +113,7 @@ def jours_reels(date_entree) -> int:
       Entrée 18h00 → lendemain 10h00+     : 2 jours
     """
     if date_entree is None:
-        return 0
+        return 1
     now = datetime.now()
     delta_days = (now.date() - date_entree.date()).days
     if delta_days <= 0:

@@ -34,10 +34,20 @@ class PaymentService:
                 if res.status in ('annulee', 'terminee'):
                     return False, "Impossible d'ajouter un paiement à une réservation terminée/annulée."
 
-                # Cas crédit : on marque sans créer de ligne paiement
+                # Cas crédit : marquer statut ET créer une ligne paiement à 0
+                # pour traçabilité dans la caisse (on peut ainsi vérifier
+                # qu'une réservation a bien un enregistrement de crédit).
                 if method == 'credit':
                     res.statut_paiement = 'credit'
-                    return True, "Réservation enregistrée en crédit."
+                    pay = HotelPayment(
+                        reservation_id=reservation_id,
+                        amount=0.0,
+                        method='credit',
+                        created_at=datetime.now(),
+                        user_id=user_id,
+                    )
+                    session.add(pay)
+                    return True, "Réservation enregistrée en crédit (paiement différé)."
 
                 amount = float(amount or 0.0)
                 if amount <= 0:

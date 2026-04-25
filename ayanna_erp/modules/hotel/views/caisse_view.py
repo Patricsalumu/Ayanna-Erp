@@ -23,17 +23,51 @@ _svc = PaymentService()
 
 COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Reçu par',
            'Dt. Réservation', 'Check-in', 'Check-out', 'Date / Heure paiement']
+
 METHOD_LABELS = {
-    'cash':'Espèces',
-    'airtelmoney':'Airtel Money',
-    'orangemoney':'Orange Money',
-    'mpesa':'M pesa',
-    'equitybcdc':'Eauity Bcdc',
-    'tmb':'Tmb',
-    'rawbank':'Raw bank',
-    'smico':'Smico',
-    'credit':'Crédit (dette)',
+    'cash':           'Espèces',
+    'airtelmoney':    'Airtel Money',
+    'orangemoney':    'Orange Money',
+    'mpesa':          'M-Pesa',
+    'equitybcdc':     'Equity BCDC',
+    'tmb':            'TMB',
+    'rawbank':        'Rawbank',
+    'smico':          'Smico',
+    'credit':         'Crédit (dette)',
+    'remboursement':  'Remboursement',
 }
+
+# Couleurs distinctes par méthode pour le tableau
+METHOD_COLORS = {
+    'cash':           '#27AE60',
+    'airtelmoney':    '#E74C3C',
+    'orangemoney':    '#E67E22',
+    'mpesa':          '#C0392B',
+    'equitybcdc':     '#1976D2',
+    'tmb':            '#1565C0',
+    'rawbank':        '#0288D1',
+    'smico':          '#00796B',
+    'credit':         '#8E44AD',
+    'remboursement':  '#E53935',
+}
+
+# Groupes pour le résumé
+MOBILE_METHODS = {'airtelmoney', 'orangemoney', 'mpesa'}
+BANQUE_METHODS = {'equitybcdc', 'tmb', 'rawbank', 'smico'}
+
+def _method_group(method: str) -> str:
+    """Retourne le groupe du mode de paiement : cash / mobile / banque / credit / remboursement."""
+    if method == 'cash':
+        return 'cash'
+    if method in MOBILE_METHODS:
+        return 'mobile'
+    if method in BANQUE_METHODS:
+        return 'banque'
+    if method == 'credit':
+        return 'credit'
+    if method == 'remboursement':
+        return 'remboursement'
+    return 'autre'
 
 
 class CaisseView(QWidget):
@@ -135,10 +169,12 @@ class CaisseView(QWidget):
         self.lbl_count  = _slbl()
         self.lbl_cash   = _slbl()
         self.lbl_mobile = _slbl()
-        self.lbl_carte  = _slbl()
+        self.lbl_banque = _slbl()
+        self.lbl_credit = _slbl()
+        self.lbl_remb   = _slbl()
         self.lbl_total  = _slbl()
         for lb in (self.lbl_count, self.lbl_cash, self.lbl_mobile,
-                   self.lbl_carte, self.lbl_total):
+                   self.lbl_banque, self.lbl_credit, self.lbl_remb, self.lbl_total):
             _sl.addWidget(lb)
         _sl.addStretch()
         root.addWidget(self.summary_frame)
@@ -170,7 +206,7 @@ class CaisseView(QWidget):
     def _fill_table(self, rows: list):
         self.table.setRowCount(0)
         total = 0.0
-        totals = {'cash': 0.0, 'mobile_money': 0.0, 'carte': 0.0}
+        grp = {'cash': 0.0, 'mobile': 0.0, 'banque': 0.0, 'credit': 0.0, 'remboursement': 0.0, 'autre': 0.0}
 
         for idx, pay in enumerate(rows, start=1):
             r = self.table.rowCount()
@@ -208,20 +244,22 @@ class CaisseView(QWidget):
                 self.table.setItem(r, col, item)
 
             # Coloration par méthode (col 4)
-            m_colors = {'cash': '#27AE60', 'mobile_money': '#8E44AD', 'carte': '#1976D2'}
+            color = METHOD_COLORS.get(method)
             m_item = self.table.item(r, 4)
-            if m_item and method in m_colors:
-                m_item.setForeground(QBrush(QColor(m_colors[method])))
+            if m_item and color:
+                m_item.setForeground(QBrush(QColor(color)))
                 m_item.setFont(QFont('', -1, QFont.Weight.Bold))
 
             total += float(amt or 0)
-            if method in totals:
-                totals[method] += float(amt or 0)
+            g = _method_group(method)
+            grp[g] += float(amt or 0)
 
         self.lbl_count.setText(f"📋 {len(rows)} paiements")
-        self.lbl_cash.setText(f"💵 Espèces : {fmt_amount(totals['cash'], self._sym)}")
-        self.lbl_mobile.setText(f"📱 Mobile : {fmt_amount(totals['mobile_money'], self._sym)}")
-        self.lbl_carte.setText(f"💳 Carte : {fmt_amount(totals['carte'], self._sym)}")
+        self.lbl_cash.setText(f"💵 Espèces : {fmt_amount(grp['cash'], self._sym)}")
+        self.lbl_mobile.setText(f"📱 Mobile : {fmt_amount(grp['mobile'], self._sym)}")
+        self.lbl_banque.setText(f"🏦 Banque : {fmt_amount(grp['banque'], self._sym)}")
+        self.lbl_credit.setText(f"📋 Crédit : {fmt_amount(grp['credit'], self._sym)}")
+        self.lbl_remb.setText(f"↩️ Remb. : {fmt_amount(grp['remboursement'], self._sym)}")
         self.lbl_total.setText(f"✅ TOTAL : {fmt_amount(total, self._sym)}")
 
     # ------------------------------------------------------------------
@@ -299,7 +337,8 @@ class CaisseView(QWidget):
                        'Date / Heure paiement']
             tbl_data = [headers]
             total = 0.0
-            totals = {'cash': 0.0, 'mobile_money': 0.0, 'carte': 0.0}
+            grp = {'cash': 0.0, 'mobile': 0.0, 'banque': 0.0, 'credit': 0.0, 'remboursement': 0.0, 'autre': 0.0}
+            per_method: dict = {}  # method → montant pour le détail PDF
 
             def _fmtd(v):
                 if v is None:
@@ -328,8 +367,9 @@ class CaisseView(QWidget):
                     dt_str,
                 ])
                 total += float(amt or 0)
-                if method in totals:
-                    totals[method] += float(amt or 0)
+                g = _method_group(method)
+                grp[g] += float(amt or 0)
+                per_method[method] = per_method.get(method, 0.0) + float(amt or 0)
 
             tbl_data.append([
                 f"TOTAL ({len(rows)})", '', '',
@@ -360,26 +400,66 @@ class CaisseView(QWidget):
             els.append(Spacer(1, 0.4 * cm))
 
             # ── Résumé par méthode ───────────────────────────────────────
-            els.append(Paragraph("<b>Résumé par méthode</b>", styles['Heading3']))
-            sum_data = [
-                ["Total transactions",  str(len(rows))],
-                ["Espèces",             fmt_amount(totals['cash'], sym)],
-                ["Mobile Money",        fmt_amount(totals['mobile_money'], sym)],
-                ["Carte",               fmt_amount(totals['carte'], sym)],
-                ["TOTAL",               fmt_amount(total, sym)],
-            ]
-            sum_tbl = Table(sum_data, colWidths=[5 * cm, 5 * cm])
-            sum_tbl.setStyle(TableStyle([
+            els.append(Paragraph("<b>Résumé par mode de paiement</b>", styles['Heading3']))
+
+            # Groupes
+            sum_data = [["Mode de paiement", "Montant"]]
+            # Espèces
+            if grp['cash']:
+                sum_data.append(["💵 Espèces", fmt_amount(grp['cash'], sym)])
+            # Mobile Money – détail par opérateur
+            if grp['mobile']:
+                sum_data.append(["📱 Mobile Money (total)", fmt_amount(grp['mobile'], sym)])
+                for m in ('airtelmoney', 'orangemoney', 'mpesa'):
+                    if per_method.get(m):
+                        sum_data.append([f"   └ {METHOD_LABELS[m]}", fmt_amount(per_method[m], sym)])
+            # Banque – détail
+            if grp['banque']:
+                sum_data.append(["🏦 Banque (total)", fmt_amount(grp['banque'], sym)])
+                for m in ('equitybcdc', 'tmb', 'rawbank', 'smico'):
+                    if per_method.get(m):
+                        sum_data.append([f"   └ {METHOD_LABELS[m]}", fmt_amount(per_method[m], sym)])
+            # Crédit
+            if grp['credit']:
+                sum_data.append(["📋 Crédit (dette)", fmt_amount(grp['credit'], sym)])
+            # Remboursements (négatifs – annulations)
+            if grp['remboursement']:
+                sum_data.append(["\u21a9\ufe0f Remboursements", fmt_amount(grp['remboursement'], sym)])
+            # Autres éventuels
+            if grp['autre']:
+                sum_data.append(["Autre", fmt_amount(grp['autre'], sym)])
+            # Total
+            sum_data.append([f"TOTAL ({len(rows)} paiements)", fmt_amount(total, sym)])
+
+            sum_tbl = Table(sum_data, colWidths=[7 * cm, 5 * cm])
+            # Indices des lignes de sous-total (total groupe)
+            grp_rows = [i for i, row in enumerate(sum_data)
+                        if row[0] in ("💵 Espèces", "📱 Mobile Money (total)",
+                                      "🏦 Banque (total)", "📋 Crédit (dette)",
+                                      "\u21a9\ufe0f Remboursements", "Autre")]
+            # Indices des lignes de remboursement (affichées en rouge)
+            remb_rows = [i for i, row in enumerate(sum_data)
+                         if row[0] == "\u21a9\ufe0f Remboursements"]
+            last = len(sum_data) - 1
+            style_cmds = [
                 ('GRID',       (0, 0),  (-1, -1), 0.4, HexColor('#CCCCCC')),
-                ('BACKGROUND', (0, 0),  (0, -2),  HexColor('#ECF0F1')),
-                ('BACKGROUND', (0, -1), (-1, -1), HexColor('#27AE60')),
-                ('TEXTCOLOR',  (0, -1), (-1, -1), white),
-                ('FONTNAME',   (0, 0),  (0, -1),  'Helvetica-Bold'),
-                ('FONTNAME',   (0, -1), (-1, -1), 'Helvetica-Bold'),
+                ('BACKGROUND', (0, 0),  (-1, 0),  HexColor('#34495E')),
+                ('TEXTCOLOR',  (0, 0),  (-1, 0),  white),
+                ('FONTNAME',   (0, 0),  (-1, 0),  'Helvetica-Bold'),
+                ('BACKGROUND', (0, last), (-1, last), HexColor('#27AE60')),
+                ('TEXTCOLOR',  (0, last), (-1, last), white),
+                ('FONTNAME',   (0, last), (-1, last), 'Helvetica-Bold'),
                 ('FONTSIZE',   (0, 0),  (-1, -1), 9),
                 ('PADDING',    (0, 0),  (-1, -1), 5),
                 ('ALIGN',      (1, 0),  (1, -1),  'RIGHT'),
-            ]))
+            ]
+            for gi in grp_rows:
+                style_cmds.append(('BACKGROUND', (0, gi), (-1, gi), HexColor('#ECF0F1')))
+                style_cmds.append(('FONTNAME', (0, gi), (-1, gi), 'Helvetica-Bold'))
+            for ri in remb_rows:
+                style_cmds.append(('TEXTCOLOR', (0, ri), (-1, ri), HexColor('#E53935')))
+                style_cmds.append(('FONTNAME', (0, ri), (-1, ri), 'Helvetica-Bold'))
+            sum_tbl.setStyle(TableStyle(style_cmds))
             els.append(sum_tbl)
             els.append(Spacer(1, 0.3 * cm))
             els.append(Paragraph(

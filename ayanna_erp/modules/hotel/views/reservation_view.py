@@ -1271,7 +1271,12 @@ class ReservationView(QWidget):
                 QMessageBox.information(self, "Check-out", msg)
                 self.refresh()
             else:
-                QMessageBox.warning(self, "Check-out impossible", msg)
+                mb = QMessageBox(self)
+                mb.setIcon(QMessageBox.Icon.Critical)
+                mb.setWindowTitle("Check-out impossible")
+                mb.setText(msg)
+                mb.setStandardButtons(QMessageBox.StandardButton.Ok)
+                mb.exec()
         elif result == ReservationDetailDialog.ACTION_EXTEND:
             ext_dlg = ExtendDialog(row, self)
             if ext_dlg.exec() == ExtendDialog.DialogCode.Accepted:
@@ -1283,7 +1288,7 @@ class ReservationView(QWidget):
                 else:
                     QMessageBox.warning(self, "Erreur prolongation", msg)
         elif result == ReservationDetailDialog.ACTION_CANCEL:
-            ok, msg = _res_svc.cancel_reservation(row['id'])
+            ok, msg = _res_svc.cancel_reservation(row['id'], self._uid())
             if ok:
                 QMessageBox.information(self, "Annulée", msg)
                 self.refresh()
@@ -1326,7 +1331,7 @@ class ReservationView(QWidget):
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes:
             return
-        ok, msg = _res_svc.cancel_reservation(row['id'])
+        ok, msg = _res_svc.cancel_reservation(row['id'], self._uid())
         if ok:
             QMessageBox.information(self, "Annulée", msg)
             self.refresh()
