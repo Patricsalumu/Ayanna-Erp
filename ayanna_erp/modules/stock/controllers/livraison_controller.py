@@ -317,28 +317,40 @@ class LivraisonController:
             if liv.statut != 'brouillon':
                 raise ValueError(f"Seul un bon en 'brouillon' peut être livré (statut actuel : {liv.statut}).")
 
-            for item in liv.lignes:
+            numero = liv.numero
+            depart_id  = liv.entrepot_depart_id
+            arrivee_id = liv.entrepot_arrivee_id
+            arrivee_name = session.execute(
+                text("SELECT name FROM stock_warehouses WHERE id = :wid"), {"wid": arrivee_id}
+            ).scalar() or ''
+
+            items_rows = session.execute(text("""
+                SELECT product_id, product_name, quantite, cout_unitaire, total_ligne
+                FROM stock_livraison_items WHERE livraison_id = :lid
+            """), {"lid": livraison_id}).fetchall()
+
+            for it in items_rows:
+                pid, pname, qte, cout, total_l = it[0], it[1], Decimal(str(it[2])), Decimal(str(it[3])), Decimal(str(it[4]))
                 # Vérification stock au moment de la livraison
-                dispo = self._get_available(session, item.product_id, liv.entrepot_depart_id)
-                if item.quantite > dispo:
+                dispo = self._get_available(session, pid, depart_id)
+                if qte > dispo:
                     raise ValueError(
-                        f"Stock insuffisant pour '{item.product_name}' au moment de la livraison "
-                        f"(demandé {float(item.quantite):.2f}, disponible {float(dispo):.2f})"
+                        f"Stock insuffisant pour '{pname}' au moment de la livraison "
+                        f"(demandé {float(qte):.2f}, disponible {float(dispo):.2f})"
                     )
                 # Déduction dans l'entrepôt de départ
-                self._adjust_stock(session, item.product_id, liv.entrepot_depart_id,
-                                   -item.quantite, item.cout_unitaire)
+                self._adjust_stock(session, pid, depart_id, -qte, cout)
                 # Mouvement SORTIE
                 session.add(StockMovement(
-                    product_id=item.product_id,
-                    warehouse_id=liv.entrepot_depart_id,
-                    destination_warehouse_id=liv.entrepot_arrivee_id,
+                    product_id=pid,
+                    warehouse_id=depart_id,
+                    destination_warehouse_id=arrivee_id,
                     movement_type='SORTIE',
-                    quantity=-item.quantite,
-                    unit_cost=item.cout_unitaire,
-                    total_cost=item.total_ligne,
-                    reference=liv.numero,
-                    description=f"Livraison {liv.numero} vers {liv.entrepot_arrivee.name if liv.entrepot_arrivee else ''}",
+                    quantity=-qte,
+                    unit_cost=cout,
+                    total_cost=total_l,
+                    reference=numero,
+                    description=f"Livraison {numero} vers {arrivee_name}",
                     user_id=utilisateur_id,
                     user_name=utilisateur_nom or "Inconnu",
                     movement_date=self._now(),
@@ -363,21 +375,33 @@ class LivraisonController:
             if liv.statut != 'livre':
                 raise ValueError("Seul un bon 'livré' peut être réceptionné.")
 
-            for item in liv.lignes:
+            numero = liv.numero
+            arrivee_id = liv.entrepot_arrivee_id
+            depart_id  = liv.entrepot_depart_id
+            depart_name = session.execute(
+                text("SELECT name FROM stock_warehouses WHERE id = :wid"), {"wid": depart_id}
+            ).scalar() or ''
+
+            items_rows = session.execute(text("""
+                SELECT product_id, quantite, cout_unitaire, total_ligne
+                FROM stock_livraison_items WHERE livraison_id = :lid
+            """), {"lid": livraison_id}).fetchall()
+
+            for it in items_rows:
+                pid, qte, cout, total_l = it[0], Decimal(str(it[1])), Decimal(str(it[2])), Decimal(str(it[3]))
                 # Ajout dans l'entrepôt d'arrivée
-                self._adjust_stock(session, item.product_id, liv.entrepot_arrivee_id,
-                                   +item.quantite, item.cout_unitaire)
+                self._adjust_stock(session, pid, arrivee_id, +qte, cout)
                 # Mouvement ENTREE
                 session.add(StockMovement(
-                    product_id=item.product_id,
-                    warehouse_id=liv.entrepot_arrivee_id,
+                    product_id=pid,
+                    warehouse_id=arrivee_id,
                     destination_warehouse_id=None,
                     movement_type='ENTREE',
-                    quantity=item.quantite,
-                    unit_cost=item.cout_unitaire,
-                    total_cost=item.total_ligne,
-                    reference=liv.numero,
-                    description=f"Réception livraison {liv.numero} depuis {liv.entrepot_depart.name if liv.entrepot_depart else ''}",
+                    quantity=qte,
+                    unit_cost=cout,
+                    total_cost=total_l,
+                    reference=numero,
+                    description=f"Réception livraison {numero} depuis {depart_name}",
                     user_id=utilisateur_id,
                     user_name=utilisateur_nom or "Inconnu",
                     movement_date=self._now(),
@@ -388,14 +412,199 @@ class LivraisonController:
             session.commit()
 
     def annuler(self, livraison_id: int) -> None:
-        """Annule un bon en statut 'brouillon' uniquement"""
+        """
+        Annule un bon en statut 'brouillon' ou 'livré'.
+        Si 'livré' : réintègre les quantités dans l'entrepôt de départ
+        et enregistre un mouvement RETOUR par produit (les SORTIE d'origine sont conservés).
+        """
         with self.db_manager.get_session() as session:
             liv = session.query(StockLivraison).filter_by(id=livraison_id).first()
             if not liv:
                 raise ValueError("Bon de livraison introuvable.")
-            if liv.statut not in ('brouillon',):
-                raise ValueError("Seul un bon en 'brouillon' peut être annulé.")
+            if liv.statut not in ('brouillon', 'livre'):
+                raise ValueError("Seul un bon en 'brouillon' ou 'livré' peut être annulé.")
+
+            if liv.statut == 'livre':
+                numero     = liv.numero
+                depart_id  = liv.entrepot_depart_id
+                depart_name = session.execute(
+                    text("SELECT name FROM stock_warehouses WHERE id = :wid"),
+                    {"wid": depart_id}
+                ).scalar() or ''
+
+                # Charger TOUTES les lignes avant toute modification
+                items_rows = session.execute(text("""
+                    SELECT product_id, product_name, quantite, cout_unitaire, total_ligne
+                    FROM stock_livraison_items WHERE livraison_id = :lid
+                    ORDER BY id
+                """), {"lid": livraison_id}).fetchall()
+
+                for it in items_rows:
+                    pid    = it[0]
+                    pname  = it[1] or ''
+                    qte    = Decimal(str(it[2]))
+                    cout   = Decimal(str(it[3]))
+                    total_l = Decimal(str(it[4]))
+
+                    # Réintégrer le stock dans l'entrepôt de départ
+                    self._adjust_stock(session, pid, depart_id, +qte, cout)
+
+                    # Mouvement RETOUR (approche additive — les SORTIE d'origine sont conservés)
+                    session.add(StockMovement(
+                        product_id=pid,
+                        warehouse_id=depart_id,
+                        movement_type='RETOUR',
+                        quantity=qte,
+                        unit_cost=cout,
+                        total_cost=total_l,
+                        reference=numero,
+                        description=f"Annulation livraison {numero} — retour vers {depart_name} ({pname})",
+                        user_name="Annulation",
+                        movement_date=self._now(),
+                    ))
+
             liv.statut = 'annule'
+            liv.date_livraison = None
+            session.commit()
+
+    def modifier_livraison(self,
+                           livraison_id: int,
+                           entrepot_depart_id: int,
+                           entrepot_arrivee_id: int,
+                           lignes: List[Dict],
+                           notes: str = "") -> None:
+        """
+        Modifie un bon de livraison en statut 'brouillon' :
+        - Met à jour les entrepôts et les notes
+        - Remplace toutes les lignes par les nouvelles
+        - Recalcule la valeur totale
+        """
+        if entrepot_depart_id == entrepot_arrivee_id:
+            raise ValueError("L'entrepôt de départ et d'arrivée doivent être différents.")
+        if not lignes:
+            raise ValueError("Le bon de livraison doit contenir au moins une ligne.")
+
+        with self.db_manager.get_session() as session:
+            liv = session.query(StockLivraison).filter_by(id=livraison_id).first()
+            if not liv:
+                raise ValueError("Bon de livraison introuvable.")
+            if liv.statut not in ('brouillon', 'livre'):
+                raise ValueError("Seul un bon en 'brouillon' ou 'livré' peut être modifié.")
+
+            statut_initial = liv.statut
+
+            if statut_initial == 'livre':
+                numero_bl   = liv.numero
+                old_depart  = liv.entrepot_depart_id
+                old_depart_name = session.execute(
+                    text("SELECT name FROM stock_warehouses WHERE id = :wid"),
+                    {"wid": old_depart}
+                ).scalar() or ''
+
+                # Charger TOUTES les anciennes lignes avant toute modification
+                items_anciens = session.execute(text("""
+                    SELECT product_id, product_name, quantite, cout_unitaire, total_ligne
+                    FROM stock_livraison_items WHERE livraison_id = :lid
+                    ORDER BY id
+                """), {"lid": livraison_id}).fetchall()
+
+                for it in items_anciens:
+                    pid   = it[0]
+                    pname = it[1] or ''
+                    qte   = Decimal(str(it[2]))
+                    cout  = Decimal(str(it[3]))
+                    total_l = Decimal(str(it[4]))
+
+                    # Réintégrer le stock dans l'ancien entrepôt de départ
+                    self._adjust_stock(session, pid, old_depart, +qte, cout)
+
+                    # Mouvement RETOUR (annulation des anciennes lignes, historique conservé)
+                    session.add(StockMovement(
+                        product_id=pid,
+                        warehouse_id=old_depart,
+                        movement_type='RETOUR',
+                        quantity=qte,
+                        unit_cost=cout,
+                        total_cost=total_l,
+                        reference=numero_bl,
+                        description=f"Modification livraison {numero_bl} — retour vers {old_depart_name} ({pname})",
+                        user_name="Modification",
+                        movement_date=self._now(),
+                    ))
+
+                session.flush()
+
+            # Vérification des stocks disponibles
+            for ligne in lignes:
+                dispo = self._get_available(session, ligne["product_id"], entrepot_depart_id)
+                qte = Decimal(str(ligne["quantite"]))
+                if qte <= 0:
+                    raise ValueError(f"La quantité doit être > 0 pour '{ligne['product_name']}'.")
+                if qte > dispo:
+                    raise ValueError(
+                        f"Stock insuffisant pour '{ligne['product_name']}' : "
+                        f"demandé {float(qte):.2f}, disponible {float(dispo):.2f}"
+                    )
+
+            # Mise à jour de l'en-tête
+            liv.entrepot_depart_id  = entrepot_depart_id
+            liv.entrepot_arrivee_id = entrepot_arrivee_id
+            liv.notes = notes
+
+            # Supprimer les anciennes lignes
+            session.execute(
+                text("DELETE FROM stock_livraison_items WHERE livraison_id = :lid"),
+                {"lid": livraison_id}
+            )
+            session.flush()
+
+            # Insérer les nouvelles lignes
+            valeur_totale = Decimal('0')
+            for ligne in lignes:
+                qte   = Decimal(str(ligne["quantite"]))
+                cout  = Decimal(str(ligne.get("cout_unitaire", 0)))
+                total_l = qte * cout
+                valeur_totale += total_l
+                session.add(StockLivraisonItem(
+                    livraison_id=livraison_id,
+                    product_id=ligne["product_id"],
+                    product_name=ligne.get("product_name", ""),
+                    product_code=ligne.get("product_code", ""),
+                    quantite=qte,
+                    cout_unitaire=cout,
+                    total_ligne=total_l,
+                ))
+
+            liv.valeur_totale = valeur_totale
+
+            # Si le bon était livré, ré-appliquer les sorties de stock avec les nouvelles lignes
+            if statut_initial == 'livre':
+                items_new = session.execute(text("""
+                    SELECT product_id, product_name, quantite, cout_unitaire, total_ligne
+                    FROM stock_livraison_items WHERE livraison_id = :lid
+                """), {"lid": livraison_id}).fetchall()
+                arrivee_name = session.execute(
+                    text("SELECT name FROM stock_warehouses WHERE id = :wid"),
+                    {"wid": entrepot_arrivee_id}
+                ).scalar() or ''
+                for it in items_new:
+                    qte  = Decimal(str(it[2]))
+                    cout = Decimal(str(it[3]))
+                    self._adjust_stock(session, it[0], entrepot_depart_id, -qte, cout)
+                    session.add(StockMovement(
+                        product_id=it[0],
+                        warehouse_id=entrepot_depart_id,
+                        destination_warehouse_id=entrepot_arrivee_id,
+                        movement_type='SORTIE',
+                        quantity=-qte,
+                        unit_cost=cout,
+                        total_cost=Decimal(str(it[4])),
+                        reference=liv.numero,
+                        description=f"Livraison {liv.numero} vers {arrivee_name} (modifiée)",
+                        user_name="Modification",
+                        movement_date=self._now(),
+                    ))
+
             session.commit()
 
     def supprimer(self, livraison_id: int) -> None:

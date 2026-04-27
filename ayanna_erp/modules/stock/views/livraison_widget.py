@@ -521,6 +521,323 @@ class NouvelleLivraisonWidget(QWidget):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+#  Dialog de modification d'un bon de livraison (brouillon uniquement)
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ModifierLivraisonDialog(QDialog):
+    """
+    Permet de modifier un bon de livraison en statut 'brouillon' :
+    - Changer les entrepôts de départ / arrivée
+    - Ajouter, supprimer ou modifier la quantité de chaque ligne
+    """
+
+    livraison_modified = pyqtSignal(int)
+
+    def __init__(self, livraison_id: int, controller, entreprise_id: int,
+                 current_user, parent=None):
+        super().__init__(parent)
+        self.livraison_id  = livraison_id
+        self.controller    = controller
+        self.entreprise_id = entreprise_id
+        self.current_user  = current_user
+        self.lignes: List[Dict] = []
+        self.entrepots: List[Dict] = []
+        self._produits_cache: Dict[int, List[Dict]] = {}
+
+        self.setWindowTitle("Modifier le bon de livraison")
+        self.setMinimumSize(960, 620)
+        self.setModal(True)
+        self._build_ui()
+        self._load_data()
+
+    # ── UI ────────────────────────────────────────────────────────────────────
+
+    def _build_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        hdr = QLabel("✏  Modifier le Bon de Livraison")
+        hdr.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        hdr.setStyleSheet("color: #2C3E50; padding-bottom: 4px;")
+        root.addWidget(hdr)
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        # ── Gauche : infos ───────────────────────────────────────────────────
+        left = QGroupBox("Informations du bon")
+        left.setMaximumWidth(340)
+        left_layout = QFormLayout(left)
+        left_layout.setSpacing(10)
+
+        self.depart_combo = QComboBox()
+        self.depart_combo.currentIndexChanged.connect(self._on_depart_changed)
+        left_layout.addRow("Entrepôt de départ *:", self.depart_combo)
+
+        self.arrivee_combo = QComboBox()
+        left_layout.addRow("Entrepôt d'arrivée *:", self.arrivee_combo)
+
+        self.notes_edit = QTextEdit()
+        self.notes_edit.setPlaceholderText("Notes (optionnel)…")
+        self.notes_edit.setMaximumHeight(80)
+        left_layout.addRow("Notes :", self.notes_edit)
+
+        add_btn = QPushButton("➕  Ajouter des produits")
+        add_btn.setStyleSheet(
+            "QPushButton { background-color: #3498DB; color: white; padding: 8px 14px; "
+            "border-radius: 4px; font-weight: bold; } "
+            "QPushButton:hover { background-color: #2980B9; }"
+        )
+        add_btn.clicked.connect(self._open_product_dialog)
+        left_layout.addRow(add_btn)
+
+        body.addWidget(left)
+
+        # ── Droite : tableau des lignes ──────────────────────────────────────
+        right = QGroupBox("Lignes du bon")
+        right_layout = QVBoxLayout(right)
+
+        self.lines_table = QTableWidget(0, 7)
+        self.lines_table.setHorizontalHeaderLabels(
+            ["Code", "Produit", "Qté Dispo", "Quantité", "Prix Achat", "Total", "Action"]
+        )
+        hh = self.lines_table.horizontalHeader()
+        hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+        hh.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.lines_table.verticalHeader().setVisible(False)
+        self.lines_table.setAlternatingRowColors(True)
+        self.lines_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.lines_table.setStyleSheet("QTableWidget { font-size: 13px; }")
+        right_layout.addWidget(self.lines_table)
+
+        total_row = QHBoxLayout()
+        total_row.addStretch()
+        self.total_label = QLabel("Valeur totale : <b>0</b>")
+        self.total_label.setStyleSheet("font-size: 15px; color: #2C3E50;")
+        total_row.addWidget(self.total_label)
+        right_layout.addLayout(total_row)
+
+        body.addWidget(right, 1)
+        root.addLayout(body, 1)
+
+        # ── Boutons du bas ───────────────────────────────────────────────────
+        footer = QHBoxLayout()
+        footer.addStretch()
+
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.setStyleSheet(
+            "QPushButton { background-color: #6C757D; color: white; padding: 8px 18px; "
+            "border-radius: 4px; font-weight: bold; } "
+            "QPushButton:hover { background-color: #5A6268; }"
+        )
+        cancel_btn.clicked.connect(self.reject)
+        footer.addWidget(cancel_btn)
+
+        save_btn = QPushButton("💾  Enregistrer les modifications")
+        save_btn.setStyleSheet(
+            "QPushButton { background-color: #27AE60; color: white; padding: 8px 18px; "
+            "border-radius: 4px; font-weight: bold; } "
+            "QPushButton:hover { background-color: #1E8449; }"
+        )
+        save_btn.clicked.connect(self._save)
+        footer.addWidget(save_btn)
+
+        root.addLayout(footer)
+
+    # ── Données ───────────────────────────────────────────────────────────────
+
+    def _load_data(self):
+        """Charge les entrepôts puis pré-remplit avec les données du bon existant."""
+        self.entrepots = self.controller.get_entrepots()
+
+        for combo in (self.depart_combo, self.arrivee_combo):
+            combo.blockSignals(True)
+            combo.clear()
+            for e in self.entrepots:
+                combo.addItem(f"{e['name']} ({e['code']})", e['id'])
+            combo.blockSignals(False)
+
+        detail = self.controller.get_livraison_detail(self.livraison_id)
+        if not detail:
+            return
+
+        for i, e in enumerate(self.entrepots):
+            if e['id'] == detail['entrepot_depart_id']:
+                self.depart_combo.blockSignals(True)
+                self.depart_combo.setCurrentIndex(i)
+                self.depart_combo.blockSignals(False)
+            if e['id'] == detail['entrepot_arrivee_id']:
+                self.arrivee_combo.setCurrentIndex(i)
+
+        self.notes_edit.setPlainText(detail.get('notes') or '')
+
+        depart_id = detail['entrepot_depart_id']
+        produits_by_id = {p['product_id']: p for p in self._get_produits(depart_id)}
+
+        self.lignes = []
+        for l in detail['lignes']:
+            prod = produits_by_id.get(l['product_id'], {})
+            # Le stock n'a pas encore été déduit (brouillon) donc available est la valeur réelle
+            available = prod.get('available', l['quantite'])
+            # S'assurer que la quantité actuelle est au moins l'upper bound du spinbox
+            available = max(available, l['quantite'])
+            self.lignes.append({
+                'product_id':    l['product_id'],
+                'product_name':  l['product_name'],
+                'product_code':  l['product_code'],
+                'available':     available,
+                'quantite':      l['quantite'],
+                'cout_unitaire': l['cout_unitaire'],
+                'total_ligne':   l['total_ligne'],
+            })
+
+        self._refresh_lines_table()
+
+    def _get_produits(self, warehouse_id: int) -> List[Dict]:
+        if warehouse_id not in self._produits_cache:
+            self._produits_cache[warehouse_id] = self.controller.get_produits_entrepot(warehouse_id)
+        return self._produits_cache[warehouse_id]
+
+    def _on_depart_changed(self):
+        if self.lignes:
+            rep = QMessageBox.question(
+                self, "Changer d'entrepôt",
+                "Changer l'entrepôt de départ va supprimer toutes les lignes actuelles. Continuer ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if rep == QMessageBox.StandardButton.Yes:
+                self.lignes.clear()
+                self._produits_cache.clear()
+                self._refresh_lines_table()
+
+    def _open_product_dialog(self):
+        depart_id = self.depart_combo.currentData()
+        if not depart_id:
+            QMessageBox.warning(self, "Entrepôt manquant", "Veuillez sélectionner un entrepôt de départ.")
+            return
+        products = self._get_produits(depart_id)
+        if not products:
+            QMessageBox.information(self, "Aucun produit disponible",
+                                    "L'entrepôt de départ ne contient aucun produit disponible.")
+            return
+        dlg = ProductSelectionDialog(products, self)
+        dlg.products_selected.connect(self._add_products_to_lines)
+        dlg.exec()
+
+    def _add_products_to_lines(self, products: List[Dict]):
+        existing_ids = {l['product_id'] for l in self.lignes}
+        for p in products:
+            if p['product_id'] not in existing_ids:
+                self.lignes.append({
+                    'product_id':    p['product_id'],
+                    'product_name':  p['product_name'],
+                    'product_code':  p['product_code'],
+                    'available':     p['available'],
+                    'quantite':      1.0,
+                    'cout_unitaire': p['unit_cost'],
+                    'total_ligne':   p['unit_cost'],
+                })
+                existing_ids.add(p['product_id'])
+        self._refresh_lines_table()
+
+    # ── Tableau des lignes ────────────────────────────────────────────────────
+
+    def _refresh_lines_table(self):
+        self.lines_table.setRowCount(0)
+        for idx, ligne in enumerate(self.lignes):
+            self.lines_table.insertRow(idx)
+
+            self.lines_table.setItem(idx, 0, QTableWidgetItem(ligne['product_code'] or ''))
+            self.lines_table.setItem(idx, 1, QTableWidgetItem(ligne['product_name'] or ''))
+
+            dispo_item = QTableWidgetItem(f"{ligne['available']:.2f}")
+            dispo_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.lines_table.setItem(idx, 2, dispo_item)
+
+            qty_spin = QDoubleSpinBox()
+            qty_spin.setRange(0.01, max(ligne['available'], ligne['quantite']))
+            qty_spin.setDecimals(2)
+            qty_spin.setValue(ligne['quantite'])
+            qty_spin.setStyleSheet("QDoubleSpinBox { padding: 2px 4px; }")
+            qty_spin.valueChanged.connect(lambda v, i=idx: self._on_qty_changed(i, v))
+            self.lines_table.setCellWidget(idx, 3, qty_spin)
+
+            cost_item = QTableWidgetItem(format_amount(ligne['cout_unitaire']))
+            cost_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.lines_table.setItem(idx, 4, cost_item)
+
+            total_item = QTableWidgetItem(format_amount(ligne['total_ligne']))
+            total_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            self.lines_table.setItem(idx, 5, total_item)
+
+            del_btn = QPushButton("🗑")
+            del_btn.setFixedWidth(36)
+            del_btn.setStyleSheet(
+                "QPushButton { background: #E74C3C; color: white; border-radius: 4px; }"
+                "QPushButton:hover { background: #C0392B; }"
+            )
+            del_btn.clicked.connect(lambda _, i=idx: self._delete_line(i))
+            self.lines_table.setCellWidget(idx, 6, del_btn)
+
+        self._update_total()
+
+    def _on_qty_changed(self, idx: int, value: float):
+        if 0 <= idx < len(self.lignes):
+            self.lignes[idx]['quantite']    = value
+            self.lignes[idx]['total_ligne'] = value * self.lignes[idx]['cout_unitaire']
+            total_item = self.lines_table.item(idx, 5)
+            if total_item:
+                total_item.setText(format_amount(self.lignes[idx]['total_ligne']))
+            self._update_total()
+
+    def _delete_line(self, idx: int):
+        if 0 <= idx < len(self.lignes):
+            self.lignes.pop(idx)
+            self._refresh_lines_table()
+
+    def _update_total(self):
+        total = sum(l['total_ligne'] for l in self.lignes)
+        self.total_label.setText(f"Valeur totale : <b>{format_amount(total)}</b>")
+
+    # ── Sauvegarde ────────────────────────────────────────────────────────────
+
+    def _save(self):
+        depart_id  = self.depart_combo.currentData()
+        arrivee_id = self.arrivee_combo.currentData()
+        notes      = self.notes_edit.toPlainText().strip()
+
+        if not depart_id:
+            QMessageBox.warning(self, "Champ manquant", "Veuillez sélectionner l'entrepôt de départ.")
+            return
+        if not arrivee_id:
+            QMessageBox.warning(self, "Champ manquant", "Veuillez sélectionner l'entrepôt d'arrivée.")
+            return
+        if depart_id == arrivee_id:
+            QMessageBox.warning(self, "Erreur", "L'entrepôt de départ et d'arrivée doivent être différents.")
+            return
+        if not self.lignes:
+            QMessageBox.warning(self, "Lignes vides", "Ajoutez au moins un produit au bon.")
+            return
+
+        try:
+            self.controller.modifier_livraison(
+                livraison_id=self.livraison_id,
+                entrepot_depart_id=depart_id,
+                entrepot_arrivee_id=arrivee_id,
+                lignes=self.lignes,
+                notes=notes,
+            )
+            QMessageBox.information(self, "Succès", "✅ Bon de livraison modifié avec succès.")
+            self.livraison_modified.emit(self.livraison_id)
+            self.accept()
+        except ValueError as e:
+            QMessageBox.warning(self, "Erreur de validation", str(e))
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Impossible de modifier le bon :\n{e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 #  Widget principal — Liste des bons de livraison
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -607,7 +924,7 @@ class LivraisonWidget(QWidget):
         hh = self.list_table.horizontalHeader()
         hh.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
         hh.setSectionResizeMode(8, QHeaderView.ResizeMode.Fixed)
-        self.list_table.setColumnWidth(8, 280)
+        self.list_table.setColumnWidth(8, 340)
         self.list_table.verticalHeader().setVisible(False)
         self.list_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.list_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -737,16 +1054,7 @@ class LivraisonWidget(QWidget):
             livrer_btn.clicked.connect(lambda _, i=lid: self._action_livrer(i))
             layout.addWidget(livrer_btn)
 
-            annuler_btn = QPushButton("✕ Annuler")
-            annuler_btn.setFixedHeight(28)
-            annuler_btn.setStyleSheet(
-                "QPushButton { background: #DC3545; color: white; border-radius: 3px; padding: 0 8px; font-size: 12px; }"
-                "QPushButton:hover { background: #B02A37; }"
-            )
-            annuler_btn.clicked.connect(lambda _, i=lid: self._action_annuler(i))
-            layout.addWidget(annuler_btn)
-
-        elif statut == 'livre':
+        if statut == 'livre':
             recept_btn = QPushButton("✅ Réceptionner")
             recept_btn.setFixedHeight(28)
             recept_btn.setStyleSheet(
@@ -756,7 +1064,18 @@ class LivraisonWidget(QWidget):
             recept_btn.clicked.connect(lambda _, i=lid: self._action_receptionner(i))
             layout.addWidget(recept_btn)
 
-        # Imprimer — toujours disponible sauf brouillon annulé
+        # Annuler — brouillon ou livré
+        if statut in ('brouillon', 'livre'):
+            annuler_btn = QPushButton("✕ Annuler")
+            annuler_btn.setFixedHeight(28)
+            annuler_btn.setStyleSheet(
+                "QPushButton { background: #DC3545; color: white; border-radius: 3px; padding: 0 8px; font-size: 12px; }"
+                "QPushButton:hover { background: #B02A37; }"
+            )
+            annuler_btn.clicked.connect(lambda _, i=lid: self._action_annuler(i))
+            layout.addWidget(annuler_btn)
+
+        # Imprimer — tous sauf annulé
         if statut in ('brouillon', 'livre', 'receptionne'):
             print_btn = QPushButton("🖨 Imprimer")
             print_btn.setFixedHeight(28)
@@ -767,17 +1086,16 @@ class LivraisonWidget(QWidget):
             print_btn.clicked.connect(lambda _, i=lid: self._action_imprimer(i))
             layout.addWidget(print_btn)
 
-        # Supprimer — seulement brouillon/annulé
-        if statut in ('brouillon', 'annule'):
-            del_btn = QPushButton("🗑")
-            del_btn.setFixedHeight(28)
-            del_btn.setFixedWidth(32)
-            del_btn.setStyleSheet(
-                "QPushButton { background: #E74C3C; color: white; border-radius: 3px; font-size: 14px; }"
-                "QPushButton:hover { background: #C0392B; }"
+        # Modifier — brouillon ou livré
+        if statut in ('brouillon', 'livre'):
+            mod_btn = QPushButton("✏ Modifier")
+            mod_btn.setFixedHeight(28)
+            mod_btn.setStyleSheet(
+                "QPushButton { background: #17A2B8; color: white; border-radius: 3px; padding: 0 8px; font-size: 12px; }"
+                "QPushButton:hover { background: #138496; }"
             )
-            del_btn.clicked.connect(lambda _, i=lid: self._action_supprimer(i))
-            layout.addWidget(del_btn)
+            mod_btn.clicked.connect(lambda _, i=lid: self._action_modifier(i))
+            layout.addWidget(mod_btn)
 
         layout.addStretch()
         return w
@@ -840,9 +1158,16 @@ class LivraisonWidget(QWidget):
             QMessageBox.critical(self, "Erreur", str(e))
 
     def _action_annuler(self, lid: int):
+        detail = self.controller.get_livraison_detail(lid)
+        msg = "Êtes-vous sûr de vouloir annuler ce bon de livraison ?"
+        if detail and detail.get('statut') == 'livre':
+            msg = (
+                "Ce bon est déjà LIVRÉ.\n"
+                "L'annulation va réintégrer les quantités dans l'entrepôt de départ.\n\n"
+                "Êtes-vous sûr de vouloir annuler ce bon ?"
+            )
         rep = QMessageBox.question(
-            self, "Annuler le bon",
-            "Êtes-vous sûr de vouloir annuler ce bon de livraison ?",
+            self, "Annuler le bon", msg,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if rep != QMessageBox.StandardButton.Yes:
@@ -854,19 +1179,12 @@ class LivraisonWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", str(e))
 
-    def _action_supprimer(self, lid: int):
-        rep = QMessageBox.question(
-            self, "Supprimer le bon",
-            "Êtes-vous sûr de vouloir supprimer définitivement ce bon ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    def _action_modifier(self, lid: int):
+        dlg = ModifierLivraisonDialog(
+            lid, self.controller, self.entreprise_id, self.current_user, self
         )
-        if rep != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            self.controller.supprimer(lid)
-            self._load_list()
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", str(e))
+        dlg.livraison_modified.connect(lambda _: self._load_list())
+        dlg.exec()
 
     def _action_imprimer(self, lid: int):
         detail = self.controller.get_livraison_detail(lid)
