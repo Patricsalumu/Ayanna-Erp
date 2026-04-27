@@ -19,7 +19,6 @@ from ayanna_erp.modules.stock.views.entrepot_widget import EntrepotWidget
 from ayanna_erp.modules.stock.views.stock_widget import StockWidget
 from ayanna_erp.modules.stock.views.movement_widget import MovementWidget as TransfertWidget
 from ayanna_erp.modules.stock.views.inventaire_widget import InventaireWidget
-from ayanna_erp.modules.stock.views.livraison_widget import LivraisonWidget
 
 
 # Import des contrôleurs pour les statistiques globales
@@ -49,7 +48,6 @@ class ModularStockManagementWidget(QWidget):
         self.stock_widget = None
         self.transfert_widget = None
         self.inventaire_widget = None
-        self.livraison_widget = None
         # Dashboard supprimé selon la demande utilisateur
         
         self.setup_ui()
@@ -170,10 +168,6 @@ class ModularStockManagementWidget(QWidget):
             # Onglet 3: Mouvements (ancien Transferts)
             self.transfert_widget = TransfertWidget(self.entreprise_id, self.current_user)
             self.tab_widget.addTab(self.transfert_widget, "📦 Mouvements")
-
-            # Onglet 4: Livraisons
-            self.livraison_widget = LivraisonWidget(self.entreprise_id, self.current_user)
-            self.tab_widget.addTab(self.livraison_widget, "🚚 Livraisons")
 
             # Onglet 5: Inventaires
             self.inventaire_widget = InventaireWidget(self.entreprise_id, self.current_user)

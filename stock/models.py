@@ -118,62 +118,6 @@ class StockMovement(Base):
     product_warehouse = relationship("StockProduitEntrepot", back_populates="movements")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  LIVRAISON (transfert multi-produits entre entrepôts)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class StockLivraison(Base):
-    """Bon de livraison interne : transfert multi-produits d'un entrepôt à un autre"""
-    __tablename__ = 'stock_livraisons'
-    __table_args__ = {'extend_existing': True, 'sqlite_autoincrement': True}
-
-    id              = Column(Integer, primary_key=True, autoincrement=True)
-    numero          = Column(String(50), unique=True, nullable=False)   # BL-2026-0001
-    entreprise_id   = Column(Integer, nullable=False)
-
-    # Entrepôts
-    entrepot_depart_id  = Column(Integer, ForeignKey('stock_warehouses.id'), nullable=False)
-    entrepot_arrivee_id = Column(Integer, ForeignKey('stock_warehouses.id'), nullable=False)
-
-    # Statut : brouillon → livré → receptionne  |  brouillon → annule
-    statut = Column(String(30), default='brouillon')  # brouillon, livre, receptionne, annule
-
-    # Valeur totale (somme des coûts d'achat des lignes)
-    valeur_totale = Column(Numeric(15, 2), default=0.0)
-
-    # Traçabilité
-    utilisateur_id   = Column(Integer)
-    utilisateur_nom  = Column(String(100))
-    date_creation    = Column(DateTime, default=func.current_timestamp())
-    date_livraison   = Column(DateTime)
-    date_reception   = Column(DateTime)
-    notes            = Column(Text)
-
-    # Relations
-    entrepot_depart  = relationship("StockWarehouse", foreign_keys=[entrepot_depart_id])
-    entrepot_arrivee = relationship("StockWarehouse", foreign_keys=[entrepot_arrivee_id])
-    lignes           = relationship("StockLivraisonItem", back_populates="livraison",
-                                    cascade="all, delete-orphan")
-
-
-class StockLivraisonItem(Base):
-    """Ligne d'un bon de livraison"""
-    __tablename__ = 'stock_livraison_items'
-    __table_args__ = {'extend_existing': True}
-
-    id           = Column(Integer, primary_key=True, autoincrement=True)
-    livraison_id = Column(Integer, ForeignKey('stock_livraisons.id'), nullable=False)
-    product_id   = Column(Integer, nullable=False)
-    product_name = Column(String(200))   # dénormalisé pour rapidité d'affichage
-    product_code = Column(String(50))
-    quantite     = Column(Numeric(15, 3), nullable=False)
-    cout_unitaire = Column(Numeric(15, 2), default=0.0)   # prix d'achat au moment du bon
-    total_ligne   = Column(Numeric(15, 2), default=0.0)
-
-    # Relations
-    livraison = relationship("StockLivraison", back_populates="lignes")
-
-
 class StockInventaire(Base):
     """Table des sessions d'inventaire"""
     __tablename__ = 'stock_inventaire'
@@ -256,11 +200,9 @@ class StockInventaireItem(Base):
 # Export des modèles pour faciliter les imports
 __all__ = [
     'StockWarehouse',
-    'StockConfig',
+    'StockConfig', 
     'StockProduitEntrepot',
     'StockMovement',
     'StockInventaire',
-    'StockInventaireItem',
-    'StockLivraison',
-    'StockLivraisonItem',
+    'StockInventaireItem'
 ]

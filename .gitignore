@@ -79,6 +79,9 @@ Thumbs.db
 # Logs
 *.log
 
+# Site web Laravel (dépôt Git séparé)
+website/
+
 # Fichiers de configuration locaux
 .env.local
 config.local.py
@@ -87,3 +90,12 @@ config.local.py
 *.bak
 *.backup
 *.old
+/vendor/
+/node_modules/
+.env
+/storage/*.key
+/storage/framework/cache/
+/storage/framework/sessions/
+/storage/framework/views/
+/storage/logs/
+database/database.sqlite

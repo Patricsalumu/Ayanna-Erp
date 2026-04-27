@@ -7,7 +7,7 @@ Utilise SQLAlchemy pour la gestion des modèles et des connexions
 import os
 import importlib
 from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
@@ -49,7 +49,10 @@ except ImportError:
 
 # Import des modèles stock pour qu'ils soient inclus dans Base.metadata
 try:
-    from ayanna_erp.modules.stock.models import StockWarehouse, StockConfig, StockProduitEntrepot, StockMovement
+    from ayanna_erp.modules.stock.models import (
+        StockWarehouse, StockConfig, StockProduitEntrepot, StockMovement,
+        StockLivraison, StockLivraisonItem,
+    )
 except ImportError:
     # Les modèles stock ne sont pas encore disponibles
     pass
@@ -98,6 +101,11 @@ class DatabaseManager:
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.session = None
         self.current_enterprise_id = None
+        # Migration automatique des nouvelles tables au premier accès à la DB
+        try:
+            self._migrate_livraison_tables()
+        except Exception:
+            pass  # Ne jamais bloquer le démarrage
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
@@ -366,6 +374,54 @@ class DatabaseManager:
                 print(f"ℹ️ Aucun modèle détecté pour le module '{mod_name}' ({import_path})")
 
         print(f"✅ Initialisation de modules terminée. Total de tables traitées: {created_count}")
+
+        # Migration automatique des tables de livraison (idempotente)
+        self._migrate_livraison_tables()
+
+    def _migrate_livraison_tables(self):
+        """
+        Crée les tables stock_livraisons et stock_livraison_items si elles
+        n'existent pas encore. Méthode idempotente : sans effet si les tables
+        sont déjà présentes. Appelée automatiquement à chaque démarrage.
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS stock_livraisons (
+                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+                        numero              TEXT    NOT NULL UNIQUE,
+                        entreprise_id       INTEGER NOT NULL,
+                        entrepot_depart_id  INTEGER NOT NULL
+                            REFERENCES stock_warehouses(id),
+                        entrepot_arrivee_id INTEGER NOT NULL
+                            REFERENCES stock_warehouses(id),
+                        statut              TEXT    NOT NULL DEFAULT 'brouillon',
+                        valeur_totale       REAL    NOT NULL DEFAULT 0,
+                        utilisateur_id      INTEGER,
+                        utilisateur_nom     TEXT,
+                        date_creation       DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        date_livraison      DATETIME,
+                        date_reception      DATETIME,
+                        notes               TEXT
+                    )
+                """))
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS stock_livraison_items (
+                        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                        livraison_id  INTEGER NOT NULL
+                            REFERENCES stock_livraisons(id) ON DELETE CASCADE,
+                        product_id    INTEGER NOT NULL,
+                        product_name  TEXT,
+                        product_code  TEXT,
+                        quantite      REAL    NOT NULL,
+                        cout_unitaire REAL    DEFAULT 0,
+                        total_ligne   REAL    DEFAULT 0
+                    )
+                """))
+                conn.commit()
+                print("✅ Migration livraison : tables OK (créées ou déjà présentes)")
+        except Exception as e:
+            print(f"⚠️ Migration livraison : {e}")
     
     def _insert_default_accounting_data(self, session, enterprise_id):
         """Insérer les données comptables par défaut SYSCOHADA"""
