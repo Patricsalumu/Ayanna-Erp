@@ -146,17 +146,21 @@ class ReservationService:
 
             log.info(f"Réservation {res_code} créée (id={res_id}).")
 
-            # --- écriture comptable (hors session pour éviter les verrous) ---
+            # --- écritures comptables (hors session pour éviter les verrous) ---
             try:
                 from ayanna_erp.database.database_manager import get_database_manager as _gdb2
                 from ayanna_erp.modules.boutique.model.models import ShopClient
                 with _gdb2().session_scope() as _s:
                     _cl = _s.query(ShopClient).filter_by(id=client_id).first()
                     _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else str(client_id)
+                # Écriture de réservation : D/Clients – C/Produits hôtel
                 _acc.on_reservation(res_code, total, _cname, user_id)
+                # Écriture de caisse pour l'acompte : D/Caisse – C/Clients
+                if acompte and float(acompte) > 0:
+                    _acc.on_paiement(res_code, float(acompte), method, _cname, user_id)
             except Exception:
                 pass
-            # -----------------------------------------------------------------
+            # ------------------------------------------------------------------
 
             return True, f"Réservation {res_code} créée avec succès.", res
 
@@ -170,10 +174,14 @@ class ReservationService:
 
     def checkin(self, reservation_id: int,
                 checkin_date: Optional[datetime] = None,
-                user_id: Optional[int] = None) -> Tuple[bool, str]:
+                user_id: Optional[int] = None,
+                force_room_id: Optional[int] = None) -> Tuple[bool, str]:
         """
-        Effectue le check-in : affecte une chambre disponible,
-        met à jour les statuts et enregistre la date d'entrée réelle.
+        Effectue le check-in.
+        Si force_room_id est fourni, affecte cette chambre précise
+        (utile pour affecter la chambre sur laquelle l'utilisateur a cliqué,
+        ou pour un upgrade vers une chambre de catégorie supérieure).
+        Sinon, cherche automatiquement une chambre disponible de la bonne catégorie.
         checkin_date : date/heure du check-in (défaut = maintenant).
         """
         try:
@@ -187,17 +195,37 @@ class ReservationService:
                 if res.status not in ('en_attente', 'confirmee'):
                     return False, f"Impossible de faire le check-in : statut actuel = {res.status}."
 
-                room = _room_svc.find_available_room(
-                    res.hotel_category_id,
-                    res.date_entree_prevue,
-                    res.date_sortie_prevue,
-                    exclude_reservation_id=reservation_id,
-                )
-                if not room:
-                    return (False,
-                            "Aucune chambre disponible pour cette catégorie "
-                            "sur les dates demandées. "
-                            "Veuillez choisir d'autres dates ou une autre catégorie.")
+                if force_room_id:
+                    # Chambre spécifiée explicitement (clic sur la carte ou upgrade)
+                    room = session.query(HotelRoom).filter_by(
+                        id=force_room_id, deleted=0).first()
+                    if not room:
+                        return False, "La chambre sélectionnée est introuvable."
+                    if room.status != 'disponible':
+                        return False, f"La chambre {room.number} n'est pas disponible (statut : {room.status})."
+                    # Vérifier absence de conflit de dates sur cette chambre précise
+                    conflict = (session.query(HotelReservation)
+                                .filter(
+                                    HotelReservation.room_id == room.id,
+                                    HotelReservation.id != reservation_id,
+                                    HotelReservation.status.in_(['confirmee', 'en_cours', 'en_attente']),
+                                    HotelReservation.date_entree_prevue < res.date_sortie_prevue,
+                                    HotelReservation.date_sortie_prevue > res.date_entree_prevue,
+                                ).first())
+                    if conflict:
+                        return False, f"Conflit de dates sur la chambre {room.number}."
+                else:
+                    room = _room_svc.find_available_room(
+                        res.hotel_category_id,
+                        res.date_entree_prevue,
+                        res.date_sortie_prevue,
+                        exclude_reservation_id=reservation_id,
+                    )
+                    if not room:
+                        return (False,
+                                "Aucune chambre disponible pour cette catégorie "
+                                "sur les dates demandées. "
+                                "Veuillez choisir d'autres dates ou une autre catégorie.")
 
                 # Affecter la chambre
                 res.room_id = room.id
@@ -209,7 +237,10 @@ class ReservationService:
                 if db_room:
                     db_room.status = 'occupee'
 
-                return True, f"Check-in effectué – Chambre {room.number} affectée."
+                upgrade_note = ''
+                if force_room_id and room.hotel_category_id != res.hotel_category_id:
+                    upgrade_note = ' (UPGRADE)'
+                return True, f"Check-in effectué – Chambre {room.number} affectée{upgrade_note}."
 
         except Exception as e:
             log.exception("Erreur checkin")
@@ -580,6 +611,69 @@ class ReservationService:
     # ------------------------------------------------------------------
     # Helpers internes
     # ------------------------------------------------------------------
+
+    # ------------------------------------------------------------------
+    # Move room (déménagement de chambre)
+    # ------------------------------------------------------------------
+
+    def move_room(self, reservation_id: int, new_room_id: int,
+                  user_id: Optional[int] = None) -> Tuple[bool, str]:
+        """
+        Transfère une réservation en cours vers une autre chambre
+        de la MÊME catégorie qui est disponible.
+        L'ancienne chambre repasse en statut 'disponible'.
+        """
+        try:
+            db = get_database_manager()
+            with db.session_scope() as session:
+                res = session.query(HotelReservation).filter_by(
+                    id=reservation_id).first()
+                if not res:
+                    return False, "Réservation introuvable."
+                if res.status != 'en_cours':
+                    return False, "Déménagement impossible : la réservation n'est pas en cours."
+
+                new_room = session.query(HotelRoom).filter_by(
+                    id=new_room_id, deleted=0).first()
+                if not new_room:
+                    return False, "La chambre de destination est introuvable."
+                if new_room.hotel_category_id != res.hotel_category_id:
+                    return False, "La chambre de destination n'est pas de la même catégorie."
+                if new_room.status != 'disponible':
+                    return False, f"La chambre {new_room.number} n'est pas disponible."
+
+                # Vérifier absence de conflit de dates
+                conflict = (session.query(HotelReservation)
+                            .filter(
+                                HotelReservation.room_id == new_room_id,
+                                HotelReservation.id != reservation_id,
+                                HotelReservation.status.in_(['confirmee', 'en_cours', 'en_attente']),
+                                HotelReservation.date_entree_prevue < res.date_sortie_prevue,
+                                HotelReservation.date_sortie_prevue > (res.date_entree_reelle or res.date_entree_prevue),
+                            ).first())
+                if conflict:
+                    return False, f"Conflit de dates sur la chambre {new_room.number}."
+
+                old_room_id = res.room_id
+                old_room_number = '?'
+
+                # Libérer l'ancienne chambre
+                if old_room_id:
+                    old_room = session.query(HotelRoom).filter_by(id=old_room_id).first()
+                    if old_room:
+                        old_room_number = old_room.number
+                        old_room.status = 'disponible'
+
+                # Affecter la nouvelle chambre
+                res.room_id = new_room_id
+                new_room.status = 'occupee'
+
+                return True, (f"Déménagement effectué : chambre {old_room_number} "
+                              f"→ chambre {new_room.number}.")
+
+        except Exception as e:
+            log.exception("Erreur move_room")
+            return False, f"Erreur déménagement : {e}"
 
     @staticmethod
     def _refresh_payment_status(session, res: HotelReservation):

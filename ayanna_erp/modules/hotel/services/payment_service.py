@@ -188,5 +188,7 @@ class PaymentService:
                     'date_checkout': res.date_sortie_reelle if res else None,
                     'pays': (res.client.pays or '') if (res and res.client) else '',
                     'carte_identite': (res.client.carte_identite or '') if (res and res.client) else '',
+                    'room_number': (res.room.number if res and res.room else '-'),
+                    'total_amount': float(res.total_amount or 0.0) if res else 0.0,
                 })
             return result

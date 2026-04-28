@@ -7,7 +7,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QLabel, QFrame, QGridLayout,
     QSizePolicy, QMessageBox, QDialog, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView,
-    QAbstractItemView, QDateTimeEdit, QFormLayout
+    QAbstractItemView, QDateTimeEdit, QFormLayout,
+    QCheckBox, QComboBox
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont, QColor, QBrush
@@ -46,13 +47,28 @@ class CheckinDialog(QDialog):
         layout.setSpacing(10)
 
         # En-tête
+        room_cat_name = self.room.category.name if self.room.category else '-'
+        self._room_cat_price = (
+            self.room.category.price_per_night if self.room.category else 0.0)
         lbl = QLabel(
             f"Sélectionnez une réservation à affecter à la chambre "
             f"<b>{self.room.number}</b> "
-            f"(catégorie : {self.room.category.name if self.room.category else '-'})"
+            f"(catégorie : {room_cat_name} – {self._room_cat_price:,.0f}/nuit)"
         )
         lbl.setWordWrap(True)
         layout.addWidget(lbl)
+
+        # Option upgrade
+        upgrade_row = QHBoxLayout()
+        self.chk_upgrade = QCheckBox(
+            "⬆️  Afficher les réservations de catégories inférieures (Upgrade)")
+        self.chk_upgrade.setStyleSheet(
+            "QCheckBox{font-weight:bold;color:#6A1B9A;font-size:11px;}")
+        self.chk_upgrade.toggled.connect(lambda: self._load_reservations(
+            self.search.text().strip().lower()))
+        upgrade_row.addWidget(self.chk_upgrade)
+        upgrade_row.addStretch()
+        layout.addLayout(upgrade_row)
 
         # Barre de recherche
         self.search = QLineEdit()
@@ -63,9 +79,9 @@ class CheckinDialog(QDialog):
 
         # Tableau réservations
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
+        self.table.setColumnCount(6)
         self.table.setHorizontalHeaderLabels(
-            ['Code', 'Client', 'Catégorie', 'Entrée prévue', 'Sortie prévue'])
+            ['Code', 'Client', 'Catégorie', 'Prix/nuit', 'Entrée prévue', 'Sortie prévue'])
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows)
         self.table.setEditTriggers(
@@ -133,17 +149,36 @@ class CheckinDialog(QDialog):
 
     def _load_reservations(self, search: str = ''):
         cat_name = self.room.category.name if self.room.category else ''
+        room_price = self._room_cat_price
         all_res = (_res_svc.get_all_reservations(status='en_attente') +
                    _res_svc.get_all_reservations(status='confirmee'))
-        # Filtre catégorie de la chambre
-        self._reservations = [
-            r for r in all_res if r['category'] == cat_name]
+
+        if self.chk_upgrade.isChecked():
+            # Upgrade : afficher toutes les réservations de catégories
+            # dont le prix/nuit est STRICTEMENT inférieur à celui de cette chambre
+            # (+ les réservations de même catégorie normales)
+            all_cats = {c.name: c.price_per_night
+                        for c in _room_svc.get_all_categories()}
+            self._reservations = [
+                r for r in all_res
+                if all_cats.get(r['category'], 0) <= room_price
+            ]
+        else:
+            # Mode normal : uniquement la même catégorie
+            self._reservations = [
+                r for r in all_res if r['category'] == cat_name]
+
         self._fill_table(search)
 
     def _filter(self, text: str):
         self._fill_table(text.strip().lower())
 
     def _fill_table(self, search: str = ''):
+        cat_name = self.room.category.name if self.room.category else ''
+        all_cats = {c.name: c.price_per_night
+                    for c in _room_svc.get_all_categories()}
+        room_price = self._room_cat_price
+
         self.table.setRowCount(0)
         for res in self._reservations:
             if search and (
@@ -153,8 +188,12 @@ class CheckinDialog(QDialog):
                 continue
             r = self.table.rowCount()
             self.table.insertRow(r)
+            cat_price = all_cats.get(res['category'], 0)
+            is_upgrade = (res['category'] != cat_name and cat_price < room_price)
+            price_str = f"{cat_price:,.0f}" if cat_price else '-'
             vals = [
                 res['code'], res['client_name'], res['category'],
+                price_str,
                 fmt_date(res['date_entree_prevue']),
                 fmt_date(res['date_sortie_prevue']),
             ]
@@ -162,6 +201,10 @@ class CheckinDialog(QDialog):
                 item = QTableWidgetItem(str(val))
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 item.setData(Qt.ItemDataRole.UserRole, res['id'])
+                if is_upgrade:
+                    # Colorer les lignes upgrade en violet clair
+                    item.setBackground(QBrush(QColor('#EDE7F6')))
+                    item.setForeground(QBrush(QColor('#4A148C')))
                 self.table.setItem(r, col, item)
 
     def _accept_selection(self):
@@ -180,19 +223,121 @@ class CheckinDialog(QDialog):
         return qdt
 
 
+class MoveRoomDialog(QDialog):
+    """Dialogue de déménagement : transférer une réservation en cours vers une
+    autre chambre disponible de la même catégorie (Moov Room)."""
+
+    def __init__(self, reservation_id: int, current_room, category_id: int,
+                 category_name: str, parent=None):
+        super().__init__(parent)
+        self.reservation_id = reservation_id
+        self.current_room = current_room
+        self.category_id = category_id
+        self.setWindowTitle(f"Moov Room – Déménagement ({category_name})")
+        self.setMinimumSize(500, 340)
+        self.setModal(True)
+        self._rooms = []
+        self._build_ui()
+        self._load_rooms()
+
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(10)
+
+        lbl = QLabel(
+            f"Chambre actuelle : <b>{self.current_room}</b><br>"
+            f"Sélectionnez la chambre de destination (même catégorie, disponible) :"
+        )
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+
+        self.table = QTableWidget()
+        self.table.setColumnCount(3)
+        self.table.setHorizontalHeaderLabels(['Chambre', 'Statut', 'Catégorie'])
+        self.table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.table.setAlternatingRowColors(True)
+        self.table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents)
+        self.table.horizontalHeader().setStretchLastSection(True)
+        self.table.setStyleSheet(
+            "QHeaderView::section{background:#34495E;color:white;"
+            "padding:5px;font-weight:bold;}")
+        self.table.doubleClicked.connect(self._accept_selection)
+        layout.addWidget(self.table)
+
+        btn_row = QHBoxLayout()
+        btn_cancel = QPushButton("Annuler")
+        btn_cancel.clicked.connect(self.reject)
+        self.btn_ok = QPushButton("🔀 Déménager")
+        self.btn_ok.setEnabled(False)
+        self.btn_ok.setStyleSheet(
+            "QPushButton{background:#6A1B9A;color:white;padding:6px 18px;"
+            "border-radius:4px;}QPushButton:hover{background:#4A148C;}"
+            "QPushButton:disabled{background:#BDC3C7;}")
+        self.btn_ok.clicked.connect(self._accept_selection)
+        self.table.selectionModel().selectionChanged.connect(
+            lambda: self.btn_ok.setEnabled(self.table.currentRow() >= 0))
+        btn_row.addWidget(btn_cancel)
+        btn_row.addStretch()
+        btn_row.addWidget(self.btn_ok)
+        layout.addLayout(btn_row)
+
+    def _load_rooms(self):
+        rooms = _room_svc.get_all_rooms(category_id=self.category_id)
+        # Exclure la chambre actuelle et les non-disponibles
+        self._rooms = [
+            r for r in rooms
+            if r.status == 'disponible' and r.number != self.current_room
+        ]
+        self.table.setRowCount(0)
+        for room in self._rooms:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            vals = [room.number, room_status_label(room.status),
+                    room.category.name if room.category else '-']
+            for col, val in enumerate(vals):
+                item = QTableWidgetItem(str(val))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+                item.setData(Qt.ItemDataRole.UserRole, room.id)
+                self.table.setItem(r, col, item)
+        if not self._rooms:
+            QLabel  # will be shown via message
+            self.table.setRowCount(1)
+            no_item = QTableWidgetItem("Aucune chambre disponible dans cette catégorie")
+            no_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            no_item.setFlags(Qt.ItemFlag.NoItemFlags)
+            self.table.setItem(0, 0, no_item)
+            self.table.setSpan(0, 0, 1, 3)
+
+    def _accept_selection(self):
+        if self.table.currentRow() < 0 or not self._rooms:
+            QMessageBox.information(self, "Sélection",
+                                    "Veuillez sélectionner une chambre.")
+            return
+        self.accept()
+
+    def get_new_room_id(self) -> int:
+        item = self.table.item(self.table.currentRow(), 0)
+        return item.data(Qt.ItemDataRole.UserRole)
+
+
 class RoomCard(QFrame):
     """Carte visuelle pour une chambre."""
 
-    def __init__(self, room, reservation, assign_cb, parent=None):
+    def __init__(self, room, reservation, assign_cb, move_cb=None, parent=None):
         super().__init__(parent)
         self.room = room
         self.reservation = reservation
         self.assign_cb = assign_cb
+        self.move_cb = move_cb
         self._build()
 
     def _build(self):
         color = ROOM_STATUS_COLORS.get(self.room.status, '#333')
-        self.setFixedSize(175, 170)
+        self.setFixedSize(175, 195)
         self.setStyleSheet(
             f"QFrame{{border:2px solid {color};border-radius:10px;"
             f"background:white;}}"
@@ -240,6 +385,16 @@ class RoomCard(QFrame):
                 (res.date_sortie_prevue.date() - res.date_entree_prevue.date()).days, 1
             ) if res.date_entree_prevue and res.date_sortie_prevue else '-'
             layout.addWidget(QLabel(f"🌙 {nuits} nuit(s)"))
+            # Bouton Moov Room (déménagement)
+            layout.addStretch()
+            if self.move_cb and self.room.status == 'occupee':
+                btn_move = QPushButton("🔀 Moov Room")
+                btn_move.setStyleSheet(
+                    "QPushButton{background:#6A1B9A;color:white;border-radius:4px;"
+                    "padding:3px;font-size:9px;}QPushButton:hover{background:#4A148C;}")
+                btn_move.clicked.connect(
+                    lambda: self.move_cb(self.room, self.reservation))
+                layout.addWidget(btn_move)
         else:
             layout.addWidget(QLabel("<span style='color:#27AE60;'>Libre</span>"))
             layout.addStretch()
@@ -252,7 +407,7 @@ class RoomCard(QFrame):
 
 
 _CARD_W = 175
-_CARD_H = 170
+_CARD_H = 195
 _CARD_SPACING = 12
 
 
@@ -399,7 +554,7 @@ class HotelDashboard(QWidget):
 
         for room in rooms:
             res = _room_svc.get_room_with_active_reservation(room.id)
-            card = RoomCard(room, res, self._on_assign, self)
+            card = RoomCard(room, res, self._on_assign, self._on_move, self)
             self._cached_cards.append(card)
 
         # Placement initial selon la largeur courante
@@ -426,7 +581,8 @@ class HotelDashboard(QWidget):
             self._place_cards(col_max)
 
     def _on_assign(self, room):
-        """Ouvre le dialogue de check-in pour sélectionner une réservation."""
+        """Ouvre le dialogue de check-in pour sélectionner une réservation.
+        La chambre cliquée est affectée directement (force_room_id)."""
         dlg = CheckinDialog(room, self.current_user, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
@@ -435,9 +591,37 @@ class HotelDashboard(QWidget):
         uid = (self.current_user.get('id')
                if isinstance(self.current_user, dict) else None)
         ok, msg = ReservationService().checkin(
-            res_id, checkin_date=checkin_dt, user_id=uid)
+            res_id, checkin_date=checkin_dt, user_id=uid,
+            force_room_id=room.id)  # affecter CETTE chambre précisément
         if ok:
             QMessageBox.information(self, "Check-in", msg)
+            self.refresh()
+        else:
+            QMessageBox.warning(self, "Impossible", msg)
+
+    def _on_move(self, room, reservation):
+        """Ouvre le dialogue Moov Room pour déménager une réservation en cours."""
+        if reservation is None:
+            return
+        cat_name = room.category.name if room.category else '-'
+        dlg = MoveRoomDialog(
+            reservation_id=reservation.id,
+            current_room=room.number,
+            category_id=room.hotel_category_id,
+            category_name=cat_name,
+            parent=self,
+        )
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_room_id = dlg.get_new_room_id()
+        if not new_room_id:
+            return
+        uid = (self.current_user.get('id')
+               if isinstance(self.current_user, dict) else None)
+        ok, msg = ReservationService().move_room(
+            reservation.id, new_room_id, user_id=uid)
+        if ok:
+            QMessageBox.information(self, "Moov Room", msg)
             self.refresh()
         else:
             QMessageBox.warning(self, "Impossible", msg)

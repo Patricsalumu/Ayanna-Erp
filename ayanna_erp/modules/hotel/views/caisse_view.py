@@ -21,7 +21,8 @@ from ayanna_erp.modules.hotel.utils.helpers import (
 
 _svc = PaymentService()
 
-COLUMNS = ['#', 'Réservation', 'Client', 'Montant', 'Méthode', 'Référence',
+COLUMNS = ['#', 'Réservation', 'Client', 'Chambre', 'Montant encaissé',
+           'Montant facture', 'Méthode', 'Référence',
            'Reçu par', 'Dt. Réservation', 'Check-in', 'Check-out',
            'Date / Heure paiement']
 
@@ -199,6 +200,7 @@ class CaisseView(QWidget):
             p for p in self._data
             if s in (p.get('reservation_code') or '').lower()
             or s in (p.get('client') or '').lower()
+            or s in (p.get('room_number') or '').lower()
             or s in METHOD_LABELS.get(p.get('method', ''), p.get('method', '')).lower()
             or s in (p.get('user_name') or '').lower()
         ]
@@ -207,6 +209,7 @@ class CaisseView(QWidget):
     def _fill_table(self, rows: list):
         self.table.setRowCount(0)
         total = 0.0
+        credit_du = 0.0   # somme des montants facturés non encaissés (crédit)
         grp = {'cash': 0.0, 'mobile': 0.0, 'banque': 0.0, 'credit': 0.0, 'remboursement': 0.0, 'autre': 0.0}
 
         for idx, pay in enumerate(rows, start=1):
@@ -227,11 +230,21 @@ class CaisseView(QWidget):
                     return str(v)
 
             amt = pay.get('amount', 0)
+            total_invoice = pay.get('total_amount', 0.0)
+            is_credit = (method == 'credit')
+
+            # Montant encaissé : 0 pour crédit
+            encaisse_str = fmt_amount(amt, self._sym) if isinstance(amt, (int, float)) else '-'
+            # Montant facture : toujours affiché, souligné pour crédit
+            facture_str = fmt_amount(total_invoice, self._sym) if isinstance(total_invoice, (int, float)) else '-'
+
             vals = [
                 str(idx),
                 pay.get('reservation_code', '-'),
                 pay.get('client', '-'),
-                fmt_amount(amt, self._sym) if isinstance(amt, (int, float)) else '-',
+                pay.get('room_number', '-'),
+                encaisse_str,
+                facture_str,
                 method_label,
                 pay.get('reference') or '-',
                 pay.get('user_name', str(pay.get('user_id', '-'))),
@@ -245,9 +258,22 @@ class CaisseView(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.table.setItem(r, col, item)
 
-            # Coloration par méthode (col 4)
+            # Coloration ligne crédit (fond violet très clair)
+            if is_credit:
+                for col in range(len(vals)):
+                    it = self.table.item(r, col)
+                    if it:
+                        it.setBackground(QBrush(QColor('#F3E5F5')))
+                # Montant facture (col 5) en rouge gras pour bien signaler la dette
+                it_facture = self.table.item(r, 5)
+                if it_facture:
+                    it_facture.setForeground(QBrush(QColor('#8E44AD')))
+                    it_facture.setFont(QFont('', -1, QFont.Weight.Bold))
+                credit_du += float(total_invoice or 0)
+
+            # Coloration méthode (col 6)
             color = METHOD_COLORS.get(method)
-            m_item = self.table.item(r, 4)
+            m_item = self.table.item(r, 6)
             if m_item and color:
                 m_item.setForeground(QBrush(QColor(color)))
                 m_item.setFont(QFont('', -1, QFont.Weight.Bold))
@@ -260,9 +286,10 @@ class CaisseView(QWidget):
         self.lbl_cash.setText(f"💵 Espèces : {fmt_amount(grp['cash'], self._sym)}")
         self.lbl_mobile.setText(f"📱 Mobile : {fmt_amount(grp['mobile'], self._sym)}")
         self.lbl_banque.setText(f"🏦 Banque : {fmt_amount(grp['banque'], self._sym)}")
-        self.lbl_credit.setText(f"📋 Crédit : {fmt_amount(grp['credit'], self._sym)}")
+        self.lbl_credit.setText(
+            f"📋 Crédit – dû : {fmt_amount(credit_du, self._sym)}")
         self.lbl_remb.setText(f"↩️ Remb. : {fmt_amount(grp['remboursement'], self._sym)}")
-        self.lbl_total.setText(f"✅ TOTAL : {fmt_amount(total, self._sym)}")
+        self.lbl_total.setText(f"✅ TOTAL encaissé : {fmt_amount(total, self._sym)}")
 
     # ------------------------------------------------------------------
     def _on_export_pdf(self):
@@ -333,14 +360,17 @@ class CaisseView(QWidget):
             els.append(Spacer(1, 0.3 * cm))
 
             # ── Tableau ─────────────────────────────────────────────────
-            headers = ['#', 'Réservation', 'Client', 'Montant',
-                       'Méthode', 'Référence', 'Reçu par',
+            headers = ['#', 'Réservation', 'Client', 'Chambre',
+                       'Encaissé', 'Facture', 'Méthode',
+                       'Référence', 'Reçu par',
                        'Dt. Réservation', 'Check-in', 'Check-out',
-                       'Date / Heure paiement']
+                       'Date paiement']
             tbl_data = [headers]
             total = 0.0
+            credit_du = 0.0
             grp = {'cash': 0.0, 'mobile': 0.0, 'banque': 0.0, 'credit': 0.0, 'remboursement': 0.0, 'autre': 0.0}
             per_method: dict = {}  # method → montant pour le détail PDF
+            credit_row_indices = []  # indices (1-based dans tbl_data) des lignes crédit
 
             def _fmtd(v):
                 if v is None:
@@ -356,11 +386,17 @@ class CaisseView(QWidget):
                           else str(pay.get('created_at', '-')))
                 amt    = pay.get('amount', 0)
                 method = pay.get('method', '')
+                total_invoice = pay.get('total_amount', 0.0)
+                is_credit = (method == 'credit')
+                encaisse_str = fmt_amount(amt, sym) if isinstance(amt, (int, float)) else '-'
+                facture_str  = fmt_amount(total_invoice, sym) if isinstance(total_invoice, (int, float)) else '-'
                 tbl_data.append([
                     str(idx),
                     pay.get('reservation_code', '-'),
                     (pay.get('client') or '')[:26],
-                    fmt_amount(amt, sym) if isinstance(amt, (int, float)) else '-',
+                    (pay.get('room_number') or '-')[:10],
+                    encaisse_str,
+                    facture_str,
                     METHOD_LABELS.get(method, method),
                     (pay.get('reference') or '-')[:24],
                     (pay.get('user_name') or str(pay.get('user_id', '-')))[:20],
@@ -369,25 +405,29 @@ class CaisseView(QWidget):
                     _fmtd(pay.get('date_checkout')),
                     dt_str,
                 ])
+                if is_credit:
+                    credit_row_indices.append(len(tbl_data) - 1)  # 1-based dans tbl_data
+                    credit_du += float(total_invoice or 0)
                 total += float(amt or 0)
                 g = _method_group(method)
                 grp[g] += float(amt or 0)
                 per_method[method] = per_method.get(method, 0.0) + float(amt or 0)
 
             tbl_data.append([
-                f"TOTAL ({len(rows)})", '', '',
-                fmt_amount(total, sym), '', '', '', '', '', '', '',
+                f"TOTAL ({len(rows)})", '', '', '',
+                fmt_amount(total, sym), '', '', '', '', '', '', '', '',
             ])
 
-            cws = [1.0*cm, 2.5*cm, 3.5*cm, 2.5*cm, 2.3*cm, 3.0*cm, 2.5*cm,
-                   2.5*cm, 2.5*cm, 2.5*cm, 3.0*cm]
+            cws = [0.7*cm, 2.2*cm, 3.0*cm, 1.8*cm, 2.2*cm, 2.2*cm,
+                   2.2*cm, 2.4*cm, 2.2*cm,
+                   2.4*cm, 2.4*cm, 2.4*cm, 2.8*cm]
             tbl = Table(tbl_data, colWidths=cws, repeatRows=1,
                         hAlign='CENTER')
-            tbl.setStyle(TableStyle([
+            style_cmds = [
                 ('BACKGROUND',     (0, 0),  (-1, 0),  HexColor('#2C3E50')),
                 ('TEXTCOLOR',      (0, 0),  (-1, 0),  white),
                 ('FONTNAME',       (0, 0),  (-1, 0),  'Helvetica-Bold'),
-                ('FONTSIZE',       (0, 0),  (-1, -1), 7.5),
+                ('FONTSIZE',       (0, 0),  (-1, -1), 7),
                 ('GRID',           (0, 0),  (-1, -1), 0.3, HexColor('#CCCCCC')),
                 ('ROWBACKGROUNDS', (1, 1),  (-2, -1),
                  [HexColor('#FFFFFF'), HexColor('#F5F6FA')]),
@@ -398,7 +438,16 @@ class CaisseView(QWidget):
                 ('VALIGN',         (0, 0),  (-1, -1), 'MIDDLE'),
                 ('ROWHEIGHT',      (0, 0),  (-1, -1), 0.55 * cm),
                 ('PADDING',        (0, 0),  (-1, -1), 3),
-            ]))
+            ]
+            # Lignes crédit : fond violet clair + colonne Facture en violet gras
+            for ri in credit_row_indices:
+                style_cmds.append(
+                    ('BACKGROUND', (0, ri), (-1, ri), HexColor('#F3E5F5')))
+                style_cmds.append(
+                    ('TEXTCOLOR',  (5, ri), (5, ri),  HexColor('#6A1B9A')))
+                style_cmds.append(
+                    ('FONTNAME',   (5, ri), (5, ri),  'Helvetica-Bold'))
+            tbl.setStyle(TableStyle(style_cmds))
             els.append(tbl)
             els.append(Spacer(1, 0.4 * cm))
 
@@ -423,8 +472,9 @@ class CaisseView(QWidget):
                     if per_method.get(m):
                         sum_data.append([f"   └ {METHOD_LABELS[m]}", fmt_amount(per_method[m], sym)])
             # Crédit
-            if grp['credit']:
-                sum_data.append(["📋 Crédit (dette)", fmt_amount(grp['credit'], sym)])
+            if grp['credit'] or credit_du:
+                sum_data.append(["📋 Crédit – montant dû (factures)",
+                                  fmt_amount(credit_du, sym)])
             # Remboursements (négatifs – annulations)
             if grp['remboursement']:
                 sum_data.append(["\u21a9\ufe0f Remboursements", fmt_amount(grp['remboursement'], sym)])
