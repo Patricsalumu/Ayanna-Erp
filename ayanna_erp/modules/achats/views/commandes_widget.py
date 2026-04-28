@@ -114,7 +114,12 @@ class PaiementDialog(QDialog):
         pay_form.addRow("Montant*:", self.montant_spinbox)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Espèces", "Chèque", "Virement", "Carte bancaire", "Mobile Money", "Autre"])
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+            for m in get_active_payment_modes():
+                self.mode_combo.addItem(m['label'], m['code'])
+        except Exception:
+            self.mode_combo.addItems(["Espèces", "Banque", "Mobile Money", "Crédit"])
         pay_form.addRow("Mode*:", self.mode_combo)
 
         self.reference_edit = QLineEdit()

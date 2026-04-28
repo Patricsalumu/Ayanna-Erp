@@ -7,24 +7,24 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
-# Méthodes qui exigent une référence de transaction
-_REF_METHODS = {'airtelmoney', 'orangemoney', 'mpesa', 'equitybcdc', 'tmb', 'rawbank', 'smico'}
+
+def _load_payment_modes():
+    """Retourne les modes actifs depuis la DB ou les 4 modes par défaut."""
+    try:
+        from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+        modes = get_active_payment_modes()
+        return [(m['code'], m['label']) for m in modes]
+    except Exception:
+        return [
+            ('cash',         'Espèces'),
+            ('banque',       'Banque'),
+            ('mobile_money', 'Mobile Money'),
+            ('credit',       'Crédit'),
+        ]
 
 
 class PaymentDialog(QDialog):
     """Dialogue pour enregistrer un paiement ou mettre en crédit."""
-
-    METHODS = [
-        ('cash',         'Espèces'),
-        ('airtelmoney', 'Airtel Money'),
-        ('orangemoney', 'Orange Money'),
-        ('mpesa', 'M pesa'),
-        ('equitybcdc',        'Eauity Bcdc'),
-        ('tmb',        'Tmb'),
-        ('rawbank',        'Raw bank'),
-        ('smico',        'Smico'),
-        ('credit',       'Crédit (dette)'),
-    ]
 
     def __init__(self, reservation: dict, parent=None):
         super().__init__(parent)
@@ -32,6 +32,8 @@ class PaymentDialog(QDialog):
         self.setWindowTitle("Enregistrer un paiement")
         self.setMinimumWidth(380)
         self.setModal(True)
+        # Charger les modes dynamiques avant de construire l'UI
+        self._methods = _load_payment_modes()
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -65,7 +67,7 @@ class PaymentDialog(QDialog):
 
         # Méthode
         self.method_combo = QComboBox()
-        for code, label in self.METHODS:
+        for code, label in self._methods:
             self.method_combo.addItem(label, code)
         form.addRow("Méthode :", self.method_combo)
 
@@ -100,7 +102,8 @@ class PaymentDialog(QDialog):
     def _on_method_change(self):
         method = self.method_combo.currentData()
         is_credit = (method == 'credit')
-        needs_ref = method in _REF_METHODS
+        # Référence requise pour tout mode autre que espèces et crédit
+        needs_ref = method is not None and method not in ('cash', 'credit')
         self.amount_spin.setEnabled(not is_credit)
         self.ref_label.setVisible(needs_ref)
         self.ref_input.setVisible(needs_ref)
@@ -113,7 +116,8 @@ class PaymentDialog(QDialog):
             QMessageBox.warning(self, "Montant invalide",
                                 "Le montant doit être supérieur à 0.")
             return
-        if method in _REF_METHODS and not self.ref_input.text().strip():
+        needs_ref = method is not None and method not in ('cash', 'credit')
+        if needs_ref and not self.ref_input.text().strip():
             QMessageBox.warning(self, "Référence manquante",
                                 f"Veuillez saisir la référence de la transaction "
                                 f"{self.method_combo.currentText()}.")
