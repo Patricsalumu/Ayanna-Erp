@@ -15,15 +15,128 @@ Fonctionnalités :
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLineEdit, QDateEdit, QHeaderView, QAbstractItemView, QMessageBox
+    QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLineEdit, QDateEdit, QHeaderView, QAbstractItemView, QMessageBox,
+    QStyledItemDelegate, QApplication
 )
 from PyQt6.QtWidgets import QLabel, QComboBox, QFrame
-from PyQt6.QtGui import QStandardItem, QColor
+from PyQt6.QtGui import QStandardItem, QColor, QPainter
 from PyQt6.QtGui import QStandardItemModel, QStandardItem
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate, QRect, QSize, QEvent
 import datetime
 
 from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
+
+
+class JournalActionsDelegate(QStyledItemDelegate):
+    """Delegate qui dessine des boutons Valider / Annuler directement dans la cellule Actions."""
+
+    _COL_DATE = 1  # Colonne où journal_id est stocké en UserRole
+
+    def __init__(self, parent_widget):
+        super().__init__(parent_widget)
+        self._pw = parent_widget  # JournalWidget
+
+    def _row_info(self, model, row):
+        """Renvoie (journal_id, is_valide) ou (None, None) pour les lignes non-action."""
+        # Ligne de détail : marqueur UserRole+1 sur col 0
+        statut_item = model.item(row, 0)
+        if statut_item and statut_item.data(Qt.ItemDataRole.UserRole + 1) == "detail":
+            return None, None
+        date_item = model.item(row, self._COL_DATE)
+        if not date_item:
+            return None, None
+        journal_id = date_item.data(Qt.ItemDataRole.UserRole)
+        if journal_id is None:  # ligne totaux
+            return None, None
+        is_valide = bool(date_item.data(Qt.ItemDataRole.UserRole + 2))
+        return journal_id, is_valide
+
+    def _btn_rects(self, option):
+        """Calcule les QRect des deux boutons dans la cellule."""
+        r = option.rect
+        margin, gap = 3, 4
+        btn_h = max(r.height() - 2 * margin, 1)
+        btn_w = max((r.width() - 2 * margin - gap) // 2, 1)
+        val_rect = QRect(r.x() + margin, r.y() + margin, btn_w, btn_h)
+        ann_rect = QRect(r.x() + margin + btn_w + gap, r.y() + margin, btn_w, btn_h)
+        return val_rect, ann_rect
+
+    def paint(self, painter, option, index):
+        model = index.model()
+        journal_id, is_valide = self._row_info(model, index.row())
+
+        if journal_id is None:
+            super().paint(painter, option, index)
+            return
+
+        painter.save()
+        # Fond de la cellule
+        from PyQt6.QtWidgets import QStyle
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, option.palette.highlight())
+        elif is_valide:
+            painter.fillRect(option.rect, QColor("#EAFAF1"))
+        else:
+            painter.fillRect(option.rect, QColor("#FFFFFF"))
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        font = painter.font()
+        font.setPointSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+
+        val_rect, ann_rect = self._btn_rects(option)
+
+        # — Bouton Valider —
+        if not is_valide:
+            painter.setBrush(QColor("#27AE60"))
+            painter.setPen(QColor("#1E8449"))
+            painter.drawRoundedRect(val_rect, 5, 5)
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawText(val_rect, Qt.AlignmentFlag.AlignCenter, "✅ Valider")
+        else:
+            painter.setBrush(QColor("#D5F5E3"))
+            painter.setPen(QColor("#A9DFBF"))
+            painter.drawRoundedRect(val_rect, 5, 5)
+            painter.setPen(QColor("#1E8449"))
+            painter.drawText(val_rect, Qt.AlignmentFlag.AlignCenter, "✅ Validé")
+
+        # — Bouton Annuler —
+        if not is_valide:
+            painter.setBrush(QColor("#E74C3C"))
+            painter.setPen(QColor("#C0392B"))
+            painter.drawRoundedRect(ann_rect, 5, 5)
+            painter.setPen(Qt.GlobalColor.white)
+            painter.drawText(ann_rect, Qt.AlignmentFlag.AlignCenter, "↩ Annuler")
+        else:
+            painter.setBrush(QColor("#ECF0F1"))
+            painter.setPen(QColor("#BDC3C7"))
+            painter.drawRoundedRect(ann_rect, 5, 5)
+            painter.setPen(QColor("#95A5A6"))
+            painter.drawText(ann_rect, Qt.AlignmentFlag.AlignCenter, "↩ Annuler")
+
+        painter.restore()
+
+    def editorEvent(self, event, model, option, index):
+        if event.type() == QEvent.Type.MouseButtonRelease:
+            journal_id, is_valide = self._row_info(model, index.row())
+            if journal_id is None:
+                return False
+            val_rect, ann_rect = self._btn_rects(option)
+            pos = event.position().toPoint()
+            if val_rect.contains(pos) and not is_valide:
+                self._pw.valider_ecriture_by_id(journal_id)
+                return True
+            elif ann_rect.contains(pos) and not is_valide:
+                self._pw.annuler_ecriture_by_id(journal_id)
+                return True
+        return False
+
+    def sizeHint(self, option, index):
+        return QSize(180, 36)
+
+
+
 class JournalWidget(QWidget):
     JOURNAL_TYPE_OPTIONS = [
         ("Vente", "vente"),
@@ -167,7 +280,7 @@ class JournalWidget(QWidget):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
 
         # Définir les labels des colonnes
-        self.model.setHorizontalHeaderLabels(["Date opération", "Référence", "Libellé", "Type", "Débit", "Crédit"])
+        self.model.setHorizontalHeaderLabels(["Statut", "Date opération", "Référence", "Libellé", "Type", "Débit", "Crédit", "Actions"])
 
         # Colonnes redimensionnables
         header = self.table.horizontalHeader()
@@ -183,20 +296,26 @@ class JournalWidget(QWidget):
         ''')
 
         # Largeurs par défaut
-        self.table.setColumnWidth(0, 140)
-        self.table.setColumnWidth(1, 130)
-        self.table.setColumnWidth(2, 420)
-        self.table.setColumnWidth(3, 70)
-        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(0, 90)
+        self.table.setColumnWidth(1, 140)
+        self.table.setColumnWidth(2, 130)
+        self.table.setColumnWidth(3, 350)
+        self.table.setColumnWidth(4, 70)
         self.table.setColumnWidth(5, 100)
+        self.table.setColumnWidth(6, 100)
+        self.table.setColumnWidth(7, 180)
 
         # Forcer hauteur d'en-tête et hauteur de ligne pour éviter agrandissement
         try:
             self.table.horizontalHeader().setFixedHeight(40)
             # Hauteur par défaut des lignes
-            self.table.verticalHeader().setDefaultSectionSize(25)
+            self.table.verticalHeader().setDefaultSectionSize(36)
         except Exception:
             pass
+
+        # Delegate inline pour la colonne Actions
+        self._actions_delegate = JournalActionsDelegate(self)
+        self.table.setItemDelegateForColumn(7, self._actions_delegate)
 
         table_layout.addWidget(self.table)
         self.layout.addWidget(table_frame, 2)
@@ -210,6 +329,7 @@ class JournalWidget(QWidget):
         self.transfer_btn = QPushButton("Passer une ecriture")
         self.transfer_btn.clicked.connect(self.show_transfer_dialog)
         actions_layout.addWidget(self.transfer_btn)
+        actions_layout.addStretch()
         self.layout.addLayout(actions_layout)
 
         self.table.doubleClicked.connect(self.toggle_ecritures_row)
@@ -244,7 +364,7 @@ class JournalWidget(QWidget):
 
     def refresh_table(self):
         self.model.clear()
-        self.model.setHorizontalHeaderLabels(["Date opération", "Référence", "Libellé", "Type", "Débit", "Crédit"])
+        self.model.setHorizontalHeaderLabels(["Statut", "Date opération", "Référence", "Libellé", "Type", "Débit", "Crédit", "Actions"])
         self.ecritures_rows = {}
 
         total_debit = 0.0
@@ -260,25 +380,39 @@ class JournalWidget(QWidget):
                 montant_str = self.controller.format_amount(montant)
             except Exception:
                 montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
+
+            is_valide = bool(getattr(j, 'valide', False))
+            statut_item = QStandardItem("✅ Validé" if is_valide else "⏳ En attente")
+            statut_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+            if is_valide:
+                statut_item.setForeground(QColor("#27AE60"))
+            else:
+                statut_item.setForeground(QColor("#E67E22"))
+
             row = [
+                statut_item,
                 QStandardItem(date_str),
                 QStandardItem(reference_str),
                 QStandardItem(j.libelle or ''),
                 QStandardItem(self.journal_type_label(getattr(j, 'type_operation', ''))),
                 QStandardItem(montant_str),
                 QStandardItem(montant_str),
+                QStandardItem(""),  # Colonne Actions — rendu par le delegate
             ]
 
-            # Alignements : Débit et Crédit à droite
+            # Fond grisé pour les écritures validées
             for idx, item in enumerate(row):
-                if idx in (4, 5):
+                if idx in (5, 6):
                     item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
                 else:
                     item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+                if is_valide:
+                    item.setBackground(QColor("#EAFAF1"))
 
             # Taguer la ligne avec l'ID du journal
             try:
-                row[0].setData(getattr(j, 'id', None), Qt.ItemDataRole.UserRole)
+                row[1].setData(getattr(j, 'id', None), Qt.ItemDataRole.UserRole)
+                row[1].setData(is_valide, Qt.ItemDataRole.UserRole + 2)  # Stocker statut valide
             except Exception:
                 pass
 
@@ -292,41 +426,45 @@ class JournalWidget(QWidget):
             total_d_str = f"{total_debit:,.2f} {self.devise}" if self.devise else f"{total_debit:,.2f}"
             total_c_str = f"{total_credit:,.2f} {self.devise}" if self.devise else f"{total_credit:,.2f}"
         total_row = [
+            QStandardItem(""),
             QStandardItem("TOTAUX"),
             QStandardItem(""),
             QStandardItem(f"{len(self.journaux)} opération(s)"),
             QStandardItem(""),
             QStandardItem(total_d_str),
             QStandardItem(total_c_str),
+            QStandardItem(""),  # Colonne Actions (vide pour la ligne totaux)
         ]
         for idx, item in enumerate(total_row):
             fnt = item.font()
             fnt.setBold(True)
             item.setFont(fnt)
             item.setBackground(QColor("#E8D5F5"))
-            if idx in (4, 5):
+            if idx in (5, 6):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             else:
                 item.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.model.appendRow(total_row)
 
         # Largeurs des colonnes
-        self.table.setColumnWidth(0, 140)  # Date opération
-        self.table.setColumnWidth(1, 150)  # Référence
-        self.table.setColumnWidth(2, 500)  # Libellé
-        self.table.setColumnWidth(3, 70)   # Type
-        self.table.setColumnWidth(4, 100)  # Débit
-        self.table.setColumnWidth(5, 100)  # Crédit
+        self.table.setColumnWidth(0, 90)   # Statut
+        self.table.setColumnWidth(1, 140)  # Date opération
+        self.table.setColumnWidth(2, 140)  # Référence
+        self.table.setColumnWidth(3, 340)  # Libellé
+        self.table.setColumnWidth(4, 70)   # Type
+        self.table.setColumnWidth(5, 100)  # Débit
+        self.table.setColumnWidth(6, 100)  # Crédit
+        self.table.setColumnWidth(7, 180)  # Actions
             
             
     def toggle_ecritures_row(self, index):
         clicked_row = index.row()
 
-        # Trouver la ligne parente (celle qui a le UserRole) en remontant si nécessaire
+        # Trouver la ligne parente (celle qui a le UserRole sur col 1) en remontant
         parent_row = None
         r = clicked_row
         while r >= 0:
-            item = self.model.item(r, 0)
+            item = self.model.item(r, 1)
             if item:
                 try:
                     val = item.data(Qt.ItemDataRole.UserRole)
@@ -356,7 +494,7 @@ class JournalWidget(QWidget):
         # Récupérer l'ID du journal stocké sur la ligne
         journal_id = None
         try:
-            journal_id = self.model.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            journal_id = self.model.item(row, 1).data(Qt.ItemDataRole.UserRole)
         except Exception:
             journal_id = None
 
@@ -430,14 +568,15 @@ class JournalWidget(QWidget):
                     montant_str = f"{montant:,.2f} {self.devise}" if self.devise else f"{montant:,.2f}"
 
                 detail_text = f"{sens} : {compte} - {libelle}  Montant : {montant_str}"
-            # Ligne de détail SYSCOHADA : date vide | compte | libellé | type vide | Débit | Crédit
+            # Ligne de détail SYSCOHADA : statut vide | date vide | compte | libellé | type vide | Débit | Crédit
+            item_statut = QStandardItem("")
             item_date_operation = QStandardItem("")
             item_compte = QStandardItem(f"  → {compte}")
             item_libelle = QStandardItem(libelle)
             item_type = QStandardItem("")
             item_debit = QStandardItem(montant_str if sens == "Débit" else "")
             item_credit = QStandardItem(montant_str if sens == "Crédit" else "")
-            for it in [item_date_operation, item_compte, item_libelle, item_type, item_debit, item_credit]:
+            for it in [item_statut, item_date_operation, item_compte, item_libelle, item_type, item_debit, item_credit]:
                 it.setBackground(QColor("#f5f5f5"))
                 fnt = it.font()
                 fnt.setPointSize(10)
@@ -445,10 +584,121 @@ class JournalWidget(QWidget):
             item_debit.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             item_credit.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             # Marqueur pour le toggle (collapse)
-            item_date_operation.setData("detail", Qt.ItemDataRole.UserRole + 1)
-            items = [item_date_operation, item_compte, item_libelle, item_type, item_debit, item_credit]
+            item_statut.setData("detail", Qt.ItemDataRole.UserRole + 1)
+            items = [item_statut, item_date_operation, item_compte, item_libelle, item_type, item_debit, item_credit, QStandardItem("")]
             self.model.insertRow(row + 1 + idx, items)
 
+
+    def _on_selection_changed(self):
+        """Met à jour l'état des boutons Valider/Annuler selon la ligne sélectionnée."""
+        try:
+            indexes = self.table.selectionModel().selectedRows()
+            if not indexes:
+                self.valider_btn.setEnabled(False)
+                self.annuler_btn.setEnabled(False)
+                return
+            row = indexes[0].row()
+            # Ignorer la ligne de totaux (pas de UserRole)
+            item = self.model.item(row, 1)
+            if not item:
+                self.valider_btn.setEnabled(False)
+                self.annuler_btn.setEnabled(False)
+                return
+            journal_id = item.data(Qt.ItemDataRole.UserRole)
+            if journal_id is None:
+                # Ligne de totaux ou ligne détail
+                self.valider_btn.setEnabled(False)
+                self.annuler_btn.setEnabled(False)
+                return
+            is_valide = bool(item.data(Qt.ItemDataRole.UserRole + 2))
+            # Si validé : ni Valider ni Annuler disponibles (extourne n'est possible que via bouton séparé)
+            self.valider_btn.setEnabled(not is_valide)
+            self.annuler_btn.setEnabled(not is_valide)
+        except Exception:
+            self.valider_btn.setEnabled(False)
+            self.annuler_btn.setEnabled(False)
+
+    def _get_selected_journal_id(self):
+        """Retourne (row_index, journal_id) de la ligne sélectionnée, ou (None, None)."""
+        indexes = self.table.selectionModel().selectedRows()
+        if not indexes:
+            return None, None
+        row = indexes[0].row()
+        item = self.model.item(row, 1)
+        if not item:
+            return None, None
+        journal_id = item.data(Qt.ItemDataRole.UserRole)
+        return row, journal_id
+
+    def _get_current_user_label(self):
+        """Retourne le nom ou email de l'utilisateur connecté, ou 'Utilisateur inconnu'."""
+        try:
+            user = self.controller.user_controller.get_current_user()
+            if user:
+                return getattr(user, 'name', None) or getattr(user, 'email', None) or str(user)
+        except Exception:
+            pass
+        return "Utilisateur inconnu"
+
+    def valider_ecriture(self):
+        """Valide l'écriture journal sélectionnée (rend immutable)."""
+        _, journal_id = self._get_selected_journal_id()
+        if journal_id is None:
+            QMessageBox.warning(self, "Sélection requise", "Veuillez sélectionner un journal à valider.")
+            return
+        user_label = self._get_current_user_label()
+        ok, msg = self.controller.valider_journal(journal_id, user_label)
+        if ok:
+            QMessageBox.information(self, "Validation réussie", msg)
+        else:
+            QMessageBox.warning(self, "Erreur de validation", msg)
+        self.load_data()
+
+    def annuler_ecriture(self):
+        """Crée une écriture extourne pour annuler l'écriture journal sélectionnée."""
+        _, journal_id = self._get_selected_journal_id()
+        if journal_id is None:
+            QMessageBox.warning(self, "Sélection requise", "Veuillez sélectionner un journal à extourner.")
+            return
+        reply = QMessageBox.question(
+            self, "Confirmer l'annulation",
+            "Cette action créera une écriture inverse (extourne) pour annuler l'écriture sélectionnée.\n\nConfirmer ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        ok, msg = self.controller.annuler_journal(journal_id, self.entreprise_id)
+        if ok:
+            QMessageBox.information(self, "Extourne créée", msg)
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+        self.load_data()
+
+    def valider_ecriture_by_id(self, journal_id):
+        """Appelé directement par le delegate de la colonne Actions."""
+        user_label = self._get_current_user_label()
+        ok, msg = self.controller.valider_journal(journal_id, user_label)
+        if ok:
+            QMessageBox.information(self, "Validation réussie", msg)
+        else:
+            QMessageBox.warning(self, "Erreur de validation", msg)
+        self.load_data()
+
+    def annuler_ecriture_by_id(self, journal_id):
+        """Appelé directement par le delegate de la colonne Actions."""
+        reply = QMessageBox.question(
+            self, "Confirmer l'annulation",
+            "Cette action créera une écriture inverse (extourne) pour annuler cette entrée.\n\nConfirmer ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        ok, msg = self.controller.annuler_journal(journal_id, self.entreprise_id)
+        if ok:
+            QMessageBox.information(self, "Extourne créée", msg)
+        else:
+            QMessageBox.warning(self, "Erreur", msg)
+        self.load_data()
 
     def export_pdf(self):
         try:

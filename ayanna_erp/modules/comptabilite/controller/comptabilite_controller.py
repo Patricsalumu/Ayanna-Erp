@@ -602,14 +602,72 @@ class ComptabiliteController:
     def get_journaux_comptables(self, entreprise_id):
         """
         Retourne la liste des journaux comptables pour une entreprise donnée.
-        Args:
-            entreprise_id (int): ID de l'entreprise
-        Returns:
-            list: Liste des objets JournalComptable
         """
-        # Import remplac� par les nouveaux mod�les
         journaux = self.session.query(JournalComptable).filter_by(enterprise_id=entreprise_id).order_by(JournalComptable.date_operation.desc()).all()
         return journaux
+
+    def valider_journal(self, journal_id, user_label):
+        """
+        Valide un journal comptable (rend l'écriture immuable).
+        :param journal_id: ID du JournalComptable
+        :param user_label: Nom ou email de l'utilisateur qui valide
+        :return: (True, msg) ou (False, msg)
+        """
+        journal = self.session.query(JournalComptable).filter_by(id=journal_id).first()
+        if not journal:
+            return False, "Journal introuvable."
+        if getattr(journal, 'valide', False):
+            return False, "Ce journal est déjà validé."
+        journal.valide = True
+        journal.valide_by = str(user_label)
+        journal.date_validation = datetime.datetime.now()
+        self.session.commit()
+        return True, f"Écriture validée par {user_label}."
+
+    def annuler_journal(self, journal_id, entreprise_id):
+        """
+        Annule un journal non validé en passant une écriture inverse (extourne).
+        :return: (True, msg) ou (False, msg)
+        """
+        journal = self.session.query(JournalComptable).filter_by(id=journal_id).first()
+        if not journal:
+            return False, "Journal introuvable."
+        if getattr(journal, 'valide', False):
+            return False, "Impossible d'annuler : cette écriture est déjà validée."
+
+        ecritures = self.session.query(EcritureComptable).filter_by(journal_id=journal.id).all()
+        if not ecritures:
+            return False, "Aucune écriture associée à ce journal."
+
+        # Créer un journal d'extourne
+        extourne = JournalComptable(
+            date_operation=datetime.datetime.now(),
+            libelle=f"EXTOURNE — {journal.libelle}",
+            montant=journal.montant,
+            type_operation=journal.type_operation,
+            reference=f"ANN-{journal.reference or journal.id}",
+            enterprise_id=entreprise_id,
+            user_id=journal.user_id,
+            valide=False,
+        )
+        self.session.add(extourne)
+        self.session.flush()
+
+        # Passer les écritures inverses
+        for ordre, e in enumerate(ecritures, start=1):
+            inv = EcritureComptable(
+                journal_id=extourne.id,
+                compte_comptable_id=e.compte_comptable_id,
+                debit=float(e.credit or 0),
+                credit=float(e.debit or 0),
+                ordre=ordre,
+                libelle=f"Extourne — {getattr(e, 'libelle', '') or ''}",
+            )
+            self.session.add(inv)
+
+        self.session.commit()
+        return True, "Écriture extournée avec succès. Une nouvelle écriture inverse a été créée."
+
 
     def get_ecritures_du_journal(self, journal_id):
         print(f"[DEBUG] Appel get_ecritures_du_journal avec journal_id={journal_id}")
@@ -650,8 +708,8 @@ class ComptabiliteController:
     def get_grand_livre(self, entreprise_id):
         """
         Retourne une liste de dicts pour l'entreprise donnée.
+        Seuls les comptes ayant au moins une écriture sont inclus, triés par numéro.
         """
-        # Import remplac� par les nouveaux mod�les
         comptes = (
             self.session.query(CompteComptable, ClasseComptable)
             .join(ClasseComptable)
@@ -668,6 +726,9 @@ class ComptabiliteController:
                 .filter(JournalComptable.enterprise_id == entreprise_id)
                 .all()
             )
+            # Exclure les comptes sans aucune écriture
+            if not ecritures:
+                continue
             total_debit = sum(float(e.debit or 0) for e in ecritures)
             total_credit = sum(float(e.credit or 0) for e in ecritures)
             solde, metadata = self.compute_account_display_balance(compte, total_debit, total_credit, classe)
@@ -1059,10 +1120,14 @@ class ComptabiliteController:
     
     # Comptes Comptables
     def get_comptes(self, entreprise_id):
-        """Retourne tous les comptes comptables avec leur classe"""
-        # Import remplac� par les nouveaux mod�les
-        # Import remplac� par les nouveaux mod�les
-        comptes = self.session.query(CompteComptable).join(ClasseComptable).filter(ClasseComptable.enterprise_id == entreprise_id).all()
+        """Retourne tous les comptes comptables avec leur classe, triés par numéro"""
+        comptes = (
+            self.session.query(CompteComptable)
+            .join(ClasseComptable)
+            .filter(ClasseComptable.enterprise_id == entreprise_id)
+            .order_by(CompteComptable.numero)
+            .all()
+        )
         result = []
         for compte in comptes:
             classe = self.session.query(ClasseComptable).filter(ClasseComptable.id == compte.classe_comptable_id).first()
@@ -1072,6 +1137,7 @@ class ComptabiliteController:
                 "nom": compte.nom,
                 "libelle": compte.libelle,
                 "classe": classe.nom if classe else "",
+                "is_default": bool(getattr(compte, 'is_default', False)),
             })
         return result
 
@@ -1199,11 +1265,15 @@ class ComptabiliteController:
         self.session.commit()
 
     def delete_compte(self, compte_id):
-        """Supprime un compte"""
-        # Import remplac� par les nouveaux mod�les
+        """Supprime un compte. Les comptes système (is_default=True) ne peuvent pas être supprimés."""
         compte = self.session.query(CompteComptable).filter(CompteComptable.id == compte_id).first()
         if not compte:
             raise Exception("Compte introuvable")
+        if getattr(compte, 'is_default', False):
+            raise Exception(
+                f"Le compte {compte.numero} - {compte.nom} est un compte système SYSCOHADA. "
+                "Il ne peut pas être supprimé, mais vous pouvez le modifier."
+            )
         self.session.delete(compte)
         self.session.commit()
 

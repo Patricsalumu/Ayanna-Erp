@@ -110,6 +110,14 @@ class DatabaseManager:
             self._migrate_payment_modes_table()
         except Exception:
             pass
+        try:
+            self._migrate_compta_is_default_column()
+        except Exception:
+            pass
+        try:
+            self._migrate_compta_journal_validation()
+        except Exception:
+            pass
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
@@ -424,6 +432,34 @@ class DatabaseManager:
         except Exception as e:
             print(f"⚠️ _migrate_payment_modes_table : {e}")
 
+    def _migrate_compta_is_default_column(self):
+        """Ajoute la colonne is_default à compta_comptes si absente (migration idempotente)."""
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text(
+                    "ALTER TABLE compta_comptes ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0"
+                ))
+                conn.commit()
+                print("✅ Migration : colonne is_default ajoutée à compta_comptes")
+        except Exception:
+            pass  # La colonne existe déjà
+
+    def _migrate_compta_journal_validation(self):
+        """Ajoute les colonnes valide, valide_by et date_validation à compta_journaux (idempotent)."""
+        cols = [
+            "ALTER TABLE compta_journaux ADD COLUMN valide INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE compta_journaux ADD COLUMN valide_by TEXT",
+            "ALTER TABLE compta_journaux ADD COLUMN date_validation DATETIME",
+        ]
+        with self.engine.connect() as conn:
+            for sql in cols:
+                try:
+                    conn.execute(text(sql))
+                except Exception:
+                    pass  # colonne déjà présente
+            conn.commit()
+        print("✅ Migration : colonnes valide/valide_by/date_validation ajoutées à compta_journaux")
+
     def _migrate_livraison_tables(self):
         """
         Crée les tables stock_livraisons et stock_livraison_items si elles
@@ -503,38 +539,97 @@ class DatabaseManager:
                 else:
                     classes_created[classe_data["code"]] = existing
             
-            # Insérer quelques comptes de base essentiels
+            # Plan comptable SYSCOHADA - 76 comptes indispensables pour une PME congolaise
             comptes_default = [
-                
-                # Classe 4 - Comptes de tiers
-                {"numero": "100", "nom": "Capital social", "libelle": "Capital Social", "classe": "1"},
-                {"numero": "101", "nom": "Apport des assosiés", "libelle": "Apports des associés", "classe": "1"},
-                
-                # Classe 4 - Comptes de tiers
-                {"numero": "411", "nom": "Clients", "libelle": "Clients ordinaires", "classe": "4"},
-                {"numero": "401", "nom": "Fournisseurs", "libelle": "Fournisseurs ordinaires", "classe": "4"},
-                
-                # Classe 3 - Comptes de stocks
-                {"numero": "304", "nom": "Stocks des marchandises", "libelle": "Stocks des marchandises", "classe": "3"},
-                
-                # Classe 5 - Comptes de trésorerie
-                {"numero": "57", "nom": "Caisse", "libelle": "Caisse générale", "classe": "5"},
-                {"numero": "521", "nom": "Banque", "libelle": "Banque locale", "classe": "5"},
-                
-                # Classe 6 - Comptes de charges
-                {"numero": "601", "nom": "Achats stockés - matières premières", "libelle": "Achats de matières premières", "classe": "6"},
-                {"numero": "604", "nom": "Achats Marchandises - ", "libelle": "Marchandises consomables", "classe": "6"},
-                {"numero": "622", "nom": "Rémunérations intermédiaires et honoraires", "libelle": "Rémunérations d'intermédiaires et honoraires", "classe": "6"},
-                {"numero": "624", "nom": "Transports", "libelle": "Transports sur achats et ventes", "classe": "6"},
-                {"numero": "680", "nom": "Remises", "libelle": "Compte des remises", "classe": "6"},
-                
-                # Classe 7 - Comptes de produits
-                {"numero": "701", "nom": "Ventes marchandises", "libelle": "Ventes de marchandises", "classe": "7"},
-                {"numero": "706", "nom": "Services vendus", "libelle": "Services vendus", "classe": "7"},
-                {"numero": "758", "nom": "Produits divers", "libelle": "Produits divers vendus", "classe": "7"},
-                
-                # Classe 44 - Comptes de taxes (TVA)
-                {"numero": "4431", "nom": "TVA collectée", "libelle": "TVA collectée sur ventes", "classe": "44"},
+                # ─── CLASSE 1 : Ressources durables (capitaux propres & dettes LT) ───
+                {"numero": "101",  "nom": "Capital social",                              "libelle": "Capital social souscrit et appelé",                         "classe": "1"},
+                {"numero": "102",  "nom": "Apports des associés",                        "libelle": "Comptes courants d'associés et apports en compte",          "classe": "1"},
+                {"numero": "111",  "nom": "Réserve légale",                              "libelle": "Réserve légale constituée (5% du bénéfice)",                 "classe": "1"},
+                {"numero": "120",  "nom": "Report à nouveau (créditeur)",               "libelle": "Report à nouveau bénéficiaire",                              "classe": "1"},
+                {"numero": "129",  "nom": "Report à nouveau (débiteur)",                "libelle": "Report à nouveau déficitaire",                               "classe": "1"},
+                {"numero": "130",  "nom": "Résultat net - Bénéfice",                    "libelle": "Résultat net de l'exercice (bénéfice)",                       "classe": "1"},
+                {"numero": "139",  "nom": "Résultat net - Perte",                       "libelle": "Résultat net de l'exercice (perte)",                          "classe": "1"},
+                {"numero": "162",  "nom": "Emprunts bancaires",                          "libelle": "Emprunts auprès des établissements de crédit",                "classe": "1"},
+                {"numero": "164",  "nom": "Comptes courants d'associés",                "libelle": "Avances et prêts des associés à la société",                  "classe": "1"},
+
+                # ─── CLASSE 2 : Actif immobilisé ───
+                {"numero": "211",  "nom": "Terrains",                                    "libelle": "Terrains nus, agricoles et de plantation",                   "classe": "2"},
+                {"numero": "213",  "nom": "Bâtiments (terrain propre)",                 "libelle": "Bâtiments et constructions sur terrain propre",              "classe": "2"},
+                {"numero": "2135", "nom": "Bâtiments (terrain d'autrui)",               "libelle": "Bâtiments construits sur terrain d'autrui",                  "classe": "2"},
+                {"numero": "228",  "nom": "Aménagements et installations de bureau",    "libelle": "Aménagements, installations et agencements de bureaux",      "classe": "2"},
+                {"numero": "231",  "nom": "Matériel de transport",                      "libelle": "Véhicules, motocycles et matériel de transport",              "classe": "2"},
+                {"numero": "241",  "nom": "Mobilier de bureau",                         "libelle": "Meubles, armoires, rayonnages corporels de bureau",           "classe": "2"},
+                {"numero": "2442", "nom": "Matériel de bureau (chaises et tables)",     "libelle": "Chaises, tables et sièges de bureau",                        "classe": "2"},
+                {"numero": "2443", "nom": "Matériel informatique",                      "libelle": "Ordinateurs, imprimantes, serveurs et périphériques",         "classe": "2"},
+                {"numero": "2444", "nom": "Logiciels et site web",                      "libelle": "Logiciels, progiciels, site web (immobilisations incorporelles)","classe": "2"},
+                {"numero": "245",  "nom": "Brevets et licences",                        "libelle": "Brevets, licences, marques et droits similaires",             "classe": "2"},
+                {"numero": "246",  "nom": "Congélateurs et équipements frigorigènes",   "libelle": "Congélateurs, réfrigérateurs et équipements de froid",        "classe": "2"},
+                {"numero": "247",  "nom": "Chaises et tables de terrasse",              "libelle": "Mobilier de terrasse et d'espace client",                    "classe": "2"},
+                {"numero": "2813", "nom": "Amortissement des bâtiments",               "libelle": "Amortissements cumulés des bâtiments",                       "classe": "2"},
+                {"numero": "2831", "nom": "Amortissement du matériel de transport",     "libelle": "Amortissements cumulés du matériel de transport",             "classe": "2"},
+                {"numero": "2841", "nom": "Amortissement du mobilier de bureau",        "libelle": "Amortissements cumulés du mobilier de bureau",                "classe": "2"},
+                {"numero": "2843", "nom": "Amortissement du matériel informatique",     "libelle": "Amortissements cumulés du matériel informatique",             "classe": "2"},
+                {"numero": "2844", "nom": "Amortissement des logiciels",               "libelle": "Amortissements cumulés des logiciels et site web",             "classe": "2"},
+                {"numero": "2846", "nom": "Amortissement des congélateurs",            "libelle": "Amortissements cumulés des congélateurs et équipements de froid","classe": "2"},
+
+                # ─── CLASSE 3 : Stocks ───
+                {"numero": "301",  "nom": "Stocks de marchandises",                     "libelle": "Stocks de marchandises destinées à la revente",              "classe": "3"},
+                {"numero": "321",  "nom": "Matières premières",                         "libelle": "Matières premières et fournitures liées à la production",    "classe": "3"},
+                {"numero": "341",  "nom": "Produits finis",                              "libelle": "Produits finis issus de la production propre",                "classe": "3"},
+
+                # ─── CLASSE 4 : Comptes de tiers ───
+                {"numero": "401",  "nom": "Fournisseurs (créditeurs)",                  "libelle": "Dettes fournisseurs et comptes rattachés",                   "classe": "4"},
+                {"numero": "409",  "nom": "Fournisseurs débiteurs (avances)",           "libelle": "Avances et acomptes versés sur commandes fournisseurs",      "classe": "4"},
+                {"numero": "411",  "nom": "Clients débiteurs",                          "libelle": "Créances clients et comptes rattachés",                      "classe": "4"},
+                {"numero": "419",  "nom": "Clients créditeurs (avances reçues)",        "libelle": "Avances et acomptes reçus sur commandes clients",            "classe": "4"},
+                {"numero": "421",  "nom": "Personnel - Rémunérations dues",             "libelle": "Salaires et traitements dus au personnel",                   "classe": "4"},
+                {"numero": "431",  "nom": "Sécurité sociale (INSS/CNSS)",              "libelle": "Cotisations de sécurité sociale et charges INSS",            "classe": "4"},
+                {"numero": "441",  "nom": "État - Impôts et taxes divers",              "libelle": "Impôts directs, taxes et contributions diverses",             "classe": "4"},
+                {"numero": "4431", "nom": "TVA collectée",                              "libelle": "TVA collectée sur les ventes",                               "classe": "4"},
+                {"numero": "4432", "nom": "TVA déductible",                             "libelle": "TVA déductible sur les achats",                              "classe": "4"},
+                {"numero": "444",  "nom": "État - Impôt sur les bénéfices (IBP)",       "libelle": "Impôt sur les bénéfices professionnels (IBP/IS)",            "classe": "4"},
+                {"numero": "461",  "nom": "Débiteurs divers",                           "libelle": "Autres débiteurs divers",                                    "classe": "4"},
+                {"numero": "462",  "nom": "Créditeurs divers",                          "libelle": "Autres créditeurs divers",                                   "classe": "4"},
+
+                # ─── CLASSE 5 : Trésorerie ───
+                {"numero": "521",  "nom": "Banque USD (compte courant)",               "libelle": "Compte courant bancaire en dollars américains (USD)",         "classe": "5"},
+                {"numero": "522",  "nom": "Banque CDF (compte courant)",               "libelle": "Compte courant bancaire en francs congolais (CDF)",           "classe": "5"},
+                {"numero": "531",  "nom": "Mobile Money",                               "libelle": "M-Pesa, Airtel Money, Orange Money et autres",                "classe": "5"},
+                {"numero": "542",  "nom": "Chèques et virements à encaisser",          "libelle": "Chèques reçus en attente d'encaissement",                     "classe": "5"},
+                {"numero": "571",  "nom": "Caisse principale USD",                      "libelle": "Caisse en espèces dollars américains",                        "classe": "5"},
+                {"numero": "572",  "nom": "Caisse principale CDF",                      "libelle": "Caisse en espèces francs congolais",                          "classe": "5"},
+
+                # ─── CLASSE 6 : Charges ───
+                {"numero": "601",  "nom": "Achats de marchandises",                     "libelle": "Achats de marchandises destinées à la revente",              "classe": "6"},
+                {"numero": "602",  "nom": "Achats de matières premières",               "libelle": "Achats de matières premières et fournitures de production",   "classe": "6"},
+                {"numero": "605",  "nom": "Achats de carburant et lubrifiants",         "libelle": "Carburant, huiles moteur et lubrifiants",                     "classe": "6"},
+                {"numero": "606",  "nom": "Achats de crédit téléphonique",              "libelle": "Achats de crédit téléphonique et recharges",                  "classe": "6"},
+                {"numero": "611",  "nom": "Frais de transport",                         "libelle": "Transport sur achats, ventes et déplacements",                "classe": "6"},
+                {"numero": "621",  "nom": "Salaires et traitements du personnel",       "libelle": "Rémunérations brutes du personnel (salaires fixes)",          "classe": "6"},
+                {"numero": "622",  "nom": "Honoraires et services externes",            "libelle": "Honoraires, rémunérations d'intermédiaires et consultants",   "classe": "6"},
+                {"numero": "623",  "nom": "Formation du personnel",                     "libelle": "Frais de formation et perfectionnement du personnel",          "classe": "6"},
+                {"numero": "626",  "nom": "Connexion internet et téléphonie",           "libelle": "Abonnements internet, mobile et téléphonie fixe",             "classe": "6"},
+                {"numero": "6271", "nom": "Électricité (SNEL)",                         "libelle": "Charges d'électricité (SNEL/fournisseur électricité)",         "classe": "6"},
+                {"numero": "6272", "nom": "Eau (REGIDESO)",                             "libelle": "Charges d'eau (REGIDESO/fournisseur d'eau)",                   "classe": "6"},
+                {"numero": "629",  "nom": "Produits d'entretien et nettoyage",          "libelle": "Produits d'entretien, ménage et nettoyage des locaux",        "classe": "6"},
+                {"numero": "631",  "nom": "Frais et commissions bancaires",             "libelle": "Frais de tenue de compte et commissions bancaires",           "classe": "6"},
+                {"numero": "632",  "nom": "Intérêts bancaires",                         "libelle": "Intérêts sur retraits, dépôts et tenue de compte bancaire",   "classe": "6"},
+                {"numero": "641",  "nom": "Charges sociales patronales (INSS)",         "libelle": "Cotisations patronales INSS/CNSS à la charge de l'entreprise", "classe": "6"},
+                {"numero": "651",  "nom": "Pertes sur créances / Abandons",             "libelle": "Abandon de créances clients et pertes sur créances irrécouvrables","classe": "6"},
+                {"numero": "661",  "nom": "Charges imprévues et exceptionnelles",       "libelle": "Dépenses imprévues, extraordinaires et exceptionnelles",       "classe": "6"},
+                {"numero": "671",  "nom": "Dotations aux amortissements",               "libelle": "Dotations aux amortissements et dépréciations des immobilisations","classe": "6"},
+                {"numero": "681",  "nom": "Marketing et publicité",                     "libelle": "Frais de marketing, publicité et communication",               "classe": "6"},
+                {"numero": "682",  "nom": "Remises accordées aux clients",              "libelle": "Remises, ristournes et rabais accordés aux clients",            "classe": "6"},
+                {"numero": "683",  "nom": "Maintenance et réparations",                 "libelle": "Entretien, maintenance et réparations des équipements",         "classe": "6"},
+                {"numero": "684",  "nom": "Informatique et système d'information",      "libelle": "Licences logiciels, maintenance informatique, hébergement",     "classe": "6"},
+                {"numero": "685",  "nom": "Plomberie et travaux divers",                "libelle": "Plomberie, électricité, peinture et travaux d'entretien",      "classe": "6"},
+                {"numero": "691",  "nom": "Impôts et taxes (IBP, DI, patente)",         "libelle": "Impôts sur bénéfices, droits d'entrée et patentes diverses",   "classe": "6"},
+
+                # ─── CLASSE 7 : Produits ───
+                {"numero": "701",  "nom": "Ventes de marchandises",                     "libelle": "Chiffre d'affaires - Ventes de marchandises",                 "classe": "7"},
+                {"numero": "706",  "nom": "Prestations de services",                    "libelle": "Chiffre d'affaires - Prestations de services facturées",       "classe": "7"},
+                {"numero": "711",  "nom": "Variation de stocks de produits finis",      "libelle": "Variation des stocks de produits finis et en-cours",           "classe": "7"},
+                {"numero": "770",  "nom": "Produits financiers (intérêts reçus)",       "libelle": "Intérêts créditeurs et produits financiers reçus de la banque","classe": "7"},
             ]
             
             comptes_created = {}
@@ -550,6 +645,7 @@ class DatabaseManager:
                     if not existing:
                         compte = ComptaComptes(
                             classe_comptable_id=classe.id,
+                            is_default=True,
                             **compte_data
                         )
                         session.add(compte)
@@ -557,6 +653,12 @@ class DatabaseManager:
                         comptes_created[compte_data["numero"]] = compte
                         print(f"✅ Compte comptable créé: {compte.numero} - {compte.nom}")
                     else:
+                        # Marquer les comptes existants comme is_default s'ils ne le sont pas
+                        if not getattr(existing, 'is_default', False):
+                            try:
+                                existing.is_default = True
+                            except Exception:
+                                pass
                         comptes_created[compte_data["numero"]] = existing
             
             # Créer une configuration comptable pour chaque POS de l'entreprise

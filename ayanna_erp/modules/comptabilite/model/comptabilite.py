@@ -45,6 +45,7 @@ class ComptaComptes(Base):
     nom = Column(String(255), nullable=False)
     libelle = Column(String(255), nullable=False)
     actif = Column(Boolean, default=True)  # Actif ou inactif
+    is_default = Column(Boolean, default=False, nullable=False)  # Compte système non supprimable
     classe_comptable_id = Column(Integer, ForeignKey('compta_classes.id'), nullable=False)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
@@ -70,6 +71,9 @@ class ComptaJournaux(Base):
     description = Column(Text)  # Description détaillée
     enterprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
     user_id = Column(Integer, ForeignKey('core_users.id'), nullable=False)
+    valide = Column(Boolean, default=False, nullable=False)  # True = écriture validée (non modifiable)
+    valide_by = Column(String(100), nullable=True)           # Nom/email de l'utilisateur validant
+    date_validation = Column(DateTime, nullable=True)        # Horodatage de la validation
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
     

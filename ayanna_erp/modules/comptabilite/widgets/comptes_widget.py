@@ -3,7 +3,7 @@ ComptesWidget - Onglet Comptes Comptables
 CRUD sur les comptes, export PDF.
 """
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QTableView, QPushButton, QHBoxLayout, QLabel, QFrame, QLineEdit
-from PyQt6.QtGui import QStandardItemModel
+from PyQt6.QtGui import QStandardItemModel, QColor, QFont
 
 class ComptesWidget(QWidget):
     def __init__(self, controller, parent=None):
@@ -96,6 +96,7 @@ class ComptesWidget(QWidget):
         if not self.entreprise_id:
             return
         self._id_map = []
+        self._default_map = []  # Mémorise si chaque ligne est un compte système
         data = self.controller.get_comptes(self.entreprise_id)
         # Filtrage local si une recherche est fournie
         try:
@@ -104,11 +105,19 @@ class ComptesWidget(QWidget):
                 data = [d for d in data if query in str(d.get('numero','')).lower() or query in str(d.get('nom','')).lower() or query in str(d.get('libelle','')).lower()]
         except Exception:
             pass
-        headers = ["Numéro", "Nom", "Libellé", "Classe"]
+        headers = ["\U0001f512", "Numéro", "Nom", "Libellé", "Classe"]
         self.model.clear()
         self.model.setHorizontalHeaderLabels(headers)
+        locked_color = QColor("#F5F5F5")
+        locked_font = QFont()
+        locked_font.setItalic(True)
         for row in data:
+            is_def = bool(row.get("is_default", False))
+            lock_item = self._item("\U0001f512" if is_def else "")
+            if is_def:
+                lock_item.setForeground(QColor("#B0BEC5"))
             items = [
+                lock_item,
                 self._item(str(row.get("numero", ""))),
                 self._item(str(row.get("nom", ""))),
                 self._item(str(row.get("libelle", ""))),
@@ -116,18 +125,22 @@ class ComptesWidget(QWidget):
             ]
             for item in items:
                 item.setEditable(False)
+                if is_def:
+                    item.setBackground(locked_color)
+                    item.setFont(locked_font)
             self.model.appendRow(items)
             self._id_map.append(row.get("id"))
-        # Largeurs par défaut
-        self.table.setColumnWidth(0, 120)
-        self.table.setColumnWidth(1, 180)
-        self.table.setColumnWidth(2, 250)
-        self.table.setColumnWidth(3, 120)
+            self._default_map.append(is_def)
+        # Largeurs
+        self.table.setColumnWidth(0, 30)
+        self.table.setColumnWidth(1, 90)
+        self.table.setColumnWidth(2, 180)
+        self.table.setColumnWidth(3, 250)
+        self.table.setColumnWidth(4, 120)
 
     def _item(self, value):
         from PyQt6.QtGui import QStandardItem
         return QStandardItem(value)
-
     def add_compte(self):
         from PyQt6.QtWidgets import QDialog, QFormLayout, QLineEdit, QComboBox, QDialogButtonBox, QMessageBox, QLabel
         from PyQt6.QtCore import Qt
@@ -246,6 +259,15 @@ class ComptesWidget(QWidget):
         from PyQt6.QtWidgets import QMessageBox
         index = self.table.currentIndex().row()
         if index < 0:
+            return
+        # Bloquer avant même d'appeler le controller
+        if getattr(self, '_default_map', []) and index < len(self._default_map) and self._default_map[index]:
+            QMessageBox.warning(
+                self, "Compte système protégé",
+                "Ce compte fait partie du plan comptable SYSCOHADA par défaut.\n"
+                "Il ne peut pas être supprimé.\n\n"
+                "Vous pouvez toutefois le modifier (numéro, nom, libellé)."
+            )
             return
         compte_id = self._id_map[index]
         confirm = QMessageBox.question(self, "Supprimer", "Supprimer ce compte ?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
