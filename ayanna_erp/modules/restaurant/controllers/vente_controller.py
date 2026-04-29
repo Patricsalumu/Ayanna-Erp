@@ -477,9 +477,9 @@ class VenteController:
                 """
                 INSERT INTO compta_journaux
                 (date_operation, libelle, montant, type_operation, reference, description,
-                 enterprise_id, user_id, date_creation, date_modification)
+                 enterprise_id, user_id, date_creation, date_modification, valide)
                 VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
-                        :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                        :description, :enterprise_id, :user_id, :date_creation, :date_modification, :valide)
                 """),
                 {
                     'date_operation': datetime.now(),
@@ -491,7 +491,8 @@ class VenteController:
                     'enterprise_id': self.entreprise_id,
                     'user_id': uid,
                     'date_creation': datetime.now(),
-                    'date_modification': datetime.now()
+                    'date_modification': datetime.now(),
+                    'valide': 0
                 }
             )
             session.flush()
@@ -581,9 +582,9 @@ class VenteController:
                 """
                 INSERT INTO compta_journaux
                 (date_operation, libelle, montant, type_operation, reference, description,
-                 enterprise_id, user_id, date_creation, date_modification)
+                 enterprise_id, user_id, date_creation, date_modification, valide)
                 VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
-                        :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                        :description, :enterprise_id, :user_id, :date_creation, :date_modification, :valide)
                 """),
                 {
                     'date_operation': datetime.now(),
@@ -595,7 +596,8 @@ class VenteController:
                     'enterprise_id': self.entreprise_id,
                     'user_id': uid,
                     'date_creation': datetime.now(),
-                    'date_modification': datetime.now()
+                    'date_modification': datetime.now(),
+                    'valide': 0
                 }
             )
             session.flush()
@@ -678,13 +680,22 @@ class VenteController:
 
             # 3) Journal encaissement (si paiement)
             if float(amount_received or 0.0) > 0 and compte_caisse_id:
+                # Compte caisse du mode de paiement sélectionné
+                pm_row_r = session.execute(text("""
+                    SELECT compte_id FROM core_payment_modes
+                    WHERE enterprise_id = :eid AND is_active = 1
+                    AND (label = :pm OR code = :pm_lower)
+                    LIMIT 1
+                """), {'eid': self.entreprise_id, 'pm': payment_method or '', 'pm_lower': (payment_method or '').lower()}).fetchone()
+                compte_caisse_paiement_id = (pm_row_r[0] if pm_row_r and pm_row_r[0] else None) or compte_caisse_id
+
                 journal_pay = session.execute(text(
                     """
                     INSERT INTO compta_journaux
                     (date_operation, libelle, montant, type_operation, reference, description,
-                     enterprise_id, user_id, date_creation, date_modification)
+                     enterprise_id, user_id, date_creation, date_modification, valide)
                     VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
-                            :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                            :description, :enterprise_id, :user_id, :date_creation, :date_modification, :valide)
                     """),
                     {
                         'date_operation': datetime.now(),
@@ -696,7 +707,8 @@ class VenteController:
                         'enterprise_id': self.entreprise_id,
                         'user_id': uid,
                         'date_creation': datetime.now(),
-                        'date_modification': datetime.now()
+                        'date_modification': datetime.now(),
+                        'valide': 0
                     }
                 )
                 session.flush()
@@ -711,7 +723,7 @@ class VenteController:
                     """),
                     {
                         'journal_id': journal_pay_id,
-                        'compte_id': compte_caisse_id,
+                        'compte_id': compte_caisse_paiement_id,
                         'debit': float(amount_received),
                         'credit': 0,
                         'ordre': 1,

@@ -345,7 +345,13 @@ class ComptesWidget(QWidget):
         for c in comptes_client:
             if str(c.numero).startswith('40'):  # Fournisseurs généralement 401
                 fournisseur_combo.addItem(f"{c.numero} - {c.nom}", c.id)
-                
+
+        fournisseur_debiteur_combo = QComboBox()
+        fournisseur_debiteur_combo.addItem("-- Sélectionner --", None)
+        for c in comptes_client:
+            if str(c.numero).startswith('409'):  # Fournisseurs débiteurs 409
+                fournisseur_debiteur_combo.addItem(f"{c.numero} - {c.nom}", c.id)
+
         tva_combo = QComboBox()
         tva_combo.addItem("-- Sélectionner --", None)
         for c in comptes_tva:
@@ -370,7 +376,8 @@ class ComptesWidget(QWidget):
         layout.addRow(QLabel("Compte caisse (classe 5) :"), caisse_combo)
         layout.addRow(QLabel("Compte banque (classe 5) :"), banque_combo)
         layout.addRow(QLabel("Compte client (classe 4) :"), client_combo)
-        layout.addRow(QLabel("Compte fournisseur (classe 4) :"), fournisseur_combo)
+        layout.addRow(QLabel("Compte fournisseur créditeur (401) :"), fournisseur_combo)
+        layout.addRow(QLabel("Compte fournisseur débiteur (409) :"), fournisseur_debiteur_combo)
         layout.addRow(QLabel("Compte TVA (classe 44) :"), tva_combo)
         layout.addRow(QLabel("Compte achat (classe 6) :"), achat_combo)
         layout.addRow(QLabel("Compte remise (classe 6) :"), remise_combo)
@@ -388,6 +395,7 @@ class ComptesWidget(QWidget):
                     self._set_combo_value(banque_combo, config.compte_banque_id)
                     self._set_combo_value(client_combo, config.compte_client_id)
                     self._set_combo_value(fournisseur_combo, config.compte_fournisseur_id)
+                    self._set_combo_value(fournisseur_debiteur_combo, getattr(config, 'compte_fournisseur_debiteur_id', None))
                     self._set_combo_value(tva_combo, config.compte_tva_id)
                     self._set_combo_value(achat_combo, config.compte_achat_id)
                     self._set_combo_value(remise_combo, config.compte_remise_id)
@@ -395,7 +403,9 @@ class ComptesWidget(QWidget):
                     self._set_combo_value(vente_combo, config.compte_vente_id)
                 else:
                     # Remettre à zéro si pas de config
-                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo, tva_combo, achat_combo, stock_combo, vente_combo, remise_combo]:
+                    for combo in [caisse_combo, banque_combo, client_combo, fournisseur_combo,
+                                  fournisseur_debiteur_combo, tva_combo, achat_combo,
+                                  stock_combo, vente_combo, remise_combo]:
                         combo.setCurrentIndex(0)  # "-- Sélectionner --"
         
         # Connecter le changement de POS
@@ -418,17 +428,18 @@ class ComptesWidget(QWidget):
                 
             try:
                 self.controller.set_compte_config(
-                    self.entreprise_id, 
+                    self.entreprise_id,
                     pos_id,
                     compte_caisse_id=caisse_combo.currentData(),
                     compte_banque_id=banque_combo.currentData(),
                     compte_client_id=client_combo.currentData(),
                     compte_fournisseur_id=fournisseur_combo.currentData(),
+                    compte_fournisseur_debiteur_id=fournisseur_debiteur_combo.currentData(),
                     compte_tva_id=tva_combo.currentData(),
                     compte_achat_id=achat_combo.currentData(),
                     compte_remise_id=remise_combo.currentData(),
                     compte_stock_id=stock_combo.currentData(),
-                    compte_vente_id=vente_combo.currentData() 
+                    compte_vente_id=vente_combo.currentData()
                 )
                 QMessageBox.information(self, "Configuration enregistrée", 
                                       f"La configuration des comptes pour le point de vente '{pos_combo.currentText()}' a bien été enregistrée.")

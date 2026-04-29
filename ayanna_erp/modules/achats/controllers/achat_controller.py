@@ -490,14 +490,20 @@ class AchatController:
             session.add(journal_commande)
             session.flush()
 
-            # Débit : Stock (ou compte achat)
+            # Débit : Fournisseur débiteur 409 (avance/commande fournisseur)
+            # Utilise compte_fournisseur_debiteur_id (409) si configuré,
+            # sinon repli sur compte_fournisseur_id (401) — jamais sur le compte de charge
+            compte_debit_commande_id = (
+                getattr(config, 'compte_fournisseur_debiteur_id', None)
+                or config.compte_fournisseur_id
+            )
             ecriture_debit_achat = ComptaEcritures(
                 journal_id=journal_commande.id,
-                compte_comptable_id=config.compte_achat_id,
+                compte_comptable_id=compte_debit_commande_id,
                 debit=commande.montant_total,
                 credit=Decimal('0'),
                 ordre=1,
-                libelle=f"Achat marchandises - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
+                libelle=f"Fournisseur débiteur (409) - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
             )
             session.add(ecriture_debit_achat)
 
@@ -555,14 +561,20 @@ class AchatController:
                 session.add(journal_paiement)
                 session.flush()
 
-                # Débit : Fournisseur (on diminue la dette)
+                # Débit : Fournisseur débiteur 409 (avance versée au fournisseur)
+                # Utilise compte_fournisseur_debiteur_id (409) si configuré,
+                # sinon repli sur compte_fournisseur_id (401 créditeur) — jamais sur le compte de charge
+                compte_debit_paiement_id = (
+                    getattr(config, 'compte_fournisseur_debiteur_id', None)
+                    or config.compte_fournisseur_id
+                )
                 ecriture_debit_paiement = ComptaEcritures(
                     journal_id=journal_paiement.id,
-                    compte_comptable_id=config.compte_fournisseur_id,
+                    compte_comptable_id=compte_debit_paiement_id,
                     debit=depense.montant,
                     credit=Decimal('0'),
                     ordre=1,
-                    libelle=f"Paiement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
+                    libelle=f"Avance fournisseur (409) - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
                 )
                 session.add(ecriture_debit_paiement)
 
@@ -631,14 +643,20 @@ class AchatController:
             )
             session.add(ecriture_debit_stock)
 
-            # Crédit : Compte achat marchandise
+            # Crédit : Fournisseur débiteur 409 (réduction de la position débiteur à la réception)
+            # Utilise compte_fournisseur_debiteur_id (409) si configuré,
+            # sinon repli sur compte_fournisseur_id (401) — jamais sur le compte de charge
+            compte_credit_stock_id = (
+                getattr(config, 'compte_fournisseur_debiteur_id', None)
+                or config.compte_fournisseur_id
+            )
             ecriture_credit_paiement = ComptaEcritures(
                 journal_id=journal_stock.id,
-                compte_comptable_id=config.compte_achat_id,
+                compte_comptable_id=compte_credit_stock_id,
                 debit=Decimal('0'),
                 credit=commande.montant_total,
                 ordre=2,
-                libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - Commande {commande.numero}"
+                libelle=f"Fournisseur débiteur (409) - Réception - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - Commande {commande.numero}"
             )
             session.add(ecriture_credit_paiement)
 

@@ -1800,6 +1800,15 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     compte_client_id = config_row[1]
                     
                     if compte_caisse_id and compte_client_id:
+                        # Compte caisse du mode de paiement sélectionné
+                        pm_row = session.execute(text("""
+                            SELECT compte_id FROM core_payment_modes
+                            WHERE enterprise_id = 1 AND is_active = 1
+                            AND (label = :pm OR code = :pm_lower)
+                            LIMIT 1
+                        """), {'pm': payment_method, 'pm_lower': (payment_method or '').lower()}).fetchone()
+                        compte_caisse_paiement_id = (pm_row[0] if pm_row and pm_row[0] else None) or compte_caisse_id
+
                         # Créer le journal de paiement
                         numero_commande = commande.numero_commande or f"CMD-{commande.id}"
                         facture_date = getattr(commande, 'created_at', None)
@@ -1820,9 +1829,9 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         journal_payment_result = session.execute(text("""
                             INSERT INTO compta_journaux
                             (date_operation, libelle, montant, type_operation, reference, description,
-                             enterprise_id, user_id, date_creation, date_modification)
+                             enterprise_id, user_id, date_creation, date_modification, valide)
                             VALUES (:date_operation, :libelle, :montant, :type_operation, :reference,
-                                    :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                                    :description, :enterprise_id, :user_id, :date_creation, :date_modification, :valide)
                         """), {
                             'date_operation': datetime.now(),
                             'libelle': libelle_journal,
@@ -1833,21 +1842,22 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             'enterprise_id': 1,  # TODO: Récupérer dynamiquement
                             'user_id': getattr(current_user, 'id', 1),
                             'date_creation': datetime.now(),
-                            'date_modification': datetime.now()
+                            'date_modification': datetime.now(),
+                            'valide': 0
                         })
                         
                         session.flush()
                         journal_payment_id_result = session.execute(text("SELECT last_insert_rowid()"))
                         journal_payment_id = journal_payment_id_result.fetchone()[0]
                         
-                        # Écriture débit : Compte de caisse (augmente la trésorerie)
+                        # Écriture débit : Compte de caisse du mode de paiement (augmente la trésorerie)
                         session.execute(text("""
                             INSERT INTO compta_ecritures
                             (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
                             VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
                         """), {
                             'journal_id': journal_payment_id,
-                            'compte_id': compte_caisse_id,
+                            'compte_id': compte_caisse_paiement_id,
                             'debit': amount,
                             'credit': 0,
                             'ordre': 1,
@@ -1922,6 +1932,15 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     compte_caisse_id = config_row[0]
                     compte_client_id = config_row[1]
                     if compte_caisse_id and compte_client_id:
+                        # Compte caisse du mode de paiement sélectionné
+                        pm_row2 = session.execute(text("""
+                            SELECT compte_id FROM core_payment_modes
+                            WHERE enterprise_id = 1 AND is_active = 1
+                            AND (label = :pm OR code = :pm_lower)
+                            LIMIT 1
+                        """), {'pm': payment_method, 'pm_lower': (payment_method or '').lower()}).fetchone()
+                        compte_caisse_paiement_id = (pm_row2[0] if pm_row2 and pm_row2[0] else None) or compte_caisse_id
+
                         # journal
                         numero = f"-{panier_id}"
                         facture_date = getattr(res, 'created_at', None)
@@ -1941,8 +1960,8 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
 
                         session.execute(text("""
                             INSERT INTO compta_journaux
-                            (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification)
-                            VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification)
+                            (date_operation, libelle, montant, type_operation, reference, description, enterprise_id, user_id, date_creation, date_modification, valide)
+                            VALUES (:date_operation, :libelle, :montant, :type_operation, :reference, :description, :enterprise_id, :user_id, :date_creation, :date_modification, :valide)
                         """), {
                             'date_operation': datetime.now(),
                             'libelle': libelle_journal,
@@ -1953,7 +1972,8 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             'enterprise_id': 1,
                             'user_id': getattr(current_user, 'id', 1),
                             'date_creation': datetime.now(),
-                            'date_modification': datetime.now()
+                            'date_modification': datetime.now(),
+                            'valide': 0
                         })
                         session.flush()
                         journal_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
@@ -1962,7 +1982,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
                         """), {
                             'journal_id': journal_id,
-                            'compte_id': compte_caisse_id,
+                            'compte_id': compte_caisse_paiement_id,
                             'debit': amount,
                             'credit': 0,
                             'ordre': 1,

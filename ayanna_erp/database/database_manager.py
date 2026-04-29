@@ -118,6 +118,10 @@ class DatabaseManager:
             self._migrate_compta_journal_validation()
         except Exception:
             pass
+        try:
+            self._migrate_compta_config_fournisseur_debiteur()
+        except Exception:
+            pass
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
@@ -459,6 +463,19 @@ class DatabaseManager:
                     pass  # colonne déjà présente
             conn.commit()
         print("✅ Migration : colonnes valide/valide_by/date_validation ajoutées à compta_journaux")
+
+    def _migrate_compta_config_fournisseur_debiteur(self):
+        """Ajoute la colonne compte_fournisseur_debiteur_id à compta_config (idempotent)."""
+        with self.engine.connect() as conn:
+            try:
+                conn.execute(text(
+                    "ALTER TABLE compta_config ADD COLUMN compte_fournisseur_debiteur_id INTEGER "
+                    "REFERENCES compta_comptes(id)"
+                ))
+                conn.commit()
+            except Exception:
+                pass  # colonne déjà présente
+        print("✅ Migration : colonne compte_fournisseur_debiteur_id ajoutée à compta_config")
 
     def _migrate_livraison_tables(self):
         """
