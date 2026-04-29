@@ -684,6 +684,65 @@ class ComptabiliteController:
             })
         return result
 
+    def get_balance(self, entreprise_id, date_debut=None, date_fin=None):
+        """
+        Retourne la balance de vérification (SYSCOHADA) :
+        - Tous les comptes ayant des mouvements (total_debit > 0 ou total_credit > 0)
+        - Pour chaque compte : mouvements débit, mouvements crédit, solde débiteur, solde créditeur
+        - Total mouvements débit == Total mouvements crédit (double-entrée)
+        - Total solde débiteur == Total solde créditeur
+
+        Paramètres optionnels de filtrage par dates.
+        """
+        if date_debut and isinstance(date_debut, datetime.date) and not isinstance(date_debut, datetime.datetime):
+            date_debut = datetime.datetime.combine(date_debut, datetime.time.min)
+        if date_fin and isinstance(date_fin, datetime.date) and not isinstance(date_fin, datetime.datetime):
+            date_fin = datetime.datetime.combine(date_fin, datetime.time.max)
+
+        comptes = (
+            self.session.query(CompteComptable, ClasseComptable)
+            .join(ClasseComptable)
+            .filter(or_(ClasseComptable.enterprise_id == entreprise_id, ClasseComptable.enterprise_id == None))
+            .order_by(CompteComptable.numero)
+            .all()
+        )
+
+        result = []
+        for compte, classe in comptes:
+            query = (
+                self.session.query(EcritureComptable)
+                .join(JournalComptable, EcritureComptable.journal_id == JournalComptable.id)
+                .filter(EcritureComptable.compte_comptable_id == compte.id)
+                .filter(JournalComptable.enterprise_id == entreprise_id)
+            )
+            if date_debut is not None:
+                query = query.filter(JournalComptable.date_operation >= date_debut)
+            if date_fin is not None:
+                query = query.filter(JournalComptable.date_operation <= date_fin)
+
+            ecritures = query.all()
+            total_debit = sum(float(e.debit or 0) for e in ecritures)
+            total_credit = sum(float(e.credit or 0) for e in ecritures)
+
+            # Filtrer les comptes sans mouvement
+            if total_debit == 0 and total_credit == 0:
+                continue
+
+            raw_balance = total_debit - total_credit
+            solde_debiteur = raw_balance if raw_balance > 0 else 0.0
+            solde_crediteur = abs(raw_balance) if raw_balance < 0 else 0.0
+
+            result.append({
+                "id": compte.id,
+                "numero": compte.numero,
+                "nom": compte.nom,
+                "total_debit": total_debit,
+                "total_credit": total_credit,
+                "solde_debiteur": solde_debiteur,
+                "solde_crediteur": solde_crediteur,
+            })
+        return result
+
     def get_ecritures_compte(self, compte_id, entreprise_id, date_debut=None, date_fin=None):
         """
         Retourne la liste des écritures d’un compte pour l'entreprise donnée.

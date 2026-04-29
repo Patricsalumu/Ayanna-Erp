@@ -71,6 +71,7 @@ class ComptabiliteWindow(QMainWindow):
         tabs_config = [
             ("Journal comptable", self._create_journal_tab),
             ("Grand livre", self._create_grand_livre_tab),
+            ("Balance", self._create_balance_tab),
             ("Compte de résultat", self._create_compte_resultat_tab),
             ("Bilan", self._create_bilan_tab),
             ("Comptes comptables", self._create_comptes_tab),
