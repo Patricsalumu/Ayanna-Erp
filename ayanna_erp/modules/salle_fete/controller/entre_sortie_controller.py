@@ -41,9 +41,9 @@ class EntreSortieController(QObject):
     @staticmethod
     def _resolve_journal_type(compte_numero):
         """Détermine le type de journal selon le numéro de compte SYSCOHADA.
-        Les comptes 57x (trésorerie / banque) → 'banque', sinon → 'caisse'.
+        Les comptes 52x (trésorerie / banque) → 'banque', sinon → 'caisse'.
         """
-        if str(compte_numero or '').strip().startswith('57'):
+        if str(compte_numero or '').strip().startswith('52'):
             return 'banque'
         return 'caisse'
 

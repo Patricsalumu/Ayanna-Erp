@@ -506,12 +506,13 @@ class VenteController:
                 pid = getattr(ligne, 'product_id', None)
                 
                 product_result = session.execute(text("""
-                        SELECT compte_produit_id FROM core_products
+                        SELECT compte_produit_id, name FROM core_products
                         WHERE id = :product_id
                     """), {'product_id':pid})
                 product_row = product_result.fetchone()
                 if product_row and product_row[0]:
                     compte_item = product_row[0]
+                product_name_label = (product_row[1] if product_row and product_row[1] else None) or f"Produit #{pid}"
                     
                 # Debug log
                 session.execute(text(
@@ -526,7 +527,7 @@ class VenteController:
                         'debit': 0,
                         'credit': item_total,
                         'ordre': ordre,
-                        'libelle': f"Vente produit {getattr(ligne, 'product_id', '')} (x{getattr(ligne, 'quantity', 0)})",
+                        'libelle': f"Vente {product_name_label} (x{getattr(ligne, 'quantity', 0)})",
                         'date_creation': datetime.now()
                     }
                 )

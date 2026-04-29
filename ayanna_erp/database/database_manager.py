@@ -605,8 +605,15 @@ class DatabaseManager:
                 {"numero": "4431", "nom": "TVA collectée",                              "libelle": "TVA collectée sur les ventes",                               "classe": "4"},
                 {"numero": "4432", "nom": "TVA déductible",                             "libelle": "TVA déductible sur les achats",                              "classe": "4"},
                 {"numero": "444",  "nom": "État - Impôt sur les bénéfices (IBP)",       "libelle": "Impôt sur les bénéfices professionnels (IBP/IS)",            "classe": "4"},
-                {"numero": "461",  "nom": "Débiteurs divers",                           "libelle": "Autres débiteurs divers",                                    "classe": "4"},
-                {"numero": "462",  "nom": "Créditeurs divers",                          "libelle": "Autres créditeurs divers",                                   "classe": "4"},
+                {"numero": "461",  "nom": "Associé - Compte courant débiteur",          "libelle": "Associé ayant reçu une avance ou pris de l'argent",           "classe": "4"},
+                {"numero": "462",  "nom": "Associé - Compte courant créditeur",         "libelle": "Associé ayant prêté de l'argent à l'entreprise",             "classe": "4"},
+                 {"numero": "465",  "nom": "Avances reçues - Associés",                  "libelle": "Avances et acomptes reçus des associés",                      "classe": "4"},
+                {"numero": "466",  "nom": "Avances versées - Associés",                 "libelle": "Avances et acomptes versés aux associés",                     "classe": "4"},
+                # ─── Comptes 47 : Associés / Tiers prêteurs et emprunteurs ───
+                {"numero": "471",  "nom": "Débiteurs divers",                           "libelle": "Autres débiteurs divers",                                    "classe": "4"},
+                {"numero": "472",  "nom": "Créditeurs divers",                          "libelle": "Autres créditeurs divers",                                   "classe": "4"},
+                {"numero": "477",  "nom": "Dépôts et cautionnements reçus",             "libelle": "Cautions et garanties reçues de tiers",                       "classe": "4"},
+                {"numero": "478",  "nom": "Dépôts et cautionnements versés",            "libelle": "Cautions et garanties versées à des tiers",                   "classe": "4"},
 
                 # ─── CLASSE 5 : Trésorerie ───
                 {"numero": "521",  "nom": "Banque USD (compte courant)",               "libelle": "Compte courant bancaire en dollars américains (USD)",         "classe": "5"},

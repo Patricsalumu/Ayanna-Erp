@@ -305,6 +305,9 @@ class JournalWidget(QWidget):
         self.table.setColumnWidth(6, 100)
         self.table.setColumnWidth(7, 180)
 
+        # Activer le retour à la ligne automatique (pour la 2ème ligne dans Libellé)
+        self.table.setWordWrap(True)
+
         # Forcer hauteur d'en-tête et hauteur de ligne pour éviter agrandissement
         try:
             self.table.horizontalHeader().setFixedHeight(40)
@@ -389,11 +392,41 @@ class JournalWidget(QWidget):
             else:
                 statut_item.setForeground(QColor("#E67E22"))
 
+            # Résoudre nom créateur
+            creator_label = ""
+            try:
+                uid = getattr(j, 'user_id', None)
+                if uid is not None and self.session:
+                    from ayanna_erp.database.database_manager import User as _CoreUser
+                    u = self.session.query(_CoreUser).filter_by(id=uid).first()
+                    if u:
+                        creator_label = getattr(u, 'name', None) or getattr(u, 'email', None) or str(uid)
+                    else:
+                        creator_label = f"#{uid}"
+            except Exception:
+                creator_label = str(getattr(j, 'user_id', ''))
+
+            # Construire le tooltip/libellé de référence enrichi
+            valide_by = getattr(j, 'valide_by', None) or ''
+            date_validation = getattr(j, 'date_validation', None)
+            date_val_str = date_validation.strftime('%d/%m/%Y %H:%M') if date_validation else ''
+            if is_valide:
+                info_str = f"Créé: {creator_label}  |  ✅ Validé: {valide_by}"
+                if date_val_str:
+                    info_str += f" le {date_val_str}"
+            else:
+                info_str = f"Créé: {creator_label}  |  ⏳ En attente"
+
+            libelle_item = QStandardItem(j.libelle or '')
+            libelle_item.setToolTip(info_str)
+            ref_item = QStandardItem(reference_str)
+            ref_item.setToolTip(info_str)
+
             row = [
                 statut_item,
                 QStandardItem(date_str),
-                QStandardItem(reference_str),
-                QStandardItem(j.libelle or ''),
+                ref_item,
+                libelle_item,
                 QStandardItem(self.journal_type_label(getattr(j, 'type_operation', ''))),
                 QStandardItem(montant_str),
                 QStandardItem(montant_str),
@@ -455,8 +488,11 @@ class JournalWidget(QWidget):
         self.table.setColumnWidth(5, 100)  # Débit
         self.table.setColumnWidth(6, 100)  # Crédit
         self.table.setColumnWidth(7, 180)  # Actions
-            
-            
+
+        # Adapter la hauteur de chaque ligne au contenu (libellé sur 2 lignes)
+        self.table.resizeRowsToContents()
+
+
     def toggle_ecritures_row(self, index):
         clicked_row = index.row()
 
@@ -587,6 +623,51 @@ class JournalWidget(QWidget):
             item_statut.setData("detail", Qt.ItemDataRole.UserRole + 1)
             items = [item_statut, item_date_operation, item_compte, item_libelle, item_type, item_debit, item_credit, QStandardItem("")]
             self.model.insertRow(row + 1 + idx, items)
+
+        # ── Ligne info : Créé par / Validé par ───────────────────────────
+        try:
+            # Résoudre nom du créateur
+            creator_label = ''
+            uid = getattr(journal, 'user_id', None)
+            if uid is not None and self.session:
+                from ayanna_erp.database.database_manager import User as _CU
+                u = self.session.query(_CU).filter_by(id=uid).first()
+                if u:
+                    creator_label = getattr(u, 'name', None) or getattr(u, 'email', None) or str(uid)
+                else:
+                    creator_label = f"#{uid}"
+            is_val = bool(getattr(journal, 'valide', False))
+            valide_by = getattr(journal, 'valide_by', None) or ''
+            date_validation = getattr(journal, 'date_validation', None)
+            date_val_str = date_validation.strftime('%d/%m/%Y %H:%M') if date_validation else ''
+            if is_val:
+                info_text = f"👤 Créé par : {creator_label}        ✅ Validé par : {valide_by}"
+                if date_val_str:
+                    info_text += f"  le {date_val_str}"
+            else:
+                info_text = f"👤 Créé par : {creator_label}        ⏳ En attente de validation"
+
+            nb_ecritures = len(ecritures)
+            info_s  = QStandardItem("")
+            info_c2 = QStandardItem("")
+            info_c3 = QStandardItem(info_text)
+            info_c3.setTextAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            info_empties = [QStandardItem("") for _ in range(4)]
+            info_row = [info_s, info_c2, info_c3] + info_empties + [QStandardItem("")]
+            for it in info_row:
+                it.setData("detail", Qt.ItemDataRole.UserRole + 1)
+                it.setBackground(QColor("#EAF0FB"))
+                fnt = it.font()
+                fnt.setItalic(True)
+                fnt.setPointSize(9)
+                it.setFont(fnt)
+                it.setForeground(QColor("#1A5276"))
+            info_row_index = row + 1 + nb_ecritures
+            self.model.insertRow(info_row_index, info_row)
+            # Fusionner Référence (col 2) + Libellé (col 3) pour afficher le texte sur les deux colonnes
+            self.table.setSpan(info_row_index, 2, 1, 2)
+        except Exception:
+            pass
 
 
     def _on_selection_changed(self):
