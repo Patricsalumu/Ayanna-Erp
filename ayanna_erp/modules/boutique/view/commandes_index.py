@@ -171,7 +171,13 @@ class CommandesIndexWidget(QWidget):
         # Filtre par statut paiement
         filters_layout.addWidget(QLabel("Paiement :"), 1, 3)
         self.payment_filter = QComboBox()
-        self.payment_filter.addItems(["Tous", "Espèces", "Crédit", "Carte", "Mobile Money"])
+        self.payment_filter.addItem("Tous")
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+            for m in get_active_payment_modes():
+                self.payment_filter.addItem(m['label'])
+        except Exception:
+            self.payment_filter.addItems(["Espèces", "Banque", "Mobile Money", "Crédit"])
         self.payment_filter.currentTextChanged.connect(self.filter_commandes)
         filters_layout.addWidget(self.payment_filter, 1, 4)
 

@@ -1166,25 +1166,44 @@ class CatalogueWidget(QWidget):
             pay_method_label = QLabel('<b>Mode de paiement:</b>')
             pay_method_layout.addWidget(pay_method_label)
 
-            pay_btns_layout = QHBoxLayout()
-            pay_methods = [
-                ('Espèces', '💵', '#28a745'),
-                ('Carte bancaire', '💳', '#1976D2'),
-                ('Mobile Money', '📱', '#FF9800'),
-                ('Crédit', '📝', '#e53935'),
-            ]
-            selected_method = {'value': 'Espèces'}
+            # Charger les modes dynamiques
+            _icon_map = {
+                'cash':         ('💵', '#28a745'),
+                'banque':       ('🏦', '#1976D2'),
+                'mobile_money': ('📱', '#FF9800'),
+                'credit':       ('📝', '#e53935'),
+            }
+            try:
+                from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+                _dyn_modes = get_active_payment_modes()
+                pay_methods = [
+                    (m['label'], m['code'],
+                     _icon_map.get(m['code'], ('💳', '#607D8B'))[0],
+                     _icon_map.get(m['code'], ('💳', '#607D8B'))[1])
+                    for m in _dyn_modes
+                ]
+            except Exception:
+                pay_methods = [
+                    ('Espèces',      'cash',         '💵', '#28a745'),
+                    ('Banque',       'banque',       '🏦', '#1976D2'),
+                    ('Mobile Money', 'mobile_money', '📱', '#FF9800'),
+                    ('Crédit',       'credit',       '📝', '#e53935'),
+                ]
+
+            selected_method = {'value': pay_methods[0][0] if pay_methods else 'Espèces',
+                               'code':  pay_methods[0][1] if pay_methods else 'cash'}
             method_buttons = []
 
-            def select_payment_method(method_name, buttons_list):
+            def select_payment_method(method_name, method_code, buttons_list):
                 selected_method['value'] = method_name
+                selected_method['code']  = method_code
                 for b in buttons_list:
                     if b.property('method') == method_name:
-                        b.setStyleSheet(f"background-color: {b.property('color')}; color: white; font-weight:bold; border-radius:6px; padding:8px 12px; border: 2px solid #333;")
+                        b.setStyleSheet(f"background-color: {b.property('color')}; color: white; font-weight:bold; border-radius:6px; padding:6px 10px; border: 2px solid #333;")
                     else:
-                        b.setStyleSheet(f"background-color: #f0f0f0; color: #333; border-radius:6px; padding:8px 12px; border: 1px solid #ccc;")
+                        b.setStyleSheet(f"background-color: #f0f0f0; color: #333; border-radius:6px; padding:6px 10px; border: 1px solid #ccc;")
                 # Si Crédit: montant reçu = 0, non modifiable
-                if method_name == 'Crédit':
+                if method_code == 'credit':
                     amt_input.setValue(0.0)
                     amt_input.setEnabled(False)
                 else:
@@ -1195,20 +1214,26 @@ class CatalogueWidget(QWidget):
                 except Exception:
                     pass
 
-            for m_name, m_icon, m_color in pay_methods:
+            # Grille 5 boutons par ligne
+            _COLS = 5
+            pay_grid = QGridLayout()
+            pay_grid.setSpacing(6)
+            for _i, (m_name, m_code, m_icon, m_color) in enumerate(pay_methods):
                 btn = QPushButton(f'{m_icon} {m_name}')
                 btn.setProperty('method', m_name)
                 btn.setProperty('color', m_color)
                 btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setFixedHeight(32)
                 method_buttons.append(btn)
-                btn.clicked.connect(lambda _checked, mn=m_name, bl=method_buttons: select_payment_method(mn, bl))
-                pay_btns_layout.addWidget(btn)
+                btn.clicked.connect(lambda _checked, mn=m_name, mc=m_code, bl=method_buttons: select_payment_method(mn, mc, bl))
+                pay_grid.addWidget(btn, _i // _COLS, _i % _COLS)
 
-            pay_method_layout.addLayout(pay_btns_layout)
+            pay_method_layout.addLayout(pay_grid)
             dlg_l.addWidget(pay_method_frame)
 
-            # Sélectionner Espèces par défaut
-            select_payment_method('Espèces', method_buttons)
+            # Sélectionner le premier mode par défaut
+            if pay_methods:
+                select_payment_method(pay_methods[0][0], pay_methods[0][1], method_buttons)
 
             # Montant reçu layout
             amt_h = QHBoxLayout()
@@ -1256,8 +1281,9 @@ class CatalogueWidget(QWidget):
             def do_confirm():
                 amt = float(amt_input.value())
                 method = selected_method['value']
+                is_credit = selected_method.get('code') == 'credit'
                 try:
-                    if method == 'Crédit':
+                    if is_credit:
                         # Crédit: montant reçu = 0, enregistrer le total comme crédit
                         pay_amount = 0.0
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))

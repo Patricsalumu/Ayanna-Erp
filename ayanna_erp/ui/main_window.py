@@ -165,7 +165,11 @@ class MainWindow(QMainWindow):
         users_action = QAction("Utilisateurs", self)
         users_action.triggered.connect(self.open_users_config)
         config_menu.addAction(users_action)
-        
+
+        payment_modes_action = QAction("Modes de paiement", self)
+        payment_modes_action.triggered.connect(self.open_payment_modes_config)
+        config_menu.addAction(payment_modes_action)
+
         # Menu Aide
         help_menu = menubar.addMenu("Aide")
         
@@ -685,6 +689,36 @@ class MainWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir la gestion des utilisateurs:\n{str(e)}")
     
+    def open_payment_modes_config(self):
+        """Ouvrir la gestion des modes de paiement."""
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import PaymentModeWidget
+            from PyQt6.QtWidgets import QDialog, QVBoxLayout
+
+            key = 'payment_modes_config'
+            if key in self.module_windows:
+                win = self.module_windows[key]
+                if win.isVisible():
+                    win.raise_()
+                    win.activateWindow()
+                    return
+
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Modes de paiement")
+            dialog.setMinimumSize(900, 560)
+            dialog.setModal(False)
+
+            layout = QVBoxLayout(dialog)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addWidget(PaymentModeWidget(dialog))
+
+            self.module_windows[key] = dialog
+            dialog.show()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erreur",
+                f"Impossible d'ouvrir les modes de paiement :\n{e}")
+
     def show_about(self):
         """Afficher les informations sur l'application avec notes de version"""
         about_dialog = AboutDialog(self)

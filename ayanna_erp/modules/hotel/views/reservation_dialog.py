@@ -163,17 +163,18 @@ class ReservationDialog(QDialog):
 
         # Méthode acompte
         self.method_combo = QComboBox()
-        for code, label in [('cash', 'Espèces'),
-        ('airtelmoney', 'Airtel Money'),
-        ('orangemoney', 'Orange Money'),
-        ('mpesa', 'M pesa'),
-        ('equitybcdc',        'Eauity Bcdc'),
-        ('tmb',        'Tmb'),
-        ('rawbank',        'Raw bank'),
-        ('smico',        'Smico'),
-        ('credit',       'Crédit (dette)'),
-        ]:
-            self.method_combo.addItem(label, code)
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+            _modes = get_active_payment_modes()
+        except Exception:
+            _modes = [
+                {'code': 'cash',         'label': 'Espèces'},
+                {'code': 'banque',       'label': 'Banque'},
+                {'code': 'mobile_money', 'label': 'Mobile Money'},
+                {'code': 'credit',       'label': 'Crédit'},
+            ]
+        for m in _modes:
+            self.method_combo.addItem(m['label'], m['code'])
         form.addRow("Méthode acompte :", self.method_combo)
 
         # Notes

@@ -2409,45 +2409,69 @@ class PaymentDialog(QDialog):
 
         layout.addWidget(summary_group)
         
-        # --- Mode de paiement (boutons sélectionnables) ---
+        # --- Mode de paiement (boutons sélectionnables, dynamiques) ---
         payment_group = QGroupBox("Mode de paiement")
         payment_group_layout = QVBoxLayout(payment_group)
 
-        pay_btns_layout = QHBoxLayout()
-        pay_methods = [
-            ('Espèces', '💵', '#28a745'),
-            ('Carte bancaire', '💳', '#1976D2'),
-            ('Mobile Money', '📱', '#FF9800'),
-            ('Crédit', '📝', '#e53935'),
-        ]
-        self._selected_method = 'Espèces'
-        self._method_buttons = []
+        # Charger les modes dynamiques
+        _icon_map = {
+            'cash':         ('💵', '#28a745'),
+            'banque':       ('🏦', '#1976D2'),
+            'mobile_money': ('📱', '#FF9800'),
+            'credit':       ('📝', '#e53935'),
+        }
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+            _dyn_modes = get_active_payment_modes()
+            pay_methods = [
+                (m['label'], m['code'],
+                 _icon_map.get(m['code'], ('💳', '#607D8B'))[0],
+                 _icon_map.get(m['code'], ('💳', '#607D8B'))[1])
+                for m in _dyn_modes
+            ]
+        except Exception:
+            pay_methods = [
+                ('Espèces',      'cash',         '💵', '#28a745'),
+                ('Banque',       'banque',       '🏦', '#1976D2'),
+                ('Mobile Money', 'mobile_money', '📱', '#FF9800'),
+                ('Crédit',       'credit',       '📝', '#e53935'),
+            ]
 
-        def select_payment_method(method_name):
+        self._selected_method = pay_methods[0][0] if pay_methods else 'Espèces'
+        self._selected_code   = pay_methods[0][1] if pay_methods else 'cash'
+        self._method_buttons  = []
+
+        def select_payment_method(method_name, method_code):
             self._selected_method = method_name
+            self._selected_code   = method_code
             for b in self._method_buttons:
                 if b.property('method') == method_name:
-                    b.setStyleSheet(f"background-color: {b.property('color')}; color: white; font-weight:bold; border-radius:6px; padding:8px 12px; border: 2px solid #333;")
+                    b.setStyleSheet(f"background-color: {b.property('color')}; color: white; font-weight:bold; border-radius:6px; padding:6px 10px; border: 2px solid #333;")
                 else:
-                    b.setStyleSheet(f"background-color: #f0f0f0; color: #333; border-radius:6px; padding:8px 12px; border: 1px solid #ccc;")
+                    b.setStyleSheet(f"background-color: #f0f0f0; color: #333; border-radius:6px; padding:6px 10px; border: 1px solid #ccc;")
             # Si Crédit: montant reçu = 0, non modifiable
-            if method_name == 'Crédit':
+            if method_code == 'credit':
                 self.amount_received.setValue(0.0)
                 self.amount_received.setEnabled(False)
             else:
                 self.amount_received.setEnabled(True)
                 self.amount_received.setValue(float(self.total_amount))
 
-        for m_name, m_icon, m_color in pay_methods:
+        # Grille 5 boutons par ligne
+        _COLS = 5
+        pay_grid = QGridLayout()
+        pay_grid.setSpacing(6)
+        for _i, (m_name, m_code, m_icon, m_color) in enumerate(pay_methods):
             btn = QPushButton(f'{m_icon} {m_name}')
             btn.setProperty('method', m_name)
             btn.setProperty('color', m_color)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(34)
             self._method_buttons.append(btn)
-            btn.clicked.connect(lambda _checked, mn=m_name: select_payment_method(mn))
-            pay_btns_layout.addWidget(btn)
+            btn.clicked.connect(lambda _checked, mn=m_name, mc=m_code: select_payment_method(mn, mc))
+            pay_grid.addWidget(btn, _i // _COLS, _i % _COLS)
 
-        payment_group_layout.addLayout(pay_btns_layout)
+        payment_group_layout.addLayout(pay_grid)
 
         # Montant reçu
         amt_layout = QFormLayout()
@@ -2486,9 +2510,10 @@ class PaymentDialog(QDialog):
         
         layout.addWidget(payment_group)
 
-        # Sélectionner Espèces par défaut
-        select_payment_method('Espèces')
-        
+        # Sélectionner le premier mode par défaut
+        if pay_methods:
+            select_payment_method(pay_methods[0][0], pay_methods[0][1])
+
         # Boutons
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
@@ -2501,6 +2526,7 @@ class PaymentDialog(QDialog):
         """Retourne les données de paiement"""
         return {
             'method': self._selected_method,
+            'method_code': getattr(self, '_selected_code', self._selected_method),
             'amount_received': self.amount_received.value(),
             'total_amount': float(self.total_amount),
             'change': self.amount_received.value() - float(self.total_amount)

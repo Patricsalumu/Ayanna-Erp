@@ -82,7 +82,12 @@ class PaymentDialog(QDialog):
         
         # Méthode de paiement
         self.payment_method = QComboBox()
-        self.payment_method.addItems(["Espèces", "Carte bancaire", "Chèque", "Virement", "Mobile Money"])
+        try:
+            from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
+            for m in get_active_payment_modes():
+                self.payment_method.addItem(m['label'], m['code'])
+        except Exception:
+            self.payment_method.addItems(["Espèces", "Banque", "Mobile Money", "Crédit"])
         payment_layout.addRow("Méthode:", self.payment_method)
         
         # Date de paiement

@@ -106,6 +106,10 @@ class DatabaseManager:
             self._migrate_livraison_tables()
         except Exception:
             pass  # Ne jamais bloquer le démarrage
+        try:
+            self._migrate_payment_modes_table()
+        except Exception:
+            pass
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
@@ -229,7 +233,10 @@ class DatabaseManager:
             
             # Initialiser les données comptables par défaut
             self._insert_default_accounting_data(session, default_enterprise.id)
-            
+
+            # Créer les modes de paiement par défaut
+            self._insert_default_payment_modes(session, default_enterprise.id)
+
             session.commit()
             
         except Exception as e:
@@ -377,6 +384,45 @@ class DatabaseManager:
 
         # Migration automatique des tables de livraison (idempotente)
         self._migrate_livraison_tables()
+
+    def _insert_default_payment_modes(self, session, enterprise_id: int):
+        """Crée les 4 modes de paiement par défaut pour l'entreprise si absents."""
+        defaults = [
+            {'code': 'cash',         'label': 'Espèces',       'sort_order': 1},
+            {'code': 'banque',       'label': 'Banque',         'sort_order': 2},
+            {'code': 'mobile_money', 'label': 'Mobile Money',   'sort_order': 3},
+            {'code': 'credit',       'label': 'Crédit',        'sort_order': 4},
+        ]
+        for d in defaults:
+            existing = session.query(PaymentMode).filter_by(
+                enterprise_id=enterprise_id, code=d['code']).first()
+            if not existing:
+                session.add(PaymentMode(
+                    enterprise_id=enterprise_id,
+                    code=d['code'],
+                    label=d['label'],
+                    sort_order=d['sort_order'],
+                    is_default=1,
+                    is_active=1,
+                ))
+        session.flush()
+
+    def _migrate_payment_modes_table(self):
+        """Crée la table core_payment_modes si elle n'existe pas encore,
+        puis seed les modes par défaut pour chaque entreprise existante."""
+        try:
+            Base.metadata.create_all(
+                bind=self.engine,
+                tables=[PaymentMode.__table__],
+                checkfirst=True,
+            )
+            # Seed pour les entreprises existantes (idempotent)
+            with self.session_scope() as session:
+                enterprises = session.query(Entreprise).all()
+                for ent in enterprises:
+                    self._insert_default_payment_modes(session, ent.id)
+        except Exception as e:
+            print(f"⚠️ _migrate_payment_modes_table : {e}")
 
     def _migrate_livraison_tables(self):
         """
@@ -724,6 +770,34 @@ class POSPoint(Base):
     # Relations
     enterprise = relationship("Entreprise", back_populates="pos_points")
     module = relationship("Module", back_populates="pos_points")
+
+
+class PaymentMode(Base):
+    """Modes de paiement configurables par entreprise.
+
+    Les 4 modes par défaut (Espèces, Banque, Mobile Money, Crédit) sont
+    protégés contre la suppression (is_default=True).
+    Chaque mode peut être associé à un compte comptable de caisse/trésorerie
+    qui sera débité à l'encaissement et crédité au décaissement.
+    """
+    __tablename__ = "core_payment_modes"
+    __table_args__ = {'extend_existing': True}
+
+    id              = Column(Integer, primary_key=True, autoincrement=True)
+    enterprise_id   = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
+    code            = Column(String(50), nullable=False)          # ex: cash, banque, mobile_money, credit
+    label           = Column(String(150), nullable=False)         # libellé affiché
+    # Sous-label / description libre (ex: noms des opérateurs mobiles)
+    description     = Column(Text, nullable=True)
+    # Compte comptable associé (ID de compta_comptes)
+    compte_id       = Column(Integer, nullable=True)
+    # Libellé du compte pour affichage rapide sans jointure
+    compte_label    = Column(String(200), nullable=True)
+    is_default      = Column(Integer, default=0)   # 1 = mode protégé, non supprimable
+    is_active       = Column(Integer, default=1)   # 0 = désactivé
+    sort_order      = Column(Integer, default=0)
+    created_at      = Column(DateTime, default=datetime.utcnow)
+
 
 
 # Instance globale du gestionnaire de base de données
