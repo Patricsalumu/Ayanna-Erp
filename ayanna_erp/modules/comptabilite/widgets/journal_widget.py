@@ -610,11 +610,16 @@ class JournalWidget(QWidget):
     def show_transfer_dialog(self):
 
         # ...existing code...
-        from PyQt6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox, QLineEdit, QPushButton, QMessageBox, QFrame
+        from PyQt6.QtWidgets import (
+            QDialog, QVBoxLayout, QHBoxLayout, QLabel, QComboBox,
+            QLineEdit, QPushButton, QMessageBox, QFrame, QListWidget,
+            QListWidgetItem, QSizePolicy
+        )
         from PyQt6.QtGui import QFont
         dialog = QDialog(self)
         dialog.setWindowTitle("Passer une ecriture comptable")
-        dialog.setMinimumWidth(480)
+        dialog.setMinimumWidth(700)
+        dialog.setMaximumHeight(820)
         layout = QVBoxLayout(dialog)
 
         title = QLabel("<b>Passer une ecriture comptable</b>")
@@ -630,46 +635,78 @@ class JournalWidget(QWidget):
         line.setFrameShadow(QFrame.Shadow.Sunken)
         layout.addWidget(line)
 
-        # Sélection compte débit (caisse uniquement)
-        h_debit = QHBoxLayout()
-        lbl_debit = QLabel("<b>Compte caisse à débiter :</b>")
-        h_debit.addWidget(lbl_debit)
-        cb_debit = QComboBox()
-        comptes_caisse = self.controller.get_comptes_caisse_banque(self.entreprise_id)
-        for c in comptes_caisse:
-            solde = self.controller.get_solde_compte(c.id)
-            try:
-                solde_str = self.controller.format_amount(solde)
-            except Exception:
-                solde_str = f"{solde:,.2f} {self.devise}" if self.devise else f"{solde:,.2f}"
-            cb_debit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde_str})", c.id)
-        h_debit.addWidget(cb_debit)
-        layout.addLayout(h_debit)
-
-        # Sélection compte crédit (actif, passif, charge, produit)
-        h_credit = QHBoxLayout()
-        lbl_credit = QLabel("<b>Compte à créditer :</b>")
-        h_credit.addWidget(lbl_credit)
-        cb_credit = QComboBox()
-        # Import des modèles depuis le bon chemin
+        # ── Charger TOUS les comptes une seule fois ───────────────────────────
         from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import CompteComptable, ClasseComptable
+        tous_comptes = []
         classes = self.controller.session.query(ClasseComptable).filter(
             ClasseComptable.enterprise_id == self.entreprise_id,
             ClasseComptable.actif == True,
-            ClasseComptable.type.in_(["actif", "passif", "charge", "produit"])
-        ).all()
-        comptes_credit = []
+        ).order_by(ClasseComptable.code).all()
         for cl in classes:
-            comptes_credit += [c for c in cl.comptes if c.actif]
-        for c in comptes_credit:
-            solde = self.controller.get_solde_compte(c.id)
-            try:
-                solde_str = self.controller.format_amount(solde)
-            except Exception:
-                solde_str = f"{solde:,.2f} {self.devise}" if self.devise else f"{solde:,.2f}"
-            cb_credit.addItem(f"{c.numero} - {c.libelle} (Solde: {solde_str})", c.id)
-        h_credit.addWidget(cb_credit)
-        layout.addLayout(h_credit)
+            for c in sorted([x for x in cl.comptes if x.actif], key=lambda x: x.numero):
+                try:
+                    solde = self.controller.get_solde_compte(c.id)
+                    solde_str = self.controller.format_amount(solde)
+                except Exception:
+                    solde = 0.0
+                    solde_str = f"{solde:,.2f}"
+                tous_comptes.append({
+                    'id':     c.id,
+                    'label':  f"{c.numero} - {c.libelle} (Solde: {solde_str})",
+                    'search': f"{c.numero} {c.libelle}".lower(),
+                })
+
+        # ── Helper : crée un groupe "recherche + liste" ───────────────────────
+        def make_compte_selector(placeholder_label):
+            """Retourne (container QVBoxLayout, getter fn → id sélectionné)"""
+            container = QVBoxLayout()
+            container.setSpacing(2)
+
+            search = QLineEdit()
+            search.setPlaceholderText(f"🔍 Rechercher dans {placeholder_label}…")
+            search.setStyleSheet("font-size: 12px; padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px;")
+            container.addWidget(search)
+
+            lst = QListWidget()
+            lst.setFixedHeight(90)
+            lst.setStyleSheet(
+                "QListWidget { font-size: 12px; border: 1px solid #ccc; border-radius: 4px; }"
+                "QListWidget::item:selected { background: #8E44AD; color: white; }"
+                "QListWidget::item:hover { background: #f0e6f6; }"
+            )
+
+            def populate(filter_text=""):
+                lst.clear()
+                f = filter_text.strip().lower()
+                for c in tous_comptes:
+                    if not f or f in c['search']:
+                        item = QListWidgetItem(c['label'])
+                        item.setData(Qt.ItemDataRole.UserRole, c['id'])
+                        lst.addItem(item)
+                if lst.count() > 0:
+                    lst.setCurrentRow(0)
+
+            populate()
+            search.textChanged.connect(populate)
+            container.addWidget(lst)
+
+            def get_selected_id():
+                sel = lst.currentItem()
+                return sel.data(Qt.ItemDataRole.UserRole) if sel else None
+
+            return container, get_selected_id
+
+        # ── Compte débit ──────────────────────────────────────────────────────
+        lbl_debit = QLabel("<b>Compte à débiter :</b>")
+        layout.addWidget(lbl_debit)
+        debit_container, get_debit_id = make_compte_selector("débit")
+        layout.addLayout(debit_container)
+
+        # ── Compte crédit ─────────────────────────────────────────────────────
+        lbl_credit = QLabel("<b>Compte à créditer :</b>")
+        layout.addWidget(lbl_credit)
+        credit_container, get_credit_id = make_compte_selector("crédit")
+        layout.addLayout(credit_container)
 
         # Montant
         h_montant = QHBoxLayout()
@@ -743,14 +780,16 @@ class JournalWidget(QWidget):
         ''')
 
         def on_valider():
-            compte_debit_id = cb_debit.currentData()
-            compte_credit_id = cb_credit.currentData()
+            compte_debit_id  = get_debit_id()
+            compte_credit_id = get_credit_id()
             montant = le_montant.text().replace(",", ".")
             libelle = le_libelle.text().strip()
             reference = le_reference.text().strip()
             date_py = le_date.date().toPyDate()
             from datetime import datetime as _DT
-            date_op = _DT(date_py.year, date_py.month, date_py.day)
+            _now = _DT.now()
+            date_op = _DT(date_py.year, date_py.month, date_py.day,
+                          _now.hour, _now.minute, _now.second)
             try:
                 montant = float(montant)
             except Exception:
@@ -764,8 +803,11 @@ class JournalWidget(QWidget):
                 return
 
             # Récupérer les libellés pour affichage
-            debit_label = cb_debit.currentText()
-            credit_label = cb_credit.currentText()
+            from PyQt6.QtWidgets import QListWidget as _QLW
+            debit_sel  = next((c for c in tous_comptes if c['id'] == compte_debit_id), None)
+            credit_sel = next((c for c in tous_comptes if c['id'] == compte_credit_id), None)
+            debit_label  = debit_sel['label']  if debit_sel  else str(compte_debit_id)
+            credit_label = credit_sel['label'] if credit_sel else str(compte_credit_id)
             details = f"<b>Compte à débiter :</b> {debit_label}<br>"
             details += f"<b>Compte à créditer :</b> {credit_label}<br>"
             try:
