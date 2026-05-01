@@ -145,10 +145,11 @@ class HotelAccountingService:
             log.exception("on_reservation accounting error: %s", e)
 
     def on_paiement(self, reservation_code: str, montant: float,
-                    method: str, client_name: str, user_id=None) -> None:
+                    method: str, client_name: str, user_id=None,
+                    compte_id: Optional[int] = None) -> None:
         """
         Paiement encaissé :
-          D/ Caisse   –  C/ Clients
+          D/ Caisse du mode de paiement (ou compte_caisse_id config)  –  C/ Clients
         Méthode 'credit' → aucune écriture (dette, non encaissé).
         """
         try:
@@ -157,8 +158,14 @@ class HotelAccountingService:
             ctrl, cfg, eid = self._get_config()
             if not ctrl:
                 return
-            if not cfg.compte_caisse_id or not cfg.compte_client_id:
-                log.info("Comptabilité hôtel : comptes caisse/client non configurés.")
+            if not cfg.compte_client_id:
+                log.info("Comptabilité hôtel : compte client non configuré.")
+                return
+            # Compte à débiter : celui du mode de paiement en priorité,
+            # sinon le compte caisse de la configuration POS.
+            compte_debit = compte_id or cfg.compte_caisse_id
+            if not compte_debit:
+                log.info("Comptabilité hôtel : aucun compte caisse disponible pour le paiement.")
                 return
             method_label = {
                 'cash': 'Espèces', 'airtelmoney': 'Airtel Money',
@@ -170,7 +177,7 @@ class HotelAccountingService:
                 f"Paiement {method_label} – {reservation_code} – {client_name}"
             )
             self._passer(ctrl, eid,
-                         compte_debit_id=cfg.compte_caisse_id,
+                         compte_debit_id=compte_debit,
                          compte_credit_id=cfg.compte_client_id,
                          montant=montant,
                          libelle=libelle,

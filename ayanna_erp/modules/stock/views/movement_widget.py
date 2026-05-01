@@ -317,9 +317,9 @@ class MovementWidget(QWidget):
         """Traiter un transfert entre entrepôts"""
         try:
             with self.db_manager.get_session() as session:
-                # Vérifier la quantité disponible
+                # Vérifier la quantité disponible + récupérer le coût unitaire source
                 source_result = session.execute(text("""
-                    SELECT quantity FROM stock_produits_entrepot
+                    SELECT quantity, unit_cost FROM stock_produits_entrepot
                     WHERE product_id = :product_id AND warehouse_id = :warehouse_id
                 """), {
                     "product_id": transfer_data['product_id'],
@@ -327,21 +327,25 @@ class MovementWidget(QWidget):
                 })
                 
                 source_row = source_result.first()
-                available_qty = float(source_row[0]) if source_row and source_row[0] else 0
+                available_qty = float(source_row[0] or 0) if source_row else 0
+                source_unit_cost = float(source_row[1] or 0) if source_row else 0
                 
                 if available_qty < float(transfer_data['quantity']):
                     QMessageBox.warning(self, "Erreur", 
                                       f"Quantité insuffisante. Disponible: {available_qty:.2f}")
                     return
                 
-                # Décrémenter le stock source
+                # Décrémenter le stock source (+ mettre à jour total_cost)
                 new_source_qty = available_qty - float(transfer_data['quantity'])
                 session.execute(text("""
                     UPDATE stock_produits_entrepot 
-                    SET quantity = :quantity, last_movement_date = CURRENT_TIMESTAMP
+                    SET quantity = :quantity,
+                        total_cost = :total_cost,
+                        last_movement_date = CURRENT_TIMESTAMP
                     WHERE product_id = :product_id AND warehouse_id = :warehouse_id
                 """), {
                     "quantity": new_source_qty,
+                    "total_cost": new_source_qty * source_unit_cost,
                     "product_id": transfer_data['product_id'],
                     "warehouse_id": transfer_data['source_warehouse_id']
                 })
@@ -357,18 +361,22 @@ class MovementWidget(QWidget):
                 
                 dest_row = dest_result.first()
                 if dest_row:
-                    # Mettre à jour le stock existant
-                    new_dest_qty = float(dest_row[0]) + float(transfer_data['quantity'])
+                    # Mettre à jour le stock existant (+ total_cost + reserved_quantity si NULL)
+                    new_dest_qty = float(dest_row[0] or 0) + float(transfer_data['quantity'])
+                    unit_cost = float(dest_row[1] or 0)
                     session.execute(text("""
                         UPDATE stock_produits_entrepot 
-                        SET quantity = :quantity, last_movement_date = CURRENT_TIMESTAMP
+                        SET quantity = :quantity,
+                            total_cost = :total_cost,
+                            reserved_quantity = COALESCE(reserved_quantity, 0),
+                            last_movement_date = CURRENT_TIMESTAMP
                         WHERE product_id = :product_id AND warehouse_id = :warehouse_id
                     """), {
                         "quantity": new_dest_qty,
+                        "total_cost": new_dest_qty * unit_cost,
                         "product_id": transfer_data['product_id'],
                         "warehouse_id": transfer_data['dest_warehouse_id']
                     })
-                    unit_cost = float(dest_row[1]) if dest_row[1] else 0
                 else:
                     # Créer une nouvelle entrée (récupérer le coût depuis la source)
                     source_cost_result = session.execute(text("""

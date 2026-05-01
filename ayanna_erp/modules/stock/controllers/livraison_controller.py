@@ -633,14 +633,19 @@ class LivraisonController:
         ).first()
 
         if row:
-            row.quantity = (row.quantity or Decimal('0')) + delta
+            old_qty = Decimal(str(row.quantity or 0))
+            old_cost = Decimal(str(row.unit_cost or 0))
+            new_qty = old_qty + delta
+            row.quantity = new_qty
             row.last_movement_date = self._now()
+            # Correction des NULL résiduels
+            if row.reserved_quantity is None:
+                row.reserved_quantity = Decimal('0')
+            if row.min_stock_level is None:
+                row.min_stock_level = Decimal('0')
             # Recalcul coût moyen pondéré uniquement sur entrée
-            if delta > 0:
-                old_qty = (row.quantity or Decimal('0')) - delta
-                old_cost = row.unit_cost or Decimal('0')
-                if old_qty + delta > 0:
-                    row.unit_cost = (old_qty * old_cost + delta * unit_cost) / (old_qty + delta)
+            if delta > 0 and new_qty > 0:
+                row.unit_cost = (old_qty * old_cost + delta * unit_cost) / new_qty
             row.total_cost = row.quantity * (row.unit_cost or Decimal('0'))
         else:
             # Créer la ligne si elle n'existe pas (entrepôt destination)
@@ -649,6 +654,8 @@ class LivraisonController:
                 product_id=product_id,
                 warehouse_id=warehouse_id,
                 quantity=new_qty,
+                reserved_quantity=Decimal('0'),
+                min_stock_level=Decimal('0'),
                 unit_cost=unit_cost,
                 total_cost=new_qty * unit_cost,
                 last_movement_date=self._now(),

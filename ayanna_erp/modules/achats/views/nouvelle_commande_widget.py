@@ -161,8 +161,8 @@ class ProductSelectionDialog(QDialog):
                 
                 for stock in stock_entries:
                     self.stock_levels[stock.product_id] = {
-                        'quantity': float(stock.quantity),
-                        'min_level': float(stock.min_stock_level)
+                        'quantity': float(stock.quantity or 0),
+                        'min_level': float(stock.min_stock_level or 0)
                     }
             
             session.close()

@@ -22,6 +22,7 @@ class PaymentService:
         method: str = 'cash',
         user_id: Optional[int] = None,
         reference: Optional[str] = None,
+        compte_id: Optional[int] = None,
     ) -> Tuple[bool, str]:
         """
         Enregistre un paiement et met à jour le statut de paiement.
@@ -88,7 +89,7 @@ class PaymentService:
                 with _gdb2().session_scope() as _s:
                     _cl = _s.query(ShopClient).filter_by(id=_client_id).first()
                     _cname = ((_cl.nom or '') + ' ' + (_cl.prenom or '')).strip() if _cl else ''
-                _acc.on_paiement(_res_code, amount, method, _cname, user_id)
+                _acc.on_paiement(_res_code, amount, method, _cname, user_id, compte_id=compte_id)
             except Exception:
                 pass
             # ------------------------------------------------

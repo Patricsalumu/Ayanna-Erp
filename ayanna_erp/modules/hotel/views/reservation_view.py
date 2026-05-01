@@ -329,7 +329,8 @@ class ReservationDetailDialog(QDialog):
             return
         ok, msg = _pay_svc.add_payment(
             self._row['id'], dlg.get_amount(), dlg.get_method(),
-            self._get_uid(), reference=dlg.get_reference())
+            self._get_uid(), reference=dlg.get_reference(),
+            compte_id=dlg.get_compte_id())
         if ok:
             QMessageBox.information(self, "Paiement", msg)
             # Recharger les données du paiement et rafraîchir la vue parente
@@ -1225,6 +1226,8 @@ class ReservationView(QWidget):
                 user_id=uid,
                 acompte=data['acompte'],
                 method=data['method'],
+                reference=data.get('reference'),
+                compte_id=data.get('compte_id'),
             )
             if ok:
                 QMessageBox.information(self, "Succès", msg)
@@ -1243,7 +1246,7 @@ class ReservationView(QWidget):
             return
         ok, msg = _pay_svc.add_payment(
             row['id'], dlg.get_amount(), dlg.get_method(), self._uid(),
-            reference=dlg.get_reference())
+            reference=dlg.get_reference(), compte_id=dlg.get_compte_id())
         if ok:
             QMessageBox.information(self, "Paiement", msg)
             self.refresh()

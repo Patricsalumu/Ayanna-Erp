@@ -2365,7 +2365,7 @@ class PaymentDialog(QDialog):
         """Initialise l'interface du dialogue de paiement"""
         self.setWindowTitle("💳 Paiement")
         self.setModal(True)
-        self.setFixedSize(450, 420)
+        self.setFixedSize(500, 480)
         
         layout = QVBoxLayout(self)
         

@@ -828,7 +828,7 @@ class VenteController:
                 )
             else:
                 session.execute(
-                    text("INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, created_at, updated_at) VALUES (:product_id, :warehouse_id, :quantity, :created_at, :updated_at)"),
+                    text("INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, reserved_quantity, unit_cost, total_cost, min_stock_level, created_at, updated_at) VALUES (:product_id, :warehouse_id, :quantity, 0, 0, 0, 0, :created_at, :updated_at)"),
                     {'product_id': product_id, 'warehouse_id': warehouse_id, 'quantity': new_stock, 'created_at': datetime.now(), 'updated_at': datetime.now()}
                 )
 

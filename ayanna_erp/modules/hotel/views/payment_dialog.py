@@ -9,17 +9,17 @@ from PyQt6.QtCore import Qt
 
 
 def _load_payment_modes():
-    """Retourne les modes actifs depuis la DB ou les 4 modes par défaut."""
+    """Retourne les modes actifs depuis la DB (avec compte_id) ou les 4 modes par défaut."""
     try:
         from ayanna_erp.core.view.payment_mode_widget import get_active_payment_modes
         modes = get_active_payment_modes()
-        return [(m['code'], m['label']) for m in modes]
+        return [(m['code'], m['label'], m.get('compte_id')) for m in modes]
     except Exception:
         return [
-            ('cash',         'Espèces'),
-            ('banque',       'Banque'),
-            ('mobile_money', 'Mobile Money'),
-            ('credit',       'Crédit'),
+            ('cash',         'Espèces',       None),
+            ('banque',       'Banque',         None),
+            ('mobile_money', 'Mobile Money',   None),
+            ('credit',       'Crédit',        None),
         ]
 
 
@@ -67,14 +67,14 @@ class PaymentDialog(QDialog):
 
         # Méthode
         self.method_combo = QComboBox()
-        for code, label in self._methods:
-            self.method_combo.addItem(label, code)
+        for code, label, compte_id in self._methods:
+            self.method_combo.addItem(label, (code, compte_id))
         form.addRow("Méthode :", self.method_combo)
 
         # Référence transaction (mobile money / banque)
         self.ref_label = QLabel("Référence :")
         self.ref_input = QLineEdit()
-        self.ref_input.setPlaceholderText("Ex : TXN-123456789")
+        self.ref_input.setPlaceholderText("Ex : TXN-123456789 (optionnel)")
         self.ref_input.setMaxLength(200)
         form.addRow(self.ref_label, self.ref_input)
 
@@ -99,8 +99,12 @@ class PaymentDialog(QDialog):
         btn_row.addWidget(btn_ok)
         layout.addLayout(btn_row)
 
+    def _current_method_code(self) -> str:
+        data = self.method_combo.currentData()
+        return data[0] if isinstance(data, tuple) else (data or '')
+
     def _on_method_change(self):
-        method = self.method_combo.currentData()
+        method = self._current_method_code()
         is_credit = (method == 'credit')
         # Référence requise pour tout mode autre que espèces et crédit
         needs_ref = method is not None and method not in ('cash', 'credit')
@@ -111,17 +115,15 @@ class PaymentDialog(QDialog):
             self.ref_input.clear()
 
     def _validate(self):
-        method = self.method_combo.currentData()
+        method = self._current_method_code()
         if method != 'credit' and self.amount_spin.value() <= 0:
             QMessageBox.warning(self, "Montant invalide",
                                 "Le montant doit être supérieur à 0.")
             return
         needs_ref = method is not None and method not in ('cash', 'credit')
         if needs_ref and not self.ref_input.text().strip():
-            QMessageBox.warning(self, "Référence manquante",
-                                f"Veuillez saisir la référence de la transaction "
-                                f"{self.method_combo.currentText()}.")
-            return
+            # Référence optionnelle : on ne bloque plus, juste un placeholder indicatif
+            pass
         self.accept()
 
     # ------------------------------------------------------------------
@@ -129,11 +131,16 @@ class PaymentDialog(QDialog):
     # ------------------------------------------------------------------
 
     def get_amount(self) -> float:
-        return 0.0 if self.method_combo.currentData() == 'credit' \
+        return 0.0 if self._current_method_code() == 'credit' \
             else self.amount_spin.value()
 
     def get_method(self) -> str:
-        return self.method_combo.currentData()
+        return self._current_method_code()
+
+    def get_compte_id(self):
+        """Retourne le compte_id lié au mode de paiement sélectionné (None si non configuré)."""
+        data = self.method_combo.currentData()
+        return data[1] if isinstance(data, tuple) else None
 
     def get_reference(self) -> str:
         """Retourne la référence de transaction (vide si méthode sans référence)."""

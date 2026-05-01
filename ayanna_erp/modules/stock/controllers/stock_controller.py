@@ -314,10 +314,10 @@ class StockController:
         else:
             session.execute(text("""
                 INSERT INTO stock_produits_entrepot 
-                (product_id, warehouse_id, quantity, unit_cost, total_cost, 
-                 last_movement_date, created_at, updated_at)
-                VALUES (:product_id, :warehouse_id, :quantity, :unit_cost, :total_cost,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (product_id, warehouse_id, quantity, reserved_quantity, unit_cost, total_cost,
+                 min_stock_level, last_movement_date, created_at, updated_at)
+                VALUES (:product_id, :warehouse_id, :quantity, 0, :unit_cost, :total_cost,
+                        0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """), {
                 "product_id": product_id,
                 "warehouse_id": warehouse_id,
@@ -364,8 +364,8 @@ class StockController:
         else:
             # Insérer une ligne minimale si aucune n'existe
             session.execute(text(
-                "INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, unit_cost, total_cost, min_stock_level, created_at, updated_at) "
-                "VALUES (:product_id, :warehouse_id, 0, 0, 0, :min_stock_level, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                "INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, reserved_quantity, unit_cost, total_cost, min_stock_level, created_at, updated_at) "
+                "VALUES (:product_id, :warehouse_id, 0, 0, 0, 0, :min_stock_level, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
             ), {"product_id": product_id, "warehouse_id": warehouse_id, "min_stock_level": float(min_value)})
     
     def transfer_stock(self, session: Session, product_id: int, 
@@ -428,10 +428,10 @@ class StockController:
         else:
             session.execute(text("""
                 INSERT INTO stock_produits_entrepot 
-                (product_id, warehouse_id, quantity, unit_cost, total_cost,
-                 last_movement_date, created_at, updated_at)
-                VALUES (:product_id, :warehouse_id, :quantity, :unit_cost, :total_cost,
-                        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                (product_id, warehouse_id, quantity, reserved_quantity, unit_cost, total_cost,
+                 min_stock_level, last_movement_date, created_at, updated_at)
+                VALUES (:product_id, :warehouse_id, :quantity, 0, :unit_cost, :total_cost,
+                        0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             """), {
                 "product_id": product_id,
                 "warehouse_id": warehouse_to_id,

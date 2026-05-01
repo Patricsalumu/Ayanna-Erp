@@ -168,14 +168,23 @@ class ReservationDialog(QDialog):
             _modes = get_active_payment_modes()
         except Exception:
             _modes = [
-                {'code': 'cash',         'label': 'Espèces'},
-                {'code': 'banque',       'label': 'Banque'},
-                {'code': 'mobile_money', 'label': 'Mobile Money'},
-                {'code': 'credit',       'label': 'Crédit'},
+                {'code': 'cash',         'label': 'Espèces',       'compte_id': None},
+                {'code': 'banque',       'label': 'Banque',         'compte_id': None},
+                {'code': 'mobile_money', 'label': 'Mobile Money',   'compte_id': None},
+                {'code': 'credit',       'label': 'Crédit',        'compte_id': None},
             ]
         for m in _modes:
-            self.method_combo.addItem(m['label'], m['code'])
+            self.method_combo.addItem(m['label'], (m['code'], m.get('compte_id')))
+        self.method_combo.currentIndexChanged.connect(self._on_method_change)
         form.addRow("Méthode acompte :", self.method_combo)
+
+        # Référence acompte (optionnelle, visible si mobile/banque)
+        self.ref_label_acompte = QLabel("Référence :")
+        self.ref_input_acompte = QLineEdit()
+        self.ref_input_acompte.setPlaceholderText("Ex : TXN-123456789 (optionnel)")
+        self.ref_input_acompte.setMaxLength(200)
+        form.addRow(self.ref_label_acompte, self.ref_input_acompte)
+        self._on_method_change()  # état initial
 
         # Notes
         self.notes_edit = QTextEdit()
@@ -277,6 +286,15 @@ class ReservationDialog(QDialog):
         except Exception:
             pass
 
+    def _on_method_change(self):
+        data = self.method_combo.currentData()
+        code = data[0] if isinstance(data, tuple) else (data or '')
+        needs_ref = code not in ('cash', 'credit')
+        self.ref_label_acompte.setVisible(needs_ref)
+        self.ref_input_acompte.setVisible(needs_ref)
+        if not needs_ref:
+            self.ref_input_acompte.clear()
+
     def _selected_category(self):
         idx = self.cat_combo.currentIndex()
         if idx < 0 or idx >= len(self.categories):
@@ -306,6 +324,9 @@ class ReservationDialog(QDialog):
     def get_data(self) -> dict:
         d1 = self.date_entree.date().toPyDate()
         d2 = self.date_sortie.date().toPyDate()
+        method_data = self.method_combo.currentData()
+        method_code = method_data[0] if isinstance(method_data, tuple) else (method_data or 'cash')
+        method_compte_id = method_data[1] if isinstance(method_data, tuple) else None
         return {
             'client_id':   self.client_combo.currentData(),
             'category_id': self.cat_combo.currentData(),
@@ -313,7 +334,9 @@ class ReservationDialog(QDialog):
             'date_sortie': datetime(d2.year, d2.month, d2.day),
             'reduction':   self.reduction_spin.value(),
             'acompte':     self.acompte_spin.value(),
-            'method':      self.method_combo.currentData(),
+            'method':      method_code,
+            'compte_id':   method_compte_id,
+            'reference':   self.ref_input_acompte.text().strip(),
             'notes':       self.notes_edit.toPlainText().strip(),
         }
 

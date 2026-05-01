@@ -82,6 +82,8 @@ class ReservationService:
         user_id: Optional[int] = None,
         acompte: float = 0.0,
         method: str = 'cash',
+        reference: Optional[str] = None,
+        compte_id: Optional[int] = None,
     ) -> Tuple[bool, str, Optional[HotelReservation]]:
         """
         Crée une réservation.
@@ -133,6 +135,7 @@ class ReservationService:
                         reservation_id=res.id,
                         amount=float(acompte),
                         method=method,
+                        reference=(reference.strip() if reference else None),
                         created_at=datetime.now(),
                         user_id=user_id,
                     )
@@ -157,7 +160,7 @@ class ReservationService:
                 _acc.on_reservation(res_code, total, _cname, user_id)
                 # Écriture de caisse pour l'acompte : D/Caisse – C/Clients
                 if acompte and float(acompte) > 0:
-                    _acc.on_paiement(res_code, float(acompte), method, _cname, user_id)
+                    _acc.on_paiement(res_code, float(acompte), method, _cname, user_id, compte_id=compte_id)
             except Exception:
                 pass
             # ------------------------------------------------------------------
