@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QSizePolicy, QMessageBox, QDialog, QLineEdit,
     QTableWidget, QTableWidgetItem, QHeaderView,
     QAbstractItemView, QDateTimeEdit, QFormLayout,
-    QCheckBox, QComboBox
+    QCheckBox, QComboBox, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer, QDateTime
 from PyQt6.QtGui import QFont, QColor, QBrush
@@ -16,7 +16,8 @@ from PyQt6.QtGui import QFont, QColor, QBrush
 from ayanna_erp.modules.hotel.services.room_service import RoomService
 from ayanna_erp.modules.hotel.services.reservation_service import ReservationService
 from ayanna_erp.modules.hotel.utils.helpers import (
-    room_status_label, ROOM_STATUS_COLORS, fmt_date, fmt_datetime
+    room_status_label, ROOM_STATUS_COLORS, fmt_date, fmt_datetime,
+    get_hotel_company_info, fmt_amount, build_pdf_company_header,
 )
 
 _room_svc = RoomService()
@@ -467,6 +468,14 @@ class HotelDashboard(QWidget):
         btn_refresh.setFixedHeight(30)
         btn_refresh.clicked.connect(self.refresh)
         title_row.addWidget(btn_refresh)
+
+        btn_pdf = QPushButton("📄 Export PDF")
+        btn_pdf.setFixedHeight(30)
+        btn_pdf.setStyleSheet(
+            "QPushButton{background:#E74C3C;color:white;border-radius:4px;padding:0 12px;}"
+            "QPushButton:hover{background:#C0392B;}")
+        btn_pdf.clicked.connect(self._export_pdf)
+        title_row.addWidget(btn_pdf)
         root.addLayout(title_row)
 
         # Filtre catégories
@@ -625,3 +634,249 @@ class HotelDashboard(QWidget):
             self.refresh()
         else:
             QMessageBox.warning(self, "Impossible", msg)
+
+    # ------------------------------------------------------------------
+    def _export_pdf(self):
+        """Exporte les chambres affichées en PDF – style conforme aux autres exports hôtel."""
+        import os, sys, tempfile, subprocess
+
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Exporter les chambres en PDF",
+            f"chambres_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
+            "PDF (*.pdf)")
+        if not path:
+            return
+
+        try:
+            from reportlab.lib.pagesizes import A4, landscape
+            from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+            from reportlab.lib.units import cm, mm
+            from reportlab.lib.colors import HexColor, black, white, grey
+            from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+            from reportlab.platypus import (
+                SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+                HRFlowable,
+            )
+
+            rooms = self._rooms
+            if self._selected_cat_id is not None:
+                rooms = [r for r in rooms
+                         if r.hotel_category_id == self._selected_cat_id]
+
+            now = datetime.now()
+            ci  = get_hotel_company_info()
+            sym = ci.get('currency_symbol', '$')
+
+            LM = RM = 1.5 * cm
+            TM = BM = 1.8 * cm
+            avail_w_cm = (landscape(A4)[0] - LM - RM) / cm
+
+            doc = SimpleDocTemplate(
+                path,
+                pagesize=landscape(A4),
+                rightMargin=RM, leftMargin=LM,
+                topMargin=TM, bottomMargin=BM,
+            )
+
+            styles = getSampleStyleSheet()
+            styles.add(ParagraphStyle('DashTitle',
+                parent=styles['Title'], fontSize=14, alignment=1, spaceAfter=4))
+            styles.add(ParagraphStyle('SmallInfo',
+                parent=styles['Normal'], fontSize=7,
+                textColor=HexColor('#666666'), alignment=1))
+            styles.add(ParagraphStyle('StatBar',
+                parent=styles['Normal'], fontSize=9,
+                textColor=HexColor('#2C3E50'), alignment=1, spaceAfter=6))
+
+            els = []
+
+            # ── En-tête entreprise ─────────────────────────────────────────
+            logo_path = build_pdf_company_header(els, styles, ci, avail_w_cm)
+
+            # ── Titre du document ──────────────────────────────────────────
+            cat_label = ''
+            if self._selected_cat_id:
+                for cat in self._categories:
+                    if cat.id == self._selected_cat_id:
+                        cat_label = f' – {cat.name}'
+                        break
+            els.append(Paragraph(
+                f"<b>TABLEAU DE BORD – CHAMBRES{cat_label.upper()}</b>",
+                styles['DashTitle']))
+            els.append(HRFlowable(
+                width="100%", thickness=1, color=HexColor('#2C3E50'), spaceAfter=4))
+
+            # ── Statistiques ───────────────────────────────────────────────
+            total  = len(rooms)
+            dispo  = sum(1 for r in rooms if r.status == 'disponible')
+            occ    = sum(1 for r in rooms if r.status == 'occupee')
+            autres = total - dispo - occ
+            els.append(Paragraph(
+                f"Généré le {now.strftime('%d/%m/%Y à %H:%M')}  ·  "
+                f"Total : <b>{total}</b>  |  "
+                f"Disponibles : <b>{dispo}</b>  |  "
+                f"Occupées : <b>{occ}</b>  |  "
+                f"Autres : <b>{autres}</b>",
+                styles['StatBar']))
+            els.append(Spacer(1, 0.3 * cm))
+
+            # ── Couleurs par statut ────────────────────────────────────────
+            STATUS_BORDER = {
+                'disponible':   HexColor('#27AE60'),
+                'occupee':      HexColor('#E74C3C'),
+                'maintenance':  HexColor('#F39C12'),
+                'hors_service': HexColor('#95A5A6'),
+            }
+            STATUS_BG = {
+                'disponible':   HexColor('#EAFAF1'),
+                'occupee':      HexColor('#FDEDEC'),
+                'maintenance':  HexColor('#FEF9E7'),
+                'hors_service': HexColor('#F2F3F4'),
+            }
+
+            # ── Styles internes à la case ──────────────────────────────────
+            s_num   = ParagraphStyle('RN', fontSize=11, fontName='Helvetica-Bold',
+                                     alignment=TA_CENTER)
+            s_badge = ParagraphStyle('RB', fontSize=7.5, fontName='Helvetica-Bold',
+                                     alignment=TA_CENTER, textColor=white)
+            s_cat   = ParagraphStyle('RC', fontSize=8, fontName='Helvetica',
+                                     alignment=TA_CENTER,
+                                     textColor=HexColor('#555555'))
+            s_body  = ParagraphStyle('RD', fontSize=7.5, fontName='Helvetica',
+                                     alignment=TA_LEFT, leading=11)
+            s_libre = ParagraphStyle('RL', fontSize=8.5, fontName='Helvetica-Bold',
+                                     alignment=TA_CENTER,
+                                     textColor=HexColor('#27AE60'))
+            s_code  = ParagraphStyle('RR', fontSize=8, fontName='Helvetica-Bold',
+                                     alignment=TA_CENTER,
+                                     textColor=HexColor('#1976D2'))
+
+            COLS   = 4
+            CARD_W = (landscape(A4)[0] - LM - RM) / COLS
+
+            def _make_cell(room):
+                status  = room.status
+                border  = STATUS_BORDER.get(status, HexColor('#333333'))
+                bg      = STATUS_BG.get(status,   HexColor('#FFFFFF'))
+                s_lbl   = room_status_label(status)
+                cat_name = room.category.name if room.category else '-'
+                price    = room.category.price_per_night if room.category else 0
+
+                res = _room_svc.get_room_with_active_reservation(room.id)
+
+                badge_style = ParagraphStyle(
+                    f'badge_{room.id}', fontSize=7.5, fontName='Helvetica-Bold',
+                    alignment=TA_CENTER, backColor=border, textColor=white,
+                    borderPadding=2, leading=10)
+
+                cell = [
+                    Paragraph(f'<b>🏨 {room.number}</b>', s_num),
+                    Spacer(1, 1.5 * mm),
+                    Paragraph(f'<font color="white"><b>{s_lbl}</b></font>',
+                              badge_style),
+                    Spacer(1, 1.5 * mm),
+                    Paragraph(f'{cat_name}  ·  {fmt_amount(price, sym)}/nuit', s_cat),
+                    Spacer(1, 1 * mm),
+                ]
+
+                if res:
+                    res_code = getattr(res, 'reservation_code', '-')
+                    client   = ''
+                    if res.client:
+                        client = ((res.client.nom or '') + ' ' +
+                                  (res.client.prenom or '')).strip()
+                    entree = fmt_date(res.date_entree_prevue) if res.date_entree_prevue else '-'
+                    sortie = fmt_date(res.date_sortie_prevue) if res.date_sortie_prevue else '-'
+                    nuits  = '-'
+                    if res.date_entree_prevue and res.date_sortie_prevue:
+                        nuits = str(max(
+                            (res.date_sortie_prevue.date() -
+                             res.date_entree_prevue.date()).days, 1))
+                    total_res = fmt_amount(getattr(res, 'total_amount', 0) or 0, sym)
+                    cell += [
+                        Paragraph(f'<b>Résa :</b> {res_code}', s_body),
+                        Paragraph(f'<b>Client :</b> {client or "-"}', s_body),
+                        Paragraph(f'<b>Entrée :</b> {entree}', s_body),
+                        Paragraph(f'<b>Sortie :</b> {sortie}', s_body),
+                        Paragraph(f'<b>Nuits :</b> {nuits}', s_body),
+                        Paragraph(f'<b>Total :</b> {total_res}', s_body),
+                    ]
+                else:
+                    cell.append(Paragraph('LIBRE', s_libre))
+
+                return cell, bg, border
+
+            # ── Construction du tableau de cases ──────────────────────────
+            table_data  = []
+            style_cmds  = [
+                ('VALIGN',        (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING',    (0, 0), (-1, -1), 6),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('LEFTPADDING',   (0, 0), (-1, -1), 6),
+                ('RIGHTPADDING',  (0, 0), (-1, -1), 6),
+            ]
+
+            row_cells = []
+            row_idx   = 0
+            for i, room in enumerate(rooms):
+                cell, bg, border = _make_cell(room)
+                col              = i % COLS
+                row_cells.append(cell)
+
+                style_cmds.append(
+                    ('BACKGROUND', (col, row_idx), (col, row_idx), bg))
+                style_cmds.append(
+                    ('BOX', (col, row_idx), (col, row_idx), 1.5, border))
+                style_cmds.append(
+                    ('GRID', (col, row_idx), (col, row_idx), 0.4,
+                     HexColor('#CCCCCC')))
+
+                if (i + 1) % COLS == 0 or i == len(rooms) - 1:
+                    while len(row_cells) < COLS:
+                        row_cells.append('')
+                    table_data.append(row_cells)
+                    row_cells = []
+                    row_idx  += 1
+
+            if not table_data:
+                els.append(Paragraph("Aucune chambre à afficher.", styles['Normal']))
+            else:
+                tbl = Table(table_data, colWidths=[CARD_W] * COLS)
+                tbl.setStyle(TableStyle(style_cmds))
+                els.append(tbl)
+
+            # ── Pied de page ───────────────────────────────────────────────
+            els.append(Spacer(1, 0.5 * cm))
+            els.append(HRFlowable(
+                width="100%", thickness=0.5, color=HexColor('#CCCCCC')))
+            els.append(Paragraph(
+                f"Informatisé par Ayanna ERP – www.ayanna.top – "
+                f"{now.strftime('%d/%m/%Y %H:%M')}",
+                styles['SmallInfo']))
+
+            doc.build(els)
+
+            # Nettoyage logo temporaire
+            if logo_path and os.path.exists(logo_path):
+                try:
+                    os.unlink(logo_path)
+                except Exception:
+                    pass
+
+            # Ouvrir le fichier
+            try:
+                if os.name == 'nt':
+                    os.startfile(path)
+                elif sys.platform == 'darwin':
+                    subprocess.run(['open', path])
+                else:
+                    subprocess.run(['xdg-open', path])
+            except Exception:
+                pass
+
+            QMessageBox.information(
+                self, "Export PDF", f"PDF généré avec succès :\n{path}")
+
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erreur PDF", f"Impossible de générer le PDF :\n{e}")

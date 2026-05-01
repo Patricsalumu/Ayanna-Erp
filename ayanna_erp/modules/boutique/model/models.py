@@ -36,6 +36,7 @@ class ShopClient(Base):
     notes = Column(Text)
     pays = Column(String(100), nullable=True)
     carte_identite = Column(String(100), nullable=True)
+    type_carte = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
     

@@ -17,6 +17,8 @@ from ayanna_erp.modules.hotel.views.category_view    import CategoryView
 from ayanna_erp.modules.hotel.views.room_view        import RoomView
 from ayanna_erp.modules.hotel.views.caisse_view      import CaisseView
 from ayanna_erp.modules.salle_fete.view.entreSortie_index import EntreeSortieIndex
+from ayanna_erp.modules.boutique.view.client_index   import ClientIndex
+from ayanna_erp.modules.boutique.controller.boutique_controller import BoutiqueController
 
 log = logging.getLogger(__name__)
 
@@ -82,6 +84,7 @@ def _ensure_tables():
             for col_def in [
                 "ALTER TABLE shop_clients ADD COLUMN pays TEXT",
                 "ALTER TABLE shop_clients ADD COLUMN carte_identite TEXT",
+                "ALTER TABLE shop_clients ADD COLUMN type_carte TEXT",
             ]:
                 try:
                     conn.execute(text(col_def))
@@ -163,12 +166,16 @@ class HotelWindow(QMainWindow):
         self.caisse_tab        = EntreeSortieIndex(
             _HotelPosWrapper(_get_hotel_pos_id()), self.current_user)
         self.paiements_tab     = CaisseView()
+        _hotel_pos_id = _get_hotel_pos_id()
+        _hotel_controller = BoutiqueController(pos_id=_hotel_pos_id)
+        self.clients_tab       = ClientIndex(_hotel_controller, self.current_user)
 
         self.tabs.addTab(self.dashboard_tab,    "🏨  Tableau de bord")
         self.tabs.addTab(self.reservations_tab, "📋  Réservations")
         self.tabs.addTab(self.paiements_tab,    "💰  Paiements")
         self.tabs.addTab(self.categories_tab,   "🏷️  Catégories")
         self.tabs.addTab(self.rooms_tab,        "🛏️  Chambres")
+        self.tabs.addTab(self.clients_tab,      "👥  Clients")
         self.tabs.addTab(self.caisse_tab,       "📥📤 Caisse")
 
         # Rafraîchir les onglets concernés quand on les affiche

@@ -71,7 +71,7 @@ class RoomService:
             q = session.query(HotelRoom).filter(HotelRoom.deleted == 0)
             if category_id is not None:
                 q = q.filter(HotelRoom.hotel_category_id == category_id)
-            rooms = q.order_by(HotelRoom.number).all()
+            rooms = q.order_by(HotelRoom.id).all()
             for r in rooms:
                 # eager-load lightweight attrs
                 _ = r.category.name if r.category else None

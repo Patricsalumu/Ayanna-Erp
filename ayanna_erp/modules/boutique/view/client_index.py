@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QPushButton, 
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView, 
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit,
-    QGridLayout
+    QGridLayout, QComboBox
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -372,6 +372,9 @@ class ClientIndex(QWidget):
                 details += f"<b>Email :</b> {client.email or 'Non renseigné'}<br>"
                 details += f"<b>Adresse :</b> {client.adresse or 'Non renseignée'}<br>"
                 details += f"<b>Ville :</b> {client.ville or 'Non renseignée'}<br>"
+                details += f"<b>Pays :</b> {getattr(client, 'pays', None) or 'Non renseigné'}<br>"
+                details += f"<b>Type carte :</b> {getattr(client, 'type_carte', None) or 'Non renseigné'}<br>"
+                details += f"<b>N° carte :</b> {getattr(client, 'carte_identite', None) or 'Non renseigné'}<br>"
                 details += f"<b>Type :</b> {client.type_client or 'Particulier'}<br>"
                 details += f"<b>Limite crédit :</b> {client.credit_limit or 0} {self.get_currency_symbol()}<br>"
                 details += f"<b>Solde compte :</b> {client.balance or 0} {self.get_currency_symbol()}<br>"
@@ -541,6 +544,25 @@ class ClientIndex(QWidget):
             history_btn.clicked.connect(lambda checked, c=client: self.view_client_history(c))
             actions_layout.addWidget(history_btn)
             
+            # Bouton supprimer
+            delete_btn = QPushButton("🗑️")
+            delete_btn.setToolTip("Supprimer le client")
+            delete_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #E74C3C;
+                    color: white;
+                    font-weight: bold;
+                    padding: 5px;
+                    border: none;
+                    border-radius: 3px;
+                }
+                QPushButton:hover {
+                    background-color: #C0392B;
+                }
+            """)
+            delete_btn.clicked.connect(lambda checked, c=client: self.delete_client(c))
+            actions_layout.addWidget(delete_btn)
+            
             self.clients_table.setCellWidget(row, 5, actions_widget)
     
     def update_statistics(self, clients: List[ShopClient]):
@@ -661,7 +683,10 @@ class ClientIndex(QWidget):
                         prenom=client_data.get("prenom"),
                         email=client_data.get("email"),
                         telephone=client_data.get("telephone"),
-                        adresse=client_data.get("adresse")
+                        adresse=client_data.get("adresse"),
+                        pays=client_data.get("pays"),
+                        carte_identite=client_data.get("carte_identite"),
+                        type_carte=client_data.get("type_carte"),
                     )
                     
                     QMessageBox.information(self, "Succès", f"Client '{new_client.nom}' créé avec succès!")
@@ -688,6 +713,9 @@ class ClientIndex(QWidget):
                         updated_client.email = client_data.get("email")
                         updated_client.telephone = client_data.get("telephone")
                         updated_client.adresse = client_data.get("adresse")
+                        updated_client.pays = client_data.get("pays")
+                        updated_client.carte_identite = client_data.get("carte_identite")
+                        updated_client.type_carte = client_data.get("type_carte")
                         
                         session.commit()
                         
@@ -708,6 +736,31 @@ class ClientIndex(QWidget):
             "Cette fonctionnalité sera implémentée dans une version future."
         )
 
+    def delete_client(self, client: ShopClient):
+        """Supprimer un client après confirmation"""
+        reply = QMessageBox.question(
+            self, "Confirmer la suppression",
+            f"Voulez-vous vraiment supprimer le client\n«{client.nom} {client.prenom or ''}» ?\n\n"
+            "Cette action est irréversible.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with self.db_manager.get_session() as session:
+                c = session.query(ShopClient).filter(ShopClient.id == client.id).first()
+                if c:
+                    session.delete(c)
+                    session.commit()
+                    QMessageBox.information(self, "Succès", f"Client '{client.nom}' supprimé.")
+                    self.load_clients()
+                    self.client_updated.emit()
+                else:
+                    QMessageBox.warning(self, "Erreur", "Client introuvable.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur", f"Erreur lors de la suppression : {str(e)}")
+
 
 class ClientFormDialog(QDialog):
     """Dialog pour créer/modifier un client"""
@@ -722,7 +775,7 @@ class ClientFormDialog(QDialog):
         title = "Modifier le Client" if self.is_editing else "Nouveau Client"
         self.setWindowTitle(title)
         self.setModal(True)
-        self.setMinimumSize(400, 350)
+        self.setMinimumSize(420, 480)
         
         self.setup_ui()
         
@@ -757,9 +810,28 @@ class ClientFormDialog(QDialog):
         
         # Adresse
         self.adresse_input = QTextEdit()
-        self.adresse_input.setMaximumHeight(80)
+        self.adresse_input.setMaximumHeight(60)
         self.adresse_input.setPlaceholderText("Adresse complète")
         form_layout.addRow("Adresse:", self.adresse_input)
+        
+        # Pays
+        self.pays_input = QLineEdit()
+        self.pays_input.setPlaceholderText("Ex: Congo, France...")
+        form_layout.addRow("Pays:", self.pays_input)
+        
+        # Type de carte
+        self.type_carte_combo = QComboBox()
+        self.type_carte_combo.addItem("-- Sélectionner --", "")
+        for tc in ["Passeport", "Carte d'identité", "Permis de conduire",
+                   "Carte étudiant", "Carte de service", "Carte élève",
+                   "Acte de naissance"]:
+            self.type_carte_combo.addItem(tc, tc)
+        form_layout.addRow("Type de carte:", self.type_carte_combo)
+        
+        # Numéro de carte
+        self.carte_identite_input = QLineEdit()
+        self.carte_identite_input.setPlaceholderText("N° de la pièce d'identité")
+        form_layout.addRow("N° carte / pièce:", self.carte_identite_input)
         
         layout.addLayout(form_layout)
         
@@ -790,6 +862,20 @@ class ClientFormDialog(QDialog):
             
             if self.client.adresse:
                 self.adresse_input.setPlainText(self.client.adresse)
+            
+            pays = getattr(self.client, 'pays', None)
+            if pays:
+                self.pays_input.setText(pays)
+            
+            carte_identite = getattr(self.client, 'carte_identite', None)
+            if carte_identite:
+                self.carte_identite_input.setText(carte_identite)
+            
+            type_carte = getattr(self.client, 'type_carte', None)
+            if type_carte:
+                idx = self.type_carte_combo.findData(type_carte)
+                if idx >= 0:
+                    self.type_carte_combo.setCurrentIndex(idx)
     
     def validate_form(self):
         """Valider le formulaire avant acceptation"""
@@ -806,7 +892,10 @@ class ClientFormDialog(QDialog):
             "prenom": self.prenom_input.text().strip() or None,
             "telephone": self.telephone_input.text().strip() or None,
             "email": self.email_input.text().strip() or None,
-            "adresse": self.adresse_input.toPlainText().strip() or None
+            "adresse": self.adresse_input.toPlainText().strip() or None,
+            "pays": self.pays_input.text().strip() or None,
+            "carte_identite": self.carte_identite_input.text().strip() or None,
+            "type_carte": self.type_carte_combo.currentData() or None,
         }
     
     def accept(self):

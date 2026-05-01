@@ -20,10 +20,28 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "1.9.1"
+    APP_VERSION = "2.0.0"
     
     # Notes de version
     VERSION_NOTES = {
+        "2.0.0": {
+            "date": "1er Mai 2026",
+            "titre": "Module Hôtel complet, Livraisons et initialisation API",
+            "changements": [
+                "NOUVEAU: Module Hôtel – tableau de bord, réservations, paiements, chambres, catégories",
+                "NOUVEAU: Onglet Clients dans le module Hôtel avec gestion type de carte d'identité",
+                "NOUVEAU: Export PDF tableau de bord hôtel avec en-tête entreprise et mention Ayanna ERP",
+                "NOUVEAU: Comptabilité hôtel SYSCOHADA – débit du compte lié au mode de paiement",
+                "NOUVEAU: Acompte à la réservation avec référence mobile/banque (optionnelle)",
+                "NOUVEAU: Fonctionnalité Bons de livraison – ajustement stock et coût moyen pondéré",
+                "NOUVEAU: Initialisation de l'API Laravel (routes, config, documentation)",
+                "AMÉLIORATION: Champs Pays, Pièce d'identité et Type de carte dans le formulaire client",
+                "AMÉLIORATION: Suppression client avec confirmation",
+                "AMÉLIORATION: Affichage des chambres du tableau de bord trié par date de création",
+                "BUGFIX: Correction valeurs NULL (reserved_quantity) dans stock_produits_entrepot",
+                "BUGFIX: Trigger SQLite pour forcer DEFAULT 0 sur les colonnes numériques du stock",
+            ]
+        },
         "1.9.1": {
             "date": "23 Avril 2026",
             "titre": "Corrections bugs sur la vente, synthèse export et recherche produit",

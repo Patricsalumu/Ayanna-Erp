@@ -47,6 +47,14 @@ class _QuickClientDialog(QDialog):
         self.carte_edit.setPlaceholderText("N\u00b0 pi\u00e8ce d'identit\u00e9 / passeport")
         form.addRow("Pi\u00e8ce d'identit\u00e9 :", self.carte_edit)
 
+        self.type_carte_combo = QComboBox()
+        self.type_carte_combo.addItem("-- Type de carte --", "")
+        for tc in ["Passeport", "Carte d'identité", "Permis de conduire",
+                   "Carte étudiant", "Carte de service", "Carte élève",
+                   "Acte de naissance"]:
+            self.type_carte_combo.addItem(tc, tc)
+        form.addRow("Type de carte :", self.type_carte_combo)
+
         btns = QHBoxLayout()
         btn_cancel = QPushButton("Annuler")
         btn_cancel.clicked.connect(self.reject)
@@ -74,6 +82,7 @@ class _QuickClientDialog(QDialog):
             self.tel_edit.text().strip(),
             self.pays_edit.text().strip(),
             self.carte_edit.text().strip(),
+            self.type_carte_combo.currentData() or "",
         )
 
 
@@ -247,7 +256,7 @@ class ReservationDialog(QDialog):
         dlg = _QuickClientDialog(self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
             return
-        nom, prenom, telephone, pays, carte_identite = dlg.get_data()
+        nom, prenom, telephone, pays, carte_identite, type_carte = dlg.get_data()
         if not nom:
             return
         db = get_database_manager()
@@ -262,6 +271,7 @@ class ReservationDialog(QDialog):
                     telephone=telephone or None,
                     pays=pays or None,
                     carte_identite=carte_identite or None,
+                    type_carte=type_carte or None,
                     is_active=True,
                 )
                 session.add(client)

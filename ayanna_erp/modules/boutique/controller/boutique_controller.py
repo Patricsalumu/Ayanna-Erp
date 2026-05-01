@@ -573,7 +573,8 @@ class BoutiqueController(QObject):
     
     def create_client(self, session: Session, nom: str, prenom: str = None,
                      email: str = None, telephone: str = None, 
-                     adresse: str = None) -> ShopClient:
+                     adresse: str = None, pays: str = None,
+                     carte_identite: str = None, type_carte: str = None) -> ShopClient:
         """Crée un nouveau client."""
         client = ShopClient(
             pos_id=self.pos_id,  # Ajouter le pos_id manquant
@@ -581,7 +582,10 @@ class BoutiqueController(QObject):
             prenom=prenom,
             email=email,
             telephone=telephone,
-            adresse=adresse
+            adresse=adresse,
+            pays=pays,
+            carte_identite=carte_identite,
+            type_carte=type_carte,
         )
         session.add(client)
         session.commit()
