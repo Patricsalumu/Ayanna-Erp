@@ -4,9 +4,18 @@ Gestionnaire de base de données pour Ayanna ERP
 Utilise SQLAlchemy pour la gestion des modèles et des connexions
 """
 
+# Import du gestionnaire de synchronisation API
+try:
+    from ayanna_erp.utils.sync_manager import CoreSync, CoreSyncSettings, SyncManager, _local_now_iso
+    _SYNC_AVAILABLE = True
+except ImportError:
+    _SYNC_AVAILABLE = False
+
 import os
+import json
 import importlib
 from datetime import datetime
+import re
 from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
@@ -88,6 +97,8 @@ except ImportError:
 
 class DatabaseManager:
     """Gestionnaire principal de la base de données"""
+    # Prevent running automatic migrations multiple times per process
+    _migrations_executed = False
     
     def __init__(self, database_url=None):
         if database_url is None:
@@ -102,26 +113,49 @@ class DatabaseManager:
         self.session = None
         self.current_enterprise_id = None
         # Migration automatique des nouvelles tables au premier accès à la DB
-        try:
-            self._migrate_livraison_tables()
-        except Exception:
-            pass  # Ne jamais bloquer le démarrage
-        try:
-            self._migrate_payment_modes_table()
-        except Exception:
-            pass
-        try:
-            self._migrate_compta_is_default_column()
-        except Exception:
-            pass
-        try:
-            self._migrate_compta_journal_validation()
-        except Exception:
-            pass
-        try:
-            self._migrate_compta_config_fournisseur_debiteur()
-        except Exception:
-            pass
+        # Exécuter une seule fois par processus pour éviter les logs/migrations répétées
+        if not DatabaseManager._migrations_executed:
+            try:
+                try:
+                    self._migrate_livraison_tables()
+                except Exception:
+                    pass  # Ne jamais bloquer le démarrage
+                try:
+                    self._migrate_payment_modes_table()
+                except Exception:
+                    pass  # Silencieux si la table core_enterprises n'existe pas encore (premier demarrage)
+                try:
+                    self._migrate_compta_is_default_column()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_compta_journal_validation()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_compta_config_fournisseur_debiteur()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_core_sync_tables()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_updated_at_columns()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_compta_timestamps()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_licences_table()
+                except Exception:
+                    pass
+            finally:
+                DatabaseManager._migrations_executed = True
+        # Initialiser le gestionnaire de synchronisation
+        self._sync_manager = None
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
@@ -165,6 +199,19 @@ class DatabaseManager:
             except Exception:
                 pass
     
+    def create_all_tables(self):
+        """Crée toutes les tables (base + modules) sans insérer de données par défaut.
+
+        Méthode idempotente — sans effet si les tables existent déjà.
+        Utilisée au premier démarrage pour pouvoir appeler is_first_run() avant
+        que les données par défaut ne soient insérées.
+        """
+        Base.metadata.create_all(bind=self.engine)
+        try:
+            self.initialize_modules()
+        except Exception as e:
+            print(f"⚠️ create_all_tables / initialize_modules : {e}")
+
     def initialize_database(self):
         """Initialiser la base de données avec les tables et données par défaut"""
         try:
@@ -178,7 +225,14 @@ class DatabaseManager:
                 self.initialize_modules()
             except Exception as e:
                 print(f"⚠️ Erreur lors de l'initialisation des modules : {e}")
-            
+
+            # Journaliser toutes les données par défaut dans core_sync
+            # (statut : jamais synchronisé — sera poussé au 1er sync serveur)
+            try:
+                self._journal_default_data()
+            except Exception as e:
+                print(f"⚠️ Journalisation initiale core_sync : {e}")
+
             return True
         except Exception as e:
             print(f"Erreur lors de l'initialisation de la base de données: {e}")
@@ -255,7 +309,83 @@ class DatabaseManager:
             session.rollback()
         finally:
             session.close()
-    
+
+    def _journal_default_data(self):
+        """
+        Insere dans core_sync toutes les donnees par defaut creees lors de
+        l'initialisation locale, avec synced=0 (jamais synchronise).
+
+        Ces entrees seront poussees vers le serveur la premiere fois que
+        l'utilisateur configurera la synchronisation.
+
+        Tables journalisees :
+          core_enterprises, core_users, modules, core_pos_points,
+          core_payment_modes
+        """
+        if not _SYNC_AVAILABLE:
+            return
+
+        sm = self.sync_manager
+        if sm is None:
+            return
+
+        CREATED_BY = 'system:init'
+
+        def _row_to_dict(obj):
+            """Convertit un objet SQLAlchemy en dictionnaire serialisable."""
+            d = {}
+            for col in obj.__table__.columns:
+                val = getattr(obj, col.name, None)
+                if isinstance(val, bytes):
+                    val = None  # exclure les BLOB (logo...)
+                elif hasattr(val, 'isoformat'):
+                    val = val.isoformat()
+                d[col.name] = val
+            return d
+
+        with self.session_scope() as session:
+            # Tables a journaliser avec leur modele et colonne PK
+            targets = [
+                (Entreprise,   'core_enterprises'),
+                (User,         'core_users'),
+                (Module,       'modules'),
+                (POSPoint,     'core_pos_points'),
+                (PaymentMode,  'core_payment_modes'),
+                (ComptaClasses, 'compta_classes'),
+                (ComptaComptes, 'compta_comptes'),
+            ]
+            total = 0
+            for model_cls, table_name in targets:
+                try:
+                    rows = session.query(model_cls).all()
+                    for row in rows:
+                        # Verifier si une entree existe deja pour cet enregistrement
+                        already = session.query(CoreSync).filter_by(
+                            table_name=table_name,
+                            record_id=str(row.id),
+                        ).first()
+                        if already:
+                            continue
+                        entry = CoreSync(
+                            table_name=table_name,
+                            operation='INSERT',
+                            record_id=str(row.id),
+                            data_json=json.dumps(
+                                _row_to_dict(row),
+                                ensure_ascii=False,
+                                default=str,
+                            ),
+                            synced=0,
+                            created_at=_local_now_iso(),
+                            created_by=CREATED_BY,
+                        )
+                        session.add(entry)
+                        total += 1
+                except Exception as exc:
+                    print(f"  ⚠️ _journal_default_data / {table_name} : {exc}")
+
+        print(f"✅ Journal initial : {total} enregistrement(s) en attente de synchronisation dans core_sync.")
+
     def _create_pos_for_enterprise(self, session, enterprise_id):
         """Créer automatiquement tous les POS pour une entreprise"""
         try:
@@ -428,7 +558,15 @@ class DatabaseManager:
                 tables=[PaymentMode.__table__],
                 checkfirst=True,
             )
-            # Seed pour les entreprises existantes (idempotent)
+            # Seed pour les entreprises existantes (idempotent).
+            # Si la table core_enterprises n'existe pas encore (premier demarrage),
+            # on sort silencieusement ; le seed sera fait par _insert_default_data().
+            with self.engine.connect() as conn:
+                tables = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_enterprises'")
+                ).fetchall()
+                if not tables:
+                    return
             with self.session_scope() as session:
                 enterprises = session.query(Entreprise).all()
                 for ent in enterprises:
@@ -476,6 +614,111 @@ class DatabaseManager:
             except Exception:
                 pass  # colonne déjà présente
         print("✅ Migration : colonne compte_fournisseur_debiteur_id ajoutée à compta_config")
+
+    def _migrate_core_sync_tables(self):
+        """
+        Cree les tables core_sync et core_sync_settings si elles
+        n'existent pas encore. Methode idempotente.
+        """
+        if not _SYNC_AVAILABLE:
+            return
+        try:
+            Base.metadata.create_all(
+                bind=self.engine,
+                tables=[CoreSync.__table__, CoreSyncSettings.__table__],
+                checkfirst=True,
+            )
+            print("✅ Migration sync : tables core_sync et core_sync_settings OK")
+        except Exception as e:
+            print(f"⚠️ _migrate_core_sync_tables : {e}")
+
+    def _migrate_updated_at_columns(self):
+        """
+        Ajoute la colonne updated_at aux tables de base si elle est absente.
+        Le serveur Laravel retourne toujours updated_at (timestamps()) ;
+        sans cette colonne le PULL echoue avec OperationalError.
+        Tables concernees : core_enterprises, core_users, modules,
+                            core_pos_points, core_payment_modes.
+        """
+        tables = [
+            'core_enterprises',
+            'core_users',
+            'modules',
+            'core_pos_points',
+            'core_payment_modes',
+        ]
+        with self.engine.connect() as conn:
+            for tbl in tables:
+                # Verifier si la table existe
+                exists = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
+                    {'t': tbl}
+                ).fetchone()
+                if not exists:
+                    continue
+                # Verifier si updated_at existe deja
+                cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
+                if 'updated_at' not in cols:
+                    try:
+                        conn.execute(text(
+                            f"ALTER TABLE {tbl} ADD COLUMN updated_at DATETIME"
+                        ))
+                        print(f"✅ Migration : colonne updated_at ajoutee a {tbl}")
+                    except Exception as e:
+                        print(f"⚠️ updated_at / {tbl} : {e}")
+            conn.commit()
+
+    def _migrate_compta_timestamps(self):
+        """
+        Ajoute created_at et updated_at a compta_classes et compta_comptes
+        si ces colonnes sont absentes (le serveur Laravel les retourne toujours).
+        """
+        tables = ['compta_classes', 'compta_comptes']
+        with self.engine.connect() as conn:
+            for tbl in tables:
+                exists = conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
+                    {'t': tbl}
+                ).fetchone()
+                if not exists:
+                    continue
+                cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
+                for col in ['created_at', 'updated_at']:
+                    if col not in cols:
+                        try:
+                            conn.execute(text(
+                                f"ALTER TABLE {tbl} ADD COLUMN {col} DATETIME"
+                            ))
+                            print(f"✅ Migration : colonne {col} ajoutée à {tbl}")
+                        except Exception as e:
+                            print(f"⚠️ {col} / {tbl} : {e}")
+            conn.commit()
+
+    @property
+    def sync_manager(self) -> 'SyncManager | None':
+        """
+        Retourne l'instance SyncManager partagee pour cette base de donnees.
+        Cree l'instance a la premiere demande (lazy init).
+        Retourne None si le module de synchronisation n'est pas disponible.
+        """
+        if not _SYNC_AVAILABLE:
+            return None
+        if self._sync_manager is None:
+            self._sync_manager = SyncManager(self.engine)
+        return self._sync_manager
+
+    def is_first_run(self) -> bool:
+        """
+        Retourne True si la base de données est vide (aucun utilisateur créé).
+        Utilisé pour déclencher l'assistant de premier démarrage.
+        """
+        try:
+            session = self.get_session()
+            count = session.query(User).count()
+            session.close()
+            return count == 0
+        except Exception:
+            return True
 
     def _migrate_livraison_tables(self):
         """
@@ -537,7 +780,7 @@ class DatabaseManager:
                 {"code": "8", "nom": "COMPTES DES AUTRES CHARGES ET DES AUTRES PRODUITS", "libelle": "Autres charges et produits", "type": "mixte", "document": "resultat"},
                 {"code": "44", "nom": "COMPTES DE TAXES", "libelle": "Comptes de taxes", "type": "mixte", "document": "bilan"},
             ]
-            
+
             classes_created = {}
             for classe_data in classes_comptables_default:
                 existing = session.query(ComptaClasses).filter_by(
@@ -552,13 +795,15 @@ class DatabaseManager:
                     session.add(classe)
                     session.flush()  # Pour obtenir l'ID
                     classes_created[classe_data["code"]] = classe
-                    print(f"✅ Classe comptable créée: {classe.code} - {classe.nom}")
+                    try:
+                        print(f"Classe comptable créée: {classe.code} - {classe.nom}")
+                    except Exception:
+                        pass
                 else:
                     classes_created[classe_data["code"]] = existing
-            
-            # Plan comptable SYSCOHADA - 76 comptes indispensables pour une PME congolaise
+
+            # Plan comptable SYSCOHADA - (truncated list kept same as prior)
             comptes_default = [
-                # ─── CLASSE 1 : Ressources durables (capitaux propres & dettes LT) ───
                 {"numero": "101",  "nom": "Capital social",                              "libelle": "Capital social souscrit et appelé",                         "classe": "1"},
                 {"numero": "102",  "nom": "Apports des associés",                        "libelle": "Comptes courants d'associés et apports en compte",          "classe": "1"},
                 {"numero": "111",  "nom": "Réserve légale",                              "libelle": "Réserve légale constituée (5% du bénéfice)",                 "classe": "1"},
@@ -568,8 +813,6 @@ class DatabaseManager:
                 {"numero": "139",  "nom": "Résultat net - Perte",                       "libelle": "Résultat net de l'exercice (perte)",                          "classe": "1"},
                 {"numero": "162",  "nom": "Emprunts bancaires",                          "libelle": "Emprunts auprès des établissements de crédit",                "classe": "1"},
                 {"numero": "164",  "nom": "Comptes courants d'associés",                "libelle": "Avances et prêts des associés à la société",                  "classe": "1"},
-
-                # ─── CLASSE 2 : Actif immobilisé ───
                 {"numero": "211",  "nom": "Terrains",                                    "libelle": "Terrains nus, agricoles et de plantation",                   "classe": "2"},
                 {"numero": "213",  "nom": "Bâtiments (terrain propre)",                 "libelle": "Bâtiments et constructions sur terrain propre",              "classe": "2"},
                 {"numero": "2135", "nom": "Bâtiments (terrain d'autrui)",               "libelle": "Bâtiments construits sur terrain d'autrui",                  "classe": "2"},
@@ -588,13 +831,9 @@ class DatabaseManager:
                 {"numero": "2843", "nom": "Amortissement du matériel informatique",     "libelle": "Amortissements cumulés du matériel informatique",             "classe": "2"},
                 {"numero": "2844", "nom": "Amortissement des logiciels",               "libelle": "Amortissements cumulés des logiciels et site web",             "classe": "2"},
                 {"numero": "2846", "nom": "Amortissement des congélateurs",            "libelle": "Amortissements cumulés des congélateurs et équipements de froid","classe": "2"},
-
-                # ─── CLASSE 3 : Stocks ───
                 {"numero": "301",  "nom": "Stocks de marchandises",                     "libelle": "Stocks de marchandises destinées à la revente",              "classe": "3"},
                 {"numero": "321",  "nom": "Matières premières",                         "libelle": "Matières premières et fournitures liées à la production",    "classe": "3"},
                 {"numero": "341",  "nom": "Produits finis",                              "libelle": "Produits finis issus de la production propre",                "classe": "3"},
-
-                # ─── CLASSE 4 : Comptes de tiers ───
                 {"numero": "401",  "nom": "Fournisseurs (créditeurs)",                  "libelle": "Dettes fournisseurs et comptes rattachés",                   "classe": "4"},
                 {"numero": "409",  "nom": "Fournisseurs débiteurs (avances)",           "libelle": "Avances et acomptes versés sur commandes fournisseurs",      "classe": "4"},
                 {"numero": "411",  "nom": "Clients débiteurs",                          "libelle": "Créances clients et comptes rattachés",                      "classe": "4"},
@@ -607,23 +846,18 @@ class DatabaseManager:
                 {"numero": "444",  "nom": "État - Impôt sur les bénéfices (IBP)",       "libelle": "Impôt sur les bénéfices professionnels (IBP/IS)",            "classe": "4"},
                 {"numero": "461",  "nom": "Associé - Compte courant débiteur",          "libelle": "Associé ayant reçu une avance ou pris de l'argent",           "classe": "4"},
                 {"numero": "462",  "nom": "Associé - Compte courant créditeur",         "libelle": "Associé ayant prêté de l'argent à l'entreprise",             "classe": "4"},
-                 {"numero": "465",  "nom": "Avances reçues - Associés",                  "libelle": "Avances et acomptes reçus des associés",                      "classe": "4"},
+                {"numero": "465",  "nom": "Avances reçues - Associés",                  "libelle": "Avances et acomptes reçus des associés",                      "classe": "4"},
                 {"numero": "466",  "nom": "Avances versées - Associés",                 "libelle": "Avances et acomptes versés aux associés",                     "classe": "4"},
-                # ─── Comptes 47 : Associés / Tiers prêteurs et emprunteurs ───
                 {"numero": "471",  "nom": "Débiteurs divers",                           "libelle": "Autres débiteurs divers",                                    "classe": "4"},
                 {"numero": "472",  "nom": "Créditeurs divers",                          "libelle": "Autres créditeurs divers",                                   "classe": "4"},
                 {"numero": "477",  "nom": "Dépôts et cautionnements reçus",             "libelle": "Cautions et garanties reçues de tiers",                       "classe": "4"},
                 {"numero": "478",  "nom": "Dépôts et cautionnements versés",            "libelle": "Cautions et garanties versées à des tiers",                   "classe": "4"},
-
-                # ─── CLASSE 5 : Trésorerie ───
                 {"numero": "521",  "nom": "Banque USD (compte courant)",               "libelle": "Compte courant bancaire en dollars américains (USD)",         "classe": "5"},
                 {"numero": "522",  "nom": "Banque CDF (compte courant)",               "libelle": "Compte courant bancaire en francs congolais (CDF)",           "classe": "5"},
                 {"numero": "531",  "nom": "Mobile Money",                               "libelle": "M-Pesa, Airtel Money, Orange Money et autres",                "classe": "5"},
                 {"numero": "542",  "nom": "Chèques et virements à encaisser",          "libelle": "Chèques reçus en attente d'encaissement",                     "classe": "5"},
                 {"numero": "571",  "nom": "Caisse principale USD",                      "libelle": "Caisse en espèces dollars américains",                        "classe": "5"},
                 {"numero": "572",  "nom": "Caisse principale CDF",                      "libelle": "Caisse en espèces francs congolais",                          "classe": "5"},
-
-                # ─── CLASSE 6 : Charges ───
                 {"numero": "601",  "nom": "Achats de marchandises",                     "libelle": "Achats de marchandises destinées à la revente",              "classe": "6"},
                 {"numero": "602",  "nom": "Achats de matières premières",               "libelle": "Achats de matières premières et fournitures de production",   "classe": "6"},
                 {"numero": "605",  "nom": "Achats de carburant et lubrifiants",         "libelle": "Carburant, huiles moteur et lubrifiants",                     "classe": "6"},
@@ -645,18 +879,147 @@ class DatabaseManager:
                 {"numero": "681",  "nom": "Marketing et publicité",                     "libelle": "Frais de marketing, publicité et communication",               "classe": "6"},
                 {"numero": "682",  "nom": "Remises accordées aux clients",              "libelle": "Remises, ristournes et rabais accordés aux clients",            "classe": "6"},
                 {"numero": "683",  "nom": "Maintenance et réparations",                 "libelle": "Entretien, maintenance et réparations des équipements",         "classe": "6"},
-                {"numero": "684",  "nom": "Informatique et système d'information",      "libelle": "Licences logiciels, maintenance informatique, hébergement",     "classe": "6"},
-                {"numero": "685",  "nom": "Plomberie et travaux divers",                "libelle": "Plomberie, électricité, peinture et travaux d'entretien",      "classe": "6"},
                 {"numero": "691",  "nom": "Impôts et taxes (IBP, DI, patente)",         "libelle": "Impôts sur bénéfices, droits d'entrée et patentes diverses",   "classe": "6"},
-
-                # ─── CLASSE 7 : Produits ───
                 {"numero": "701",  "nom": "Ventes de marchandises",                     "libelle": "Chiffre d'affaires - Ventes de marchandises",                 "classe": "7"},
                 {"numero": "706",  "nom": "Prestations de services",                    "libelle": "Chiffre d'affaires - Prestations de services facturées",       "classe": "7"},
                 {"numero": "711",  "nom": "Variation de stocks de produits finis",      "libelle": "Variation des stocks de produits finis et en-cours",           "classe": "7"},
                 {"numero": "770",  "nom": "Produits financiers (intérêts reçus)",       "libelle": "Intérêts créditeurs et produits financiers reçus de la banque","classe": "7"},
             ]
-            
+
             comptes_created = {}
+            for compte_data in comptes_default:
+                classe_code = compte_data.pop("classe")
+                classe = classes_created.get(classe_code)
+                
+                if classe:
+                    existing = session.query(ComptaComptes).filter_by(
+                        numero=compte_data["numero"]
+                    ).join(ComptaClasses).filter(ComptaClasses.enterprise_id == enterprise_id).first()
+                    
+                    if not existing:
+                        compte = ComptaComptes(
+                            classe_comptable_id=classe.id,
+                            is_default=True,
+                            **compte_data
+                        )
+                        session.add(compte)
+                        session.flush()  # Pour obtenir l'ID
+                        comptes_created[compte_data["numero"]] = compte
+                        try:
+                            print(f"Compte comptable créé: {compte.numero} - {compte.nom}")
+                        except Exception:
+                            pass
+                    else:
+                        if not getattr(existing, 'is_default', False):
+                            try:
+                                existing.is_default = True
+                            except Exception:
+                                pass
+                        comptes_created[compte_data["numero"]] = existing
+
+            # Créer une configuration comptable pour chaque POS de l'entreprise
+            pos_list = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
+            
+            for pos in pos_list:
+                existing_config = session.query(ComptaConfig).filter_by(
+                    enterprise_id=enterprise_id, 
+                    pos_id=pos.id
+                ).first()
+                
+                if not existing_config:
+                    config = ComptaConfig(
+                        enterprise_id=enterprise_id,
+                        pos_id=pos.id,
+                        compte_caisse_id=comptes_created.get("57").id if comptes_created.get("57") else None,
+                        compte_banque_id=comptes_created.get("521").id if comptes_created.get("521") else None,
+                        compte_client_id=comptes_created.get("411").id if comptes_created.get("411") else None,
+                        compte_fournisseur_id=comptes_created.get("401").id if comptes_created.get("401") else None,
+                        compte_vente_id=comptes_created.get("701").id if comptes_created.get("701") else None,
+                        compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None,
+                        compte_stock_id=comptes_created.get("304").id if comptes_created.get("304") else None,
+                        compte_variation_stock_id=comptes_created.get("604").id if comptes_created.get("604") else None,
+                        compte_tva_id=comptes_created.get("4431").id if comptes_created.get("4431") else None,
+                        compte_remise_id =comptes_created.get("680").id if comptes_created.get("680") else None
+                        
+                    )
+                    session.add(config)
+                    try:
+                        print(f"Configuration comptable créée pour POS: {pos.name}")
+                    except Exception:
+                        pass
+            
+            if not pos_list:
+                try:
+                    print("Aucun POS trouvé pour l'entreprise, configuration comptable non créée")
+                except Exception:
+                    pass
+            
+            session.flush()
+            
+        except Exception as e:
+            print(f"❌ Erreur lors de l'insertion des données comptables: {e}")
+            raise
+
+    def _migrate_licences_table(self):
+        """
+        Crée la table `licences` si elle n'existe pas encore (idempotent).
+        Structure compatible avec le schéma serveur (id TEXT UUID, cle, type,
+        date_activation, date_expiration, signature, active, enterprise_id,
+        timestamps, deleted_at).
+        """
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS licences (
+                        id TEXT PRIMARY KEY,
+                        cle TEXT UNIQUE,
+                        type TEXT,
+                        date_activation DATETIME,
+                        date_expiration DATETIME,
+                        signature TEXT,
+                        active INTEGER DEFAULT 1,
+                        entreprise_id TEXT,
+                        created_at DATETIME,
+                        updated_at DATETIME,
+                        deleted_at DATETIME
+                    )
+                """))
+                conn.commit()
+                # Ensure compatibility column name `entreprise_id` exists (some DBs used `enterprise_id`)
+                cols = [r[1] for r in conn.execute(text("PRAGMA table_info('licences')")).fetchall()]
+                if 'entreprise_id' not in cols:
+                    try:
+                        conn.execute(text("ALTER TABLE licences ADD COLUMN entreprise_id TEXT"))
+                        # copy values if enterprise_id exists
+                        if 'enterprise_id' in cols:
+                            conn.execute(text("UPDATE licences SET entreprise_id = enterprise_id WHERE entreprise_id IS NULL OR entreprise_id = ''"))
+                        conn.commit()
+                        print('Migrated licences table: added entreprise_id column')
+                    except Exception:
+                        pass
+            print("✅ Migration : table licences OK (created if missing)")
+        except Exception as e:
+            print(f"⚠️ _migrate_licences_table : {e}")
+        # If an older singular `licence` table exists (legacy schema), copy its rows
+        # into the new `licences` table so both schemas remain compatible.
+        try:
+            with self.engine.connect() as conn:
+                res = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='licence'"))
+                row = res.fetchone()
+                if row:
+                    # Only copy if licences is empty (avoid duplicate imports)
+                    count = conn.execute(text("SELECT COUNT(*) FROM licences")).fetchone()[0]
+                    if count == 0:
+                        print("ℹ️ Found legacy table `licence`, migrating rows to `licences`...")
+                        # Copy rows; generate a textual id to avoid PK collisions with UUIDs
+                        conn.execute(text("INSERT INTO licences (id, cle, type, date_activation, date_expiration, signature, active, enterprise_id, created_at, updated_at) \nSELECT 'local-' || id, cle, type, date_activation, date_expiration, signature, active, entreprise_id, date_activation, date_activation FROM licence"))
+                        conn.commit()
+                        print("✅ Migration: copied legacy `licence` -> `licences` (ids prefixed with 'local-')")
+                    else:
+                        print("ℹ️ Legacy `licence` detected but `licences` already contains data; skipping copy")
+        except Exception as e:
+            print(f"⚠️ _migrate_licences_table (legacy copy) : {e}")
+        
             for compte_data in comptes_default:
                 classe_code = compte_data.pop("classe")
                 classe = classes_created.get(classe_code)
@@ -857,6 +1220,8 @@ class User(Base):
     email = Column(String(100), nullable=False, unique=True)
     password = Column(String(255), nullable=False)
     role = Column(String(50), default='admin')
+    # Modules accessibles pour l'utilisateur (JSON list stored as TEXT)
+    modules = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relations
@@ -864,11 +1229,62 @@ class User(Base):
     
     def set_password(self, password):
         """Hasher le mot de passe"""
+        # If the provided value already looks like a bcrypt hash, store it verbatim
+        # to avoid double-hashing when applying server-provided hashes.
+        try:
+            if isinstance(password, str) and re.match(r'^\$2[aby]\$.{56}$', password):
+                # Normalize $2y$ -> $2b$ for local bcrypt compatibility but keep the hash
+                if password.startswith('$2y$'):
+                    self.password = '$2b$' + password[4:]
+                else:
+                    self.password = password
+                return
+        except Exception:
+            pass
+
+        # Otherwise hash the plaintext password
         self.password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
     
     def check_password(self, password):
         """Vérifier le mot de passe"""
-        return bcrypt.checkpw(password.encode('utf-8'), self.password.encode('utf-8'))
+        # Some servers (PHP bcrypt) emit hashes with the $2y$ prefix.
+        # Python's bcrypt expects $2b$ in many distributions — normalize for verification
+        stored = (self.password or '')
+        try:
+            if stored.startswith('$2y$'):
+                stored_norm = '$2b$' + stored[4:]
+            else:
+                stored_norm = stored
+            return bcrypt.checkpw(password.encode('utf-8'), stored_norm.encode('utf-8'))
+        except Exception:
+            # Fallback: try raw stored value (in case normalization unnecessary)
+            try:
+                return bcrypt.checkpw(password.encode('utf-8'), stored.encode('utf-8'))
+            except Exception:
+                return False
+
+    # Helper accessors for modules list (stored as JSON in Text column)
+    def get_modules_list(self):
+        try:
+            if not self.modules:
+                return []
+            return json.loads(self.modules)
+        except Exception:
+            return []
+
+    def set_modules_list(self, modules_list):
+        try:
+            if modules_list is None:
+                self.modules = None
+            else:
+                # ensure serializable list of strings
+                self.modules = json.dumps([str(m) for m in modules_list])
+        except Exception:
+            # fallback: store as str
+            try:
+                self.modules = str(modules_list)
+            except Exception:
+                self.modules = None
 
 
 

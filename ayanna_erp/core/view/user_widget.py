@@ -286,6 +286,33 @@ class UserWidget(QDialog):
         
         layout.addRow("Rôle:", self.role_combo)
         
+        # Modules accessibles (sans toucher à la BDD, stored in-memory/user_data)
+        # Module internal names should match those used in `Module.name` (MainWindow)
+        self.module_options = [
+            ("SalleFete", "Salle de Fête"),
+            ("Vente", "Boutique / Vente"),
+            ("Pharmacie", "Pharmacie"),
+            ("Restaurant", "Restaurant"),
+            ("Hotel", "Hôtel"),
+            ("Achats", "Achats"),
+            ("Stock", "Stock"),
+            ("Comptabilite", "Comptabilité")
+        ]
+
+        # Layout for module checkboxes
+        modules_box = QGroupBox("Modules accessibles (cocher pour autoriser)")
+        modules_layout = QGridLayout(modules_box)
+        self.module_checkboxes = {}
+        for idx, (mname, mlabel) in enumerate(self.module_options):
+            cb = QCheckBox(mlabel)
+            cb.setObjectName(f"mod_cb_{mname}")
+            self.module_checkboxes[mname] = cb
+            r = idx // 2
+            c = idx % 2
+            modules_layout.addWidget(cb, r, c)
+
+        layout.addRow(modules_box)
+
         return group
     
     def create_button_layout(self):
@@ -330,6 +357,15 @@ class UserWidget(QDialog):
             if self.role_combo.itemData(i) == user_role:
                 self.role_combo.setCurrentIndex(i)
                 break
+        # Modules (liste de noms internes)
+        modules = self.user_data.get('modules', []) or []
+        # Normalize to set of strings
+        modules_set = set([str(m) for m in modules])
+        for mname, cb in self.module_checkboxes.items():
+            try:
+                cb.setChecked(mname in modules_set)
+            except Exception:
+                cb.setChecked(False)
     
     def validate_form(self):
         """Valider les données du formulaire"""
@@ -379,6 +415,12 @@ class UserWidget(QDialog):
         password = self.password_edit.text()
         if password:
             data['password'] = password
+        # Modules list (internal names)
+        modules = []
+        for mname, cb in self.module_checkboxes.items():
+            if cb.isChecked():
+                modules.append(mname)
+        data['modules'] = modules
         
         return data
     
@@ -388,6 +430,8 @@ class UserWidget(QDialog):
             return
         
         data = self.collect_form_data()
+        # Pass modules through to controller so they are persisted in DB
+        controller_data = data
         
         # Désactiver le bouton pendant le traitement
         self.save_button.setEnabled(False)
@@ -400,12 +444,12 @@ class UserWidget(QDialog):
                 # Mise à jour
                 success = self.user_controller.update_user(
                     self.user_data['id'], 
-                    data,
+                    controller_data,
                     current_role
                 )
             else:
                 # Création
-                result = self.user_controller.create_user(data, current_role)
+                result = self.user_controller.create_user(controller_data, current_role)
                 success = result is not None
             
             if not success:
@@ -431,8 +475,30 @@ class UserWidget(QDialog):
             f"L'utilisateur '{user_data.get('name', '')}' a été " +
             ("modifié" if self.is_editing else "créé") + " avec succès!"
         )
-        
+        # Merge pending modules selection (runtime-only, no DB schema change)
+        if hasattr(self, '_pending_modules') and self._pending_modules:
+            try:
+                user_data['modules'] = list(self._pending_modules)
+            except Exception:
+                pass
+
         self.user_saved.emit(user_data)
+        # If the edited user is the current logged user, update in-memory and refresh parent modules
+        try:
+            if self.is_editing and self.user_data and self.current_user and self.user_data.get('id') == self.current_user.get('id'):
+                # update reference
+                if isinstance(self.current_user, dict):
+                    self.current_user['modules'] = user_data.get('modules', [])
+                # If parent (or caller) exposes load_modules, call it to refresh displayed modules
+                parent = self.parent()
+                if parent and hasattr(parent, 'load_modules'):
+                    try:
+                        parent.load_modules()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
         self.accept()
     
     def on_error_occurred(self, error_message):

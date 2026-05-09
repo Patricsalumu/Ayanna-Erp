@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
+use Illuminate\Support\Facades\Hash;
 
 class User extends Authenticatable
 {
@@ -27,6 +28,21 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password'          => 'hashed',
     ];
+
+    /**
+     * Mutator: set the password attribute.
+     * If the provided value already looks like a bcrypt hash ($2y$|$2b$|$2a$), store it verbatim
+     * to avoid double-hashing when receiving hashes from clients.
+     */
+    public function setPasswordAttribute($value)
+    {
+        if (is_string($value) && preg_match('/^\$2[aby]\$.{56}$/', $value)) {
+            $this->attributes['password'] = $value;
+            return;
+        }
+
+        $this->attributes['password'] = Hash::make($value);
+    }
 
     public function enterprise()
     {

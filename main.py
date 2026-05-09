@@ -94,34 +94,68 @@ def main():
     # Initialiser la base de données
     _log('before_db_init')
     db_manager = DatabaseManager()
-    if not db_manager.initialize_database():
-        print("Erreur lors de l'initialisation de la base de données")
-        _log('db_init_failed')
-        sys.exit(1)
+    from ayanna_erp.database.database_manager import set_database_manager
+    set_database_manager(db_manager)   # partager l'instance dès maintenant
+
+    # Créer toutes les tables SANS insérer les données par défaut,
+    # afin de pouvoir tester is_first_run() avant l'initialisation.
+    try:
+        db_manager.create_all_tables()
+    except Exception as _e:
+        print(f"Avertissement lors de la création des tables : {_e}")
+    _log('after_db_table_create')
+
+    # ── Premier démarrage ─────────────────────────────────────────────────────
+    # Si la BDD est vide (aucun utilisateur), afficher le wizard de configuration.
+    # Le wizard demande les identifiants du serveur :
+    #   • Succès  → login() + pull() : toutes les données sont rapatriées.
+    #               La vérification de licence locale est sautée (server_mode_used).
+    #   • Échec / pas de serveur → clic sur "Continuer sans serveur" →
+    #               initialize_database() avec les données par défaut.
+    skip_licence = False
+    if db_manager.is_first_run():
+        _log('first_run_wizard')
+        from PyQt6.QtWidgets import QDialog
+        from ayanna_erp.ui.first_run_wizard import FirstRunWizard
+        wizard = FirstRunWizard(db_manager)
+        result = wizard.exec()
+        if result != QDialog.DialogCode.Accepted:
+            # L'utilisateur a fermé le wizard sans terminer la configuration
+            sys.exit(0)
+        skip_licence = getattr(wizard, 'server_mode_used', False)
+        _log('first_run_wizard_done')
+    else:
+        # Démarrage normal : s'assurer que toutes les données par défaut existent
+        if not db_manager.initialize_database():
+            print("Erreur lors de l'initialisation de la base de données")
+            _log('db_init_failed')
+            sys.exit(1)
     _log('after_db_init')
 
-    # Vérifier la licence locale; si aucune licence valide, afficher la modale d'activation
-    try:
-        _log('before_licence_check')
-        valid, msg = verifier_licence()
-        if not valid:
-            # afficher la fenêtre d'activation en mode modal
-            dlg = LicenceActivationDialog()
-            result = dlg.exec()
-            # Si l'utilisateur a accepté, re-vérifier
-            if result == 1:
-                _log('before_licence_check_2')
-                valid2, msg2 = verifier_licence()
-                _log('after_licence_check_2')
-                if not valid2:
-                    print("Licence introuvable ou invalide après activation :", msg2)
+    # ── Vérification de la licence ───────────────────────────────────────────
+    # Sautée si les données (dont la licence) ont déjà été récupérées du serveur.
+    if not skip_licence:
+        try:
+            _log('before_licence_check')
+            valid, msg = verifier_licence()
+            if not valid:
+                # afficher la fenêtre d'activation en mode modal
+                dlg = LicenceActivationDialog()
+                result = dlg.exec()
+                # Si l'utilisateur a accepté, re-vérifier
+                if result == 1:
+                    _log('before_licence_check_2')
+                    valid2, msg2 = verifier_licence()
+                    _log('after_licence_check_2')
+                    if not valid2:
+                        print("Licence introuvable ou invalide après activation :", msg2)
+                        sys.exit(1)
+                else:
+                    print("Activation de licence annulée par l'utilisateur.")
                     sys.exit(1)
-            else:
-                print("Activation de licence annulée par l'utilisateur.")
-                sys.exit(1)
-    except Exception as e:
-        print("Erreur lors de la vérification de la licence:", e)
-        sys.exit(1)
+        except Exception as e:
+            print("Erreur lors de la vérification de la licence:", e)
+            sys.exit(1)
     
     # Créer et afficher la fenêtre de connexion
     login_window = LoginWindow()

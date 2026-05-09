@@ -792,6 +792,10 @@ class CountingDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de l'export PDF:\n{str(e)}")
 
+    def generate_inventory_ticket_80mm(self, file_path: str, inventory: StockInventaire, products: List[Dict], enterprise: Dict):
+        """Delegate to module-level 80mm generator."""
+        return generate_inventory_ticket_80mm(file_path, inventory, products, enterprise)
+
     def get_enterprise_info(self) -> Dict[str, Any]:
         """Récupérer les informations de l'entreprise"""
         try:
@@ -994,6 +998,123 @@ class CountingDialog(QDialog):
         
         # Générer le PDF
         doc.build(story)
+
+def generate_inventory_ticket_80mm(file_path: str, inventory: StockInventaire, products: List[Dict], enterprise: Dict):
+    """Générer un ticket 80mm pour l'inventaire (compact, sans prix unitaire)."""
+    # Page width = 80mm, height set to A4 height to allow content flow
+    page_width = 8 * cm
+    page_height = 29.7 * cm
+    doc = SimpleDocTemplate(file_path, pagesize=(page_width, page_height), leftMargin=6, rightMargin=6, topMargin=6, bottomMargin=6)
+    styles = getSampleStyleSheet()
+    story = []
+
+    # Header (logo + company info)
+    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=11)
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=12, alignment=1)
+    logo_path = None
+    try:
+        if enterprise.get('logo'):
+            import tempfile
+            tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+            tmp.write(enterprise.get('logo'))
+            tmp.flush()
+            tmp.close()
+            logo_path = tmp.name
+            img = Image(logo_path, width=1.5*cm, height=1.5*cm)
+            header_table = Table([[img, Paragraph(f"<b>{enterprise.get('name','')}</b><br/>{enterprise.get('address','')}<br/>Tel: {enterprise.get('phone','')}", small_style)]], colWidths=[1.6*cm, page_width-2.6*cm])
+            header_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP')]))
+            story.append(header_table)
+        else:
+            story.append(Paragraph(enterprise.get('name', 'Entreprise'), header_style))
+            if enterprise.get('address'):
+                story.append(Paragraph(enterprise.get('address'), small_style))
+        story.append(Spacer(1, 0.1*cm))
+    except Exception:
+        story.append(Paragraph(enterprise.get('name', 'Entreprise'), header_style))
+        story.append(Spacer(1, 0.1*cm))
+
+    # Inventory meta
+    user = getattr(inventory, 'completed_by_name', None) or getattr(inventory, 'created_by_name', None) or ''
+    date_str = None
+    if getattr(inventory, 'completed_date', None):
+        date_str = inventory.completed_date.strftime('%d/%m/%Y %H:%M')
+    else:
+        date_str = inventory.created_at.strftime('%d/%m/%Y %H:%M') if inventory.created_at else ''
+
+    meta_table = Table([
+        [Paragraph('Réf:', small_style), Paragraph(str(inventory.reference or ''), small_style)],
+        [Paragraph('Session:', small_style), Paragraph(str(inventory.session_name or ''), small_style)],
+        [Paragraph('Date:', small_style), Paragraph(date_str, small_style)],
+        [Paragraph('Utilisateur:', small_style), Paragraph(str(user), small_style)],
+        [Paragraph('Entrepôt:', small_style), Paragraph(getattr(inventory.warehouse, 'name', ''), small_style)]
+    ], colWidths=[2.5*cm, (page_width-12)/2])
+    meta_table.setStyle(TableStyle([('VALIGN', (0,0), (-1,-1), 'TOP'), ('ALIGN', (0,0), (-1,-1), 'LEFT'), ('FONTSIZE', (0,0), (-1,-1), 8)]))
+    story.append(meta_table)
+    story.append(Spacer(1, 0.2*cm))
+
+    # Table header
+    table_data = [[Paragraph('Produit', small_style), Paragraph('S.S', small_style), Paragraph('S.C', small_style), Paragraph('Écart', small_style), Paragraph('Valeur', small_style)]]
+
+    total_value_sale = 0.0
+    # Include rows with non-zero variance to keep ticket concise
+    for p in products:
+        variance = float(p.get('variance', 0) or 0)
+        if variance == 0:
+            continue
+        system_stock = float(p.get('system_stock', 0) or 0)
+        counted_stock = float(p.get('counted_stock', 0) or 0)
+        selling_price = float(p.get('selling_price', 0) or 0)
+        value_sale = variance * selling_price
+        total_value_sale += value_sale
+
+        table_data.append([
+            Paragraph(str(p.get('product_name', ''))[:30], small_style),
+            Paragraph(f"{system_stock:.2f}", small_style),
+            Paragraph(f"{counted_stock:.2f}", small_style),
+            Paragraph(f"{variance:.2f}", small_style),
+            Paragraph(_format_money(value_sale, enterprise.get('currency', 'FC')), small_style)
+        ])
+
+    if len(table_data) == 1:
+        story.append(Paragraph("Aucun écart détecté.", small_style))
+    else:
+        col_widths = [page_width*0.45, page_width*0.13, page_width*0.13, page_width*0.14, page_width*0.18]
+        prod_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        prod_table.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 9),
+            ('FONTSIZE', (0,1), (-1,-1), 8),
+            ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]))
+        story.append(prod_table)
+
+    story.append(Spacer(1, 0.3*cm))
+    # Totals
+    totals_table = Table([
+        [Paragraph('Total (vente):', small_style), Paragraph(_format_money(total_value_sale, enterprise.get('currency', 'FC')), small_style)]
+    ], colWidths=[page_width*0.6, page_width*0.3])
+    totals_table.setStyle(TableStyle([('ALIGN', (1,0), (1,0), 'RIGHT'), ('FONTSIZE', (0,0), (-1,-1), 9)]))
+    story.append(totals_table)
+
+    story.append(Spacer(1, 0.2*cm))
+    # Footer + print timestamp
+    printed_ts = datetime.now().strftime('%d/%m/%Y %H:%M')
+    footer_text = "Informatisé par Ayanna ERP — www.ayanna.top"
+    story.append(Paragraph(footer_text, ParagraphStyle('f', parent=styles['Normal'], fontSize=7, alignment=1)))
+    story.append(Paragraph(f"Imprimé le {printed_ts}", ParagraphStyle('f2', parent=styles['Normal'], fontSize=7, alignment=1)))
+
+    doc.build(story)
+
+    # Cleanup temp logo
+    try:
+        if logo_path and os.path.exists(logo_path):
+            os.unlink(logo_path)
+    except Exception:
+        pass
+
+    
+    
 
 
 class InventoryDetailsDialog(QDialog):

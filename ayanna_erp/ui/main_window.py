@@ -170,6 +170,12 @@ class MainWindow(QMainWindow):
         payment_modes_action.triggered.connect(self.open_payment_modes_config)
         config_menu.addAction(payment_modes_action)
 
+        config_menu.addSeparator()
+
+        sync_action = QAction("Synchronisation serveur", self)
+        sync_action.triggered.connect(self.open_sync_config)
+        config_menu.addAction(sync_action)
+
         # Menu Aide
         help_menu = menubar.addMenu("Aide")
         
@@ -264,6 +270,44 @@ class MainWindow(QMainWindow):
         try:
             session = self.db_manager.get_session()
             modules = session.query(Module).all()
+
+            # If current_user has an in-memory modules list, use it to filter visible modules.
+            user_allowed = None
+            try:
+                # If current_user exposes helper get_modules_list, prefer it
+                if not self.current_user:
+                    user_allowed = None
+                elif isinstance(self.current_user, dict):
+                    user_allowed = self.current_user.get('modules')
+                elif hasattr(self.current_user, 'get_modules_list'):
+                    user_allowed = self.current_user.get_modules_list()
+                else:
+                    # Could be ORM attribute stored as JSON string or a list
+                    raw = getattr(self.current_user, 'modules', None)
+                    if raw is None:
+                        user_allowed = None
+                    else:
+                        try:
+                            import json
+                            if isinstance(raw, str):
+                                parsed = json.loads(raw)
+                                user_allowed = parsed
+                            else:
+                                user_allowed = raw
+                        except Exception:
+                            # Fallback: if it's a comma-separated string
+                            try:
+                                if isinstance(raw, str):
+                                    user_allowed = [p.strip() for p in raw.split(',') if p.strip()]
+                                else:
+                                    user_allowed = None
+                            except Exception:
+                                user_allowed = None
+
+                if user_allowed is not None:
+                    user_allowed = set([str(m) for m in user_allowed])
+            except Exception:
+                user_allowed = None
             
             # Configuration des modules avec leurs descriptions et couleurs
             module_configs = {
@@ -304,6 +348,20 @@ class MainWindow(QMainWindow):
             # Créer les boutons des modules
             row, col = 0, 0
             for i, module in enumerate(modules):
+                # Skip inactive modules
+                try:
+                    if not getattr(module, 'is_active', True):
+                        continue
+                except Exception:
+                    pass
+
+                # If user_allowed provided, show only modules in that set
+                if user_allowed is not None:
+                    try:
+                        if module.name not in user_allowed:
+                            continue
+                    except Exception:
+                        pass
                 config = module_configs.get(module.name, {
                     "description": module.description or "Module",
                     "color": "#3498DB"
@@ -718,6 +776,18 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Erreur",
                 f"Impossible d'ouvrir les modes de paiement :\n{e}")
+
+    def open_sync_config(self):
+        """Ouvrir le dialogue de configuration de la synchronisation serveur."""
+        try:
+            from ayanna_erp.core.view.sync_config_widget import SyncConfigDialog
+            dialog = SyncConfigDialog(self)
+            dialog.exec()
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Erreur",
+                f"Impossible d'ouvrir la configuration de synchronisation :\n{e}"
+            )
 
     def show_about(self):
         """Afficher les informations sur l'application avec notes de version"""

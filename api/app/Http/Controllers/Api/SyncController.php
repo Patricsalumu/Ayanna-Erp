@@ -37,10 +37,18 @@ class SyncController extends Controller
             'operations.*.client_updated_at' => 'nullable|date',
         ]);
 
-        $result = $this->syncService->push(
-            $request->input('operations'),
-            $request->user()->id
-        );
+        $operations = $request->input('operations');
+        $result = $this->syncService->push($operations, $request->user()->id);
+
+        // Journaliser le résumé côté serveur
+        $tables = array_unique(array_column($operations, 'table'));
+        \Illuminate\Support\Facades\Log::info('[Sync] PUSH recu', [
+            'user'       => $request->user()->email,
+            'total'      => count($operations),
+            'success'    => $result['success'],
+            'errors'     => count($result['errors']),
+            'tables'     => $tables,
+        ]);
 
         $status = empty($result['errors']) ? 200 : 207; // 207 Multi-Status if partial failure
         return response()->json($result, $status);
@@ -63,6 +71,15 @@ class SyncController extends Controller
             : Carbon::createFromTimestamp(0);
 
         $data = $this->syncService->pull($lastSync);
+
+        // Journaliser le résumé côté serveur
+        $totalRecords = array_sum(array_map('count', $data));
+        \Illuminate\Support\Facades\Log::info('[Sync] PULL envoye', [
+            'user'         => $request->user()->email,
+            'last_sync'    => $request->input('last_sync', 'full'),
+            'tables'       => array_keys($data),
+            'total_records'=> $totalRecords,
+        ]);
 
         return response()->json([
             'server_time' => now()->toIso8601String(),

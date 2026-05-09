@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QTableWidget,
                             QLineEdit, QComboBox, QGroupBox, QGridLayout, QFormLayout,
                             QHeaderView, QFrame, QSplitter, QMessageBox, QScrollArea, QDialog, QTextEdit, QAbstractItemView, QCheckBox, QDialogButtonBox,
                             QListWidget, QListWidgetItem)
+from PyQt6.QtWidgets import QInputDialog
 from PyQt6.QtCore import Qt, QDate, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QPalette, QColor, QBrush
 from datetime import datetime, timedelta
@@ -1838,7 +1839,22 @@ Notes: {notes_preview}
                 p['no'] = idx
 
             # Générer un PDF professionnel pour les produits vendus
-            pdf_path = self._generate_products_pdf(products, date_debut, date_fin, selected_categories=selected_categories)
+            # Choix du format d'export (A4 ou 80mm)
+            choice, ok = QInputDialog.getItem(self, "Format d'export", "Choisissez le format:", ["A4", "80mm"], 0, False)
+            if not ok:
+                return
+
+            pdf_path = None
+            if choice == '80mm':
+                try:
+                    from ayanna_erp.modules.boutique.view.exports_widgets import print_products_report
+                    # Pass the already-filtered products list so 80mm matches A4 selection
+                    pdf_path = print_products_report(self, date_debut, date_fin, paper='80mm', include_services=True, module=getattr(self, 'module', None), pos_id=getattr(self.boutique_controller, 'pos_id', None), rows=products)
+                except Exception as e:
+                    print(f"Erreur export 80mm via print_products_report: {e}")
+                    pdf_path = None
+            else:
+                pdf_path = self._generate_products_pdf(products, date_debut, date_fin, selected_categories=selected_categories)
             if pdf_path and os.path.exists(pdf_path):
                 try:
                     if os.name == 'nt':
@@ -2700,12 +2716,18 @@ Notes: {notes_preview}
             # Trier les catégories par nom
             sorted_categories = sorted(products_by_category.keys())
 
+            # Détecter si on a des quantités initiales sur la journée (si non, cacher Q.Init et Reste)
+            has_initials_day = any((p.get('initial_quantity') is not None) for p in products)
+
             # ============================
             # 9) Construction des tableaux par catégorie
             # ============================
             total_general = 0
             total_marge = 0
-            col_widths = [0.7*cm, 3.8*cm, 1.4*cm, 1.2*cm, 1.4*cm, 1.5*cm, 1.2*cm, 1.3*cm, 1.6*cm, 2*cm, 2*cm, 2*cm]
+            if has_initials_day:
+                col_widths = [0.7*cm, 3.8*cm, 1.4*cm, 1.2*cm, 1.5*cm, 1.2*cm, 1.3*cm, 1.6*cm, 2*cm, 2*cm, 2*cm]
+            else:
+                col_widths = [0.7*cm, 4.2*cm, 1.4*cm, 1.5*cm, 1.2*cm, 1.6*cm, 2*cm, 2*cm, 2*cm]
 
             for category_name in sorted_categories:
                 category_products = products_by_category[category_name]
@@ -2714,10 +2736,15 @@ Notes: {notes_preview}
                 elements.append(Paragraph(f"📦 {category_name}", styles['CategoryTitle']))
                 elements.append(Spacer(1, 0.3*cm))
                 
-                # En-tête du tableau
-                table_data = [[
-                    'N°', 'Nom', 'Q. Init', 'Ajouts', 'Ajust', 'Total', 'Ventes', 'Reste', 'P.U', 'Total', 'Coût', 'Marge'
-                ]]
+                # En-tête du tableau (sans colonne Ajustements)
+                if has_initials_day:
+                    table_data = [[
+                        'N°', 'Nom', 'Q. Init', 'Ajouts', 'Total', 'Ventes', 'Reste', 'P.U', 'Total', 'Coût', 'Marge'
+                    ]]
+                else:
+                    table_data = [[
+                        'N°', 'Nom', 'Ajouts', 'Total', 'Ventes', 'P.U', 'Total', 'Coût', 'Marge'
+                    ]]
 
                 # Total de la catégorie
                 total_category = 0
@@ -2727,21 +2754,33 @@ Notes: {notes_preview}
                     total_category += row.get('total', 0)
                     total_general += row.get('total', 0)
                     total_marge += row.get('marge', 0)
-                    total_apres_ajust = row.get('initial_quantity', 0) + row.get('quantity_added', 0) + row.get('adjustments', 0)
-                    table_data.append([
-                        row.get('no', ''),
-                        row.get('name', ''),
-                        f"{row.get('initial_quantity', 0):.0f}",
-                        f"{row.get('quantity_added', 0):.0f}",
-                        f"{row.get('adjustments', 0):.0f}",
-                        f"{total_apres_ajust:.0f}",
-                        f"{row.get('sold', 0):.0f}",
-                        f"{row.get('final_quantity', 0):.0f}",
-                        _fmt_local(row.get('unit_price', 0)),
-                        _fmt_local(row.get('total', 0)),
-                        _fmt_local(row.get('total_cost', 0)),
-                        _fmt_local(row.get('marge', 0))
-                    ])
+                    total_after = (row.get('initial_quantity', 0) or 0) + row.get('quantity_added', 0)
+                    if has_initials_day:
+                        table_data.append([
+                            row.get('no', ''),
+                            row.get('name', ''),
+                            f"{(row.get('initial_quantity', None) if row.get('initial_quantity', None) is not None else 0):.0f}",
+                            f"{row.get('quantity_added', 0):.0f}",
+                            f"{total_after:.0f}",
+                            f"{row.get('sold', 0):.0f}",
+                            f"{row.get('final_quantity', 0):.0f}",
+                            _fmt_local(row.get('unit_price', 0)),
+                            _fmt_local(row.get('total', 0)),
+                            _fmt_local(row.get('total_cost', 0)),
+                            _fmt_local(row.get('marge', 0))
+                        ])
+                    else:
+                        table_data.append([
+                            row.get('no', ''),
+                            row.get('name', ''),
+                            f"{row.get('quantity_added', 0):.0f}",
+                            f"{total_after:.0f}",
+                            f"{row.get('sold', 0):.0f}",
+                            _fmt_local(row.get('unit_price', 0)),
+                            _fmt_local(row.get('total', 0)),
+                            _fmt_local(row.get('total_cost', 0)),
+                            _fmt_local(row.get('marge', 0))
+                        ])
 
                 # Créer le tableau
                 tbl = Table(table_data, colWidths=col_widths, repeatRows=1)

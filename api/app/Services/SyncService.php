@@ -43,6 +43,8 @@ class SyncService
         'stock_config'              => \App\Models\StockConfig::class,
         'stock_inventaire'          => \App\Models\StockInventaire::class,
         'stock_inventaire_items'    => \App\Models\StockInventaireItem::class,
+        'stock_livraisons'          => \App\Models\StockLivraison::class,
+        'stock_livraison_items'     => \App\Models\StockLivraisonItem::class,
         'shop_clients'              => \App\Models\ShopClient::class,
         'shop_services'             => \App\Models\ShopService::class,
         'shop_paniers'              => \App\Models\ShopPanier::class,
@@ -114,19 +116,75 @@ class SyncService
         $result = [];
 
         foreach ($this->tableMap as $table => $modelClass) {
-            $model = new $modelClass;
+            try {
+                $records = $modelClass::withTrashed()
+                    ->where(function ($q) use ($lastSync) {
+                        $q->where('updated_at', '>', $lastSync)
+                          ->orWhere('created_at', '>', $lastSync)
+                          ->orWhere('deleted_at', '>', $lastSync);
+                    })
+                    ->get();
 
-            $records = $modelClass::withTrashed()
-                ->where(function ($q) use ($lastSync) {
-                    $q->where('updated_at', '>', $lastSync)
-                      ->orWhere('created_at', '>', $lastSync)
-                      ->orWhere('deleted_at', '>', $lastSync);
-                })
-                ->get();
+                if ($records->isNotEmpty()) {
+                    // Ensure sensitive but necessary fields are included for sync consumers.
+                    // Some Eloquent models hide `password` by default; make it visible for core_users.
+                    if ($table === 'core_users') {
+                        $records->each(function ($r) { $r->makeVisible('password'); });
+                    }
 
-            if ($records->isNotEmpty()) {
-                $result[$table] = $records->toArray();
+                    $result[$table] = $records->toArray();
+                }
+            } catch (\Throwable $e) {
+                \Illuminate\Support\Facades\Log::warning(
+                    "SyncService::pull — table {$table} ignoree : {$e->getMessage()}"
+                );
             }
+        }
+
+        // Ensure the `licences` table key is always present in the payload
+        // (may be an empty array if no licences are defined on server).
+        if (! array_key_exists('licences', $result)) {
+            try {
+                $result['licences'] = \App\Models\Licence::all()->toArray();
+            } catch (\Throwable $e) {
+                // If Licence model/table missing, log and provide empty array to keep payload shape stable.
+                \Illuminate\Support\Facades\Log::warning('SyncService::pull — unable to fetch licences: '.$e->getMessage());
+                $result['licences'] = [];
+            }
+        }
+
+        // If there are no licences defined on the server, create a default one
+        // so clients can import at least one licence record during first-run.
+        try {
+            if (is_array($result['licences']) && count($result['licences']) === 0) {
+                // Create a simple default licence if the table exists but is empty.
+                try {
+                    $exists = \Illuminate\Support\Facades\Schema::hasTable('licences');
+                } catch (\Throwable $_) {
+                    $exists = false;
+                }
+                if ($exists) {
+                    $now = now();
+                    $id = (string) \Illuminate\Support\Str::uuid();
+                    $cle = 'DEFAULT-' . strtoupper(substr((string) \Illuminate\Support\Str::random(16),0,16));
+                    \Illuminate\Support\Facades\DB::table('licences')->insert([
+                        'id' => $id,
+                        'cle' => $cle,
+                        'type' => 'trial',
+                        'date_activation' => $now,
+                        'date_expiration' => $now->addDays(30),
+                        'signature' => substr(sha1($cle),0,40),
+                        'active' => true,
+                        'enterprise_id' => null,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ]);
+                    // Refresh result
+                    $result['licences'] = \App\Models\Licence::all()->toArray();
+                }
+            }
+        } catch (\Throwable $e) {
+            \Illuminate\Support\Facades\Log::warning('SyncService::pull — failed to create default licence: '.$e->getMessage());
         }
 
         return $result;

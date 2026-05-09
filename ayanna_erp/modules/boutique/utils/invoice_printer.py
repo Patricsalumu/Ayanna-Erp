@@ -236,6 +236,24 @@ class InvoicePrintManager:
         canvas.setLineWidth(1)
         canvas.line(50, 50, A4[0] - 50, 50)
 
+        # Footer text: Informatisé par Ayanna ERP — website + print datetime
+        try:
+            footer_text = "Informatisé par Ayanna ERP — www.ayanna.top"
+            canvas.setFont('Helvetica', 8)
+            text_width = canvas.stringWidth(footer_text, 'Helvetica', 8)
+            x_center = (A4[0] - text_width) / 2
+            canvas.drawString(x_center, 34, footer_text)
+
+            # Impression datetime
+            printed_ts = datetime.now().strftime('%d/%m/%Y %H:%M')
+            printed_text = f"Imprimé le {printed_ts}"
+            canvas.setFont('Helvetica', 7)
+            text_width2 = canvas.stringWidth(printed_text, 'Helvetica', 7)
+            x_center2 = (A4[0] - text_width2) / 2
+            canvas.drawString(x_center2, 20, printed_text)
+        except Exception:
+            pass
+
         canvas.restoreState()
 
     def print_invoice_a4(self, invoice_data, filename):
@@ -817,11 +835,26 @@ class InvoicePrintManager:
             y = _draw_wrapped(nb, self._font_regular, 8, TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=True)
 
         # =========================
-        # SIGNATURE
+        # SIGNATURE / FOOTER
         # =========================
         gen_time = datetime.now().strftime('%d/%m/%Y %H:%M')
         c.setFont(self._font_regular, 7)
-        c.drawCentredString(TICKET_WIDTH / 2, y, f"Informatisé par Ayanna Erp {gen_time}")
+        try:
+            c.drawCentredString(TICKET_WIDTH / 2, y, "Informatisé par Ayanna ERP")
+            y -= 3 * mm
+            c.drawCentredString(TICKET_WIDTH / 2, y, "www.ayanna.top")
+            y -= 3 * mm
+            # Timestamp
+            try:
+                c.setFont(self._font_regular, 7)
+                c.drawCentredString(TICKET_WIDTH / 2, y, f"Imprimé le {gen_time}")
+            except Exception:
+                pass
+        except Exception:
+            try:
+                c.drawCentredString(TICKET_WIDTH / 2, y, f"Informatisé par Ayanna ERP {gen_time}")
+            except Exception:
+                pass
 
         c.save()
         return filename

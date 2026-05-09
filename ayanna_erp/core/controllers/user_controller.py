@@ -10,6 +10,7 @@ import os
 from datetime import datetime
 from sqlalchemy import desc, or_
 from PyQt6.QtCore import QObject, pyqtSignal
+import json
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 from ayanna_erp.database.database_manager import DatabaseManager, User
@@ -58,6 +59,9 @@ class UserController(QObject):
             'role': user.role,
             'role_display': UserController.ROLES.get(user.role, user.role),
             'created_at': user.created_at,
+            'modules': [] if not getattr(user, 'modules', None) else (
+                (json.loads(user.modules) if isinstance(user.modules, str) else user.modules)
+            )
         }
 
     # ------------------------------------------------------------------
@@ -122,6 +126,16 @@ class UserController(QObject):
                 created_at=datetime.now(),
             )
             user.set_password(data['password'])
+            # modules (optional)
+            if 'modules' in data:
+                try:
+                    user.set_modules_list(data.get('modules'))
+                except Exception:
+                    # fallback: store raw
+                    try:
+                        user.modules = json.dumps(data.get('modules') or [])
+                    except Exception:
+                        user.modules = None
 
             session.add(user)
             session.commit()
@@ -169,6 +183,16 @@ class UserController(QObject):
                 user.email = data['email']
             if 'role' in data:
                 user.role = data['role']
+
+            # modules
+            if 'modules' in data:
+                try:
+                    user.set_modules_list(data.get('modules'))
+                except Exception:
+                    try:
+                        user.modules = json.dumps(data.get('modules') or [])
+                    except Exception:
+                        user.modules = None
 
             # Mot de passe (optionnel)
             if data.get('password'):

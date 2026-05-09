@@ -13,12 +13,12 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit, 
     QDoubleSpinBox, QSpinBox, QCheckBox, QTabWidget, QTreeWidget, 
     QTreeWidgetItem, QSplitter, QProgressBar, QFrame, QDateEdit, QFileDialog,
-    QGridLayout
+    QGridLayout, QInputDialog
 )
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter, A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib.units import inch, cm
+from reportlab.lib.units import inch, cm, mm
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -47,10 +47,11 @@ class InventorySessionDialog(QDialog):
     def __init__(self, parent=None, pos_id=None):
         super().__init__(parent)
         self.pos_id = pos_id
+        # Initialiser db_manager avant de récupérer entreprise_id
+        self.db_manager = DatabaseManager()
         # Récupérer entreprise_id depuis pos_id
         self.entreprise_id = self.get_entreprise_id_from_pos(pos_id)
         self.controller = InventaireController(self.entreprise_id)
-        self.db_manager = DatabaseManager()
         
         self.setWindowTitle("Nouvelle Session d'Inventaire")
         # Fenêtre plus grande pour faciliter la sélection des produits en inventaire partiel
@@ -66,9 +67,9 @@ class InventorySessionDialog(QDialog):
                 result = session.execute(text("SELECT enterprise_id FROM core_pos_points WHERE id = :pos_id"), {"pos_id": pos_id})
                 row = result.fetchone()
                 return row[0] if row else 1  # Par défaut entreprise 1
-        except:
+        except Exception:
             return 1  # Par défaut entreprise 1
-    
+
     def setup_ui(self):
         """Configuration de l'interface utilisateur"""
         layout = QVBoxLayout(self)
@@ -178,7 +179,7 @@ class InventorySessionDialog(QDialog):
 
         # Recharger catégories/produits lorsque l'entrepôt change
         self.warehouse_combo.currentIndexChanged.connect(self.on_warehouse_changed)
-    
+
     def on_inventory_type_changed(self, text: str):
         """Afficher / masquer les zones selon le type d'inventaire."""
         if text and 'Partiel' in text:
@@ -351,6 +352,7 @@ class InventorySessionDialog(QDialog):
             self.products_table.resizeColumnsToContents()
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des produits pour sélection:\n{str(e)}")
+
     def load_warehouses(self):
         """Charger la liste des entrepôts"""
         try:
@@ -423,7 +425,7 @@ class InventorySessionDialog(QDialog):
                 
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors de la création de l'inventaire:\n{str(e)}")
-    
+
     def validate_form(self):
         """Valider le formulaire"""
         if not self.session_name.text().strip():
@@ -450,6 +452,162 @@ class InventorySessionDialog(QDialog):
                 return False
         
         return True
+
+def generate_inventory_ticket_80mm(file_path: str, inventory: StockInventaire, products: List[Dict], enterprise: Dict):
+    """Generate compact 80mm inventory ticket.
+    - No ref/user/warehouse meta (only company header).
+    - Respect the `products` list passed (caller applies filters).
+    - Show integer quantities/values (no decimals), no per-line currency.
+    - Final total labeled 'Total perte' if negative, 'Total gain' if positive, with currency.
+    - Include a small table listing same-day completed inventory sessions.
+    """
+    page_width = 8 * cm
+    page_height = 29.7 * cm
+    doc = SimpleDocTemplate(file_path, pagesize=(page_width, page_height), leftMargin=6, rightMargin=6, topMargin=6, bottomMargin=6)
+    styles = getSampleStyleSheet()
+    story = []
+
+    small_style = ParagraphStyle('Small', parent=styles['Normal'], fontSize=9)
+    header_style = ParagraphStyle('Header', parent=styles['Heading2'], fontSize=12, alignment=1)
+    line_style = ParagraphStyle('Line', parent=styles['Normal'], fontSize=9)
+
+    # No logo for 80mm export; show only company name
+    logo_path = None
+    story.append(Paragraph(enterprise.get('name', 'Entreprise'), header_style))
+    story.append(Spacer(1, 0.1*cm))
+
+    story.append(Paragraph("RAPPORT D'INVENTAIRE", header_style))
+    story.append(Spacer(1, 0.1*cm))
+
+    # Table header (shorten 'Écart' to 'Dif')
+    table_data = [[Paragraph('Produit', line_style), Paragraph('S.S', line_style), Paragraph('S.C', line_style), Paragraph('Dif', line_style), Paragraph('Valeur', line_style)]]
+
+    total_value = 0.0
+
+    def fmt_int(v):
+        try:
+            iv = int(round(float(v or 0)))
+        except Exception:
+            iv = 0
+        return f"{iv:,}".replace(",", " ")
+
+    # Ensure products are displayed alphabetically by product name
+    try:
+        sorted_products = sorted(products or [], key=lambda x: (str(x.get('product_name') if isinstance(x, dict) else getattr(x, 'product_name', '') or '')).lower())
+    except Exception:
+        sorted_products = products or []
+
+    for p in sorted_products:
+        system_stock = p.get('system_stock', 0) or 0
+        counted_stock = p.get('counted_stock', 0) or 0
+        variance = p.get('variance', 0) or 0
+        selling_price = p.get('selling_price', 0) or 0
+        try:
+            value_sale = float(variance) * float(selling_price)
+        except Exception:
+            value_sale = 0.0
+        total_value += value_sale
+
+        name = str(p.get('product_name', '') or '')[:25]
+        table_data.append([
+            Paragraph(name, line_style),
+            Paragraph(fmt_int(system_stock), line_style),
+            Paragraph(fmt_int(counted_stock), line_style),
+            Paragraph(fmt_int(variance), line_style),
+            Paragraph(fmt_int(value_sale), line_style)
+        ])
+
+    if len(table_data) == 1:
+        story.append(Paragraph("Aucun produit listé.", line_style))
+    else:
+        # Adjusted widths: shrink 'Produit' slightly and enlarge 'Dif' to fit ~3 chars
+        col_widths = [page_width*0.34, page_width*0.12, page_width*0.12, page_width*0.14, page_width*0.28]
+        prod_table = Table(table_data, colWidths=col_widths, repeatRows=1)
+        prod_table.setStyle(TableStyle([
+            ('FONTNAME', (0,0), (-1,0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0,0), (-1,0), 9),
+            ('FONTSIZE', (0,1), (-1,-1), 8),
+            ('ALIGN', (1,1), (-1,-1), 'RIGHT'),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+            ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+        ]))
+        story.append(prod_table)
+
+    story.append(Spacer(1, 0.3*cm))
+
+    # Totals: Total perte / Total gain with currency
+    currency = enterprise.get('currency', 'FC')
+    try:
+        if total_value < 0:
+            label = 'Total perte'
+            value = abs(total_value)
+        else:
+            label = 'Total gain'
+            value = total_value
+        total_fmt = fmt_int(value)
+    except Exception:
+        label = 'Total'
+        total_fmt = str(total_value)
+
+    totals_table = Table([[Paragraph(label, line_style), Paragraph(f"{total_fmt} {currency}", line_style)]], colWidths=[page_width*0.6, page_width*0.3])
+    totals_table.setStyle(TableStyle([('ALIGN', (1,0), (1,0), 'RIGHT'), ('FONTSIZE', (0,0), (-1,-1), 9)]))
+    story.append(totals_table)
+
+    story.append(Spacer(1, 0.2*cm))
+
+    # Inventories table (same-day completed sessions related to this inventory)
+    inv_names = []
+    try:
+        from ayanna_erp.database.database_manager import DatabaseManager
+        from sqlalchemy import text
+        dbm = DatabaseManager()
+        if getattr(inventory, 'completed_date', None):
+            inv_day = inventory.completed_date
+        else:
+            inv_day = getattr(inventory, 'created_at', datetime.now())
+        start_day = datetime.combine(inv_day.date(), datetime.min.time())
+        end_day = datetime.combine(inv_day.date(), datetime.max.time())
+        with dbm.get_session() as sess:
+            q = text("""
+                SELECT session_name FROM stock_inventaire
+                WHERE status = 'COMPLETED' AND completed_date >= :start_day AND completed_date <= :end_day
+                ORDER BY completed_date ASC
+            """)
+            rows = sess.execute(q, {'start_day': start_day, 'end_day': end_day}).fetchall()
+            for rr in rows:
+                name = getattr(rr, 'session_name', None) or (rr[0] if len(rr) > 0 else None)
+                if name:
+                    inv_names.append(str(name))
+    except Exception:
+        inv_names = []
+
+    inv_table_data = [[Paragraph('<b>Inventaires pris en compte</b>', small_style)]]
+    if inv_names:
+        for n in inv_names:
+            inv_table_data.append([Paragraph(n, small_style)])
+    else:
+        inv_table_data.append([Paragraph('Aucun inventaire complété ce jour', small_style)])
+    inv_tbl = Table(inv_table_data, colWidths=[page_width - 4*mm])
+    inv_tbl.setStyle(TableStyle([
+        ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+        ('FONTSIZE', (0,0), (-1,-1), 8),
+        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+    ]))
+    story.append(inv_tbl)
+
+    story.append(Spacer(1, 0.5*cm))
+    story.append(Paragraph("Généré par Ayanna ERP", small_style))
+    story.append(Paragraph(f"Imprimé le {datetime.now().strftime('%d/%m/%Y %H:%M')}", small_style))
+
+    doc.build(story)
+
+    # Cleanup temp logo
+    try:
+        if logo_path and os.path.exists(logo_path):
+            os.unlink(logo_path)
+    except Exception:
+        pass
+    
 
 
 class CountingDialog(QDialog):
@@ -771,8 +929,18 @@ class CountingDialog(QDialog):
             # Récupérer les informations de l'entreprise
             enterprise_info = self.get_enterprise_info()
             
-            # Générer le PDF
-            self.generate_inventory_pdf(file_path, inventory, products, enterprise_info)
+            # Choix du format d'export (A4 ou 80mm)
+            choice, ok = QInputDialog.getItem(self, "Format d'export", "Choisissez le format:", ["A4", "80mm"], 0, False)
+            if not ok:
+                return
+
+            if choice == '80mm':
+                file_path = os.path.join(export_dir, f"inventaire_{safe_reference}_{ts}_80mm.pdf")
+                generate_inventory_ticket_80mm(file_path, inventory, products, enterprise_info)
+            else:
+                file_path = os.path.join(export_dir, f"inventaire_{safe_reference}_{ts}.pdf")
+                # Générer le PDF A4
+                self.generate_inventory_pdf(file_path, inventory, products, enterprise_info)
 
             # Ouvrir automatiquement le PDF généré
             try:
@@ -994,6 +1162,10 @@ class CountingDialog(QDialog):
         
         # Générer le PDF
         doc.build(story)
+
+    def generate_inventory_ticket_80mm(self, file_path: str, inventory: StockInventaire, products: List[Dict], enterprise: Dict):
+        # Delegate to module-level generator for reuse across dialogs
+        return generate_inventory_ticket_80mm(file_path, inventory, products, enterprise)
 
 
 class InventoryDetailsDialog(QDialog):
@@ -1462,8 +1634,17 @@ class InventoryDetailsDialog(QDialog):
             file_path = os.path.join(export_dir, f"inventaire_{safe_reference}_{ts}.pdf")
 
             enterprise_info = self.get_enterprise_info()
+            # Choix du format d'export (A4 ou 80mm)
+            choice, ok = QInputDialog.getItem(self, "Format d'export", "Choisissez le format:", ["A4", "80mm"], 0, False)
+            if not ok:
+                return
+
             current_filter = self.variance_filter.currentText() if hasattr(self, 'variance_filter') else 'Tous'
-            self.generate_inventory_pdf(file_path, inventory, products, enterprise_info, variance_filter=current_filter)
+            if choice == '80mm':
+                # ticket 80mm
+                generate_inventory_ticket_80mm(file_path, inventory, products, enterprise_info)
+            else:
+                self.generate_inventory_pdf(file_path, inventory, products, enterprise_info, variance_filter=current_filter)
 
             try:
                 if os.name == 'nt':

@@ -856,20 +856,18 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 # Pour chaque produit/service, calculer quantités stock via stock_mouvements
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
-                    print("DEBUG 1 : Verifier si on entre dans la boucle")
                     if it.get('is_service'):
-                        # Pas de stock pour les services
-                        initial_q = 0.0
+                        # Pas de stock pour les services -> pas d'initial
+                        initial_q = None
                         added_q = 0.0
                         purchases_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # quantité initiale : tenter par entrepôt POS selon canal de vente (boutique->POS_2, restau->POS_4)
-                        # choisir l'entrepôt où l'article est majoritairement vendu
+                        # quantité initiale : PREMIER inventaire COMPLETED de la journée (start_day -> end_day)
+                        initial_q = None
                         try:
-                            # Chercher le dernier inventaire COMPLETED qui contient CE produit spécifiquement
-                            inv_base = None
-                            inv_base_dt = None
+                            start_day = datetime.combine(d1.date(), datetime.min.time())
+                            end_day = datetime.combine(d1.date(), datetime.max.time())
                             if wid:
                                 r_prod_inv = session.execute(text("""
                                     SELECT sii.counted_stock, si.completed_date
@@ -878,56 +876,29 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                     WHERE sii.product_id = :pid
                                       AND si.warehouse_id = :wid
                                       AND si.status = 'COMPLETED'
-                                      AND si.completed_date <= :d1
-                                    ORDER BY si.completed_date DESC
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
                                     LIMIT 1
-                                """), {'pid': pid, 'wid': wid, 'd1': d1}).fetchone()
-                                if r_prod_inv:
-                                    inv_base = float(r_prod_inv.counted_stock or 0)
-                                    inv_base_dt = r_prod_inv.completed_date
-
-                            if inv_base is not None and inv_base_dt:
-                                # Variation signée des mouvements entre la date d'inventaire et d1
-                                q_var = text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                        ELSE 0 END),0) as var
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
-                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """)
-                                r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_base_dt, 'd1': d1, 'wid': wid}).fetchone()
-                                variation = float(r_var.var or 0)
-                                initial_q = float(inv_base + variation)
+                                """), {'pid': pid, 'wid': wid, 'start_day': start_day, 'end_day': end_day}).fetchone()
                             else:
-                                # Aucun inventaire pour ce produit -> somme signée de tous les mouvements avant d1
-                                if wid:
-                                    q_init = text("""
-                                        SELECT COALESCE(SUM(CASE
-                                            WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                            WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                            WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                            WHEN movement_type = 'ANNULATION' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            ELSE 0
-                                        END),0) as qty
-                                        FROM stock_mouvements
-                                        WHERE product_id = :pid AND movement_date < :d1
-                                          AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                    """)
-                                    params_init = {'pid': pid, 'd1': d1, 'wid': wid}
-                                else:
-                                    q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
-                                    params_init = {'pid': pid, 'd1': d1}
-                                r_init = session.execute(q_init, params_init).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                r_prod_inv = session.execute(text("""
+                                    SELECT sii.counted_stock, si.completed_date
+                                    FROM stock_inventaire_item sii
+                                    JOIN stock_inventaire si ON sii.inventory_id = si.id
+                                    WHERE sii.product_id = :pid
+                                      AND si.status = 'COMPLETED'
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
+                                    LIMIT 1
+                                """), {'pid': pid, 'start_day': start_day, 'end_day': end_day}).fetchone()
+                            if r_prod_inv:
+                                initial_q = float(r_prod_inv.counted_stock or 0)
+                            else:
+                                initial_q = None
                         except Exception:
-                            initial_q = 0.0
+                            initial_q = None
 
                         # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
                         try:
@@ -994,6 +965,14 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'unit_price': unit_price,
                         'total': total_amount
                     })
+
+                # If at least one product has an initial inventory counted (not None),
+                # then set initial_quantity to 0 for other products so the column is shown.
+                any_initial = any((r.get('initial_quantity') is not None) for r in rows_out)
+                if any_initial:
+                    for r in rows_out:
+                        if r.get('initial_quantity') is None:
+                            r['initial_quantity'] = 0.0
 
                 # Générer CSV
                 export_dir = os.path.join(os.getcwd(), 'exports')
@@ -1198,17 +1177,17 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
                     if it.get('is_service'):
-                        # Pas de stock pour les services
-                        initial_q = 0.0
+                        # Pas de stock pour les services -> pas d'initial
+                        initial_q = None
                         added_q = 0.0
                         adjustments_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # QUANTITÉ INITIALE = dernier inventaire COMPLETED qui contient CE produit spécifiquement
+                        # QUANTITÉ INITIALE = PREMIER inventaire COMPLETED de la journée (start_day..end_day)
+                        # Si aucun inventaire COMPLETED le jour-même, ne pas calculer initial (None)
                         try:
-                            initial_q = 0.0
-                            inv_base = None
-                            inv_base_dt = None
+                            start_day = datetime.combine(d1.date(), datetime.min.time())
+                            end_day = datetime.combine(d1.date(), datetime.max.time())
                             if warehouse_id:
                                 r_prod_inv = session.execute(text("""
                                     SELECT sii.counted_stock, si.completed_date
@@ -1217,56 +1196,30 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                                     WHERE sii.product_id = :pid
                                       AND si.warehouse_id = :wid
                                       AND si.status = 'COMPLETED'
-                                      AND si.completed_date <= :d1
-                                    ORDER BY si.completed_date DESC
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
                                     LIMIT 1
-                                """), {'pid': pid, 'wid': warehouse_id, 'd1': d1}).fetchone()
-                                if r_prod_inv:
-                                    inv_base = float(r_prod_inv.counted_stock or 0)
-                                    inv_base_dt = r_prod_inv.completed_date
-
-                            if inv_base is not None and inv_base_dt:
-                                # Variation signée des mouvements entre la date d'inventaire et d1
-                                q_var = text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        ELSE 0 END),0) as var
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
-                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """)
-                                r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_base_dt, 'd1': d1, 'wid': warehouse_id}).fetchone()
-                                variation = float(r_var.var or 0)
-                                initial_q = float(inv_base + variation)
-                            elif warehouse_id:
-                                # Aucun inventaire pour ce produit -> somme signée de tous les mouvements avant d1
-                                r_init = session.execute(text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                        WHEN movement_type = 'ANNULATION' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        ELSE 0
-                                    END),0) as qty
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date < :d1
-                                      AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """), {'pid': pid, 'd1': d1, 'wid': warehouse_id}).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                """), {'pid': pid, 'wid': warehouse_id, 'start_day': start_day, 'end_day': end_day}).fetchone()
                             else:
-                                # Sans entrepôt : fallback sur la somme globale des mouvements avant d1
-                                r_init = session.execute(text(
-                                    "SELECT COALESCE(SUM(CASE WHEN movement_type = 'ENTREE' THEN quantity WHEN movement_type = 'SORTIE' THEN -quantity WHEN movement_type = 'AJUSTEMENT' THEN quantity WHEN movement_type = 'ANNULATION' THEN quantity ELSE 0 END), 0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1"
-                                ), {'pid': pid, 'd1': d1}).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                r_prod_inv = session.execute(text("""
+                                    SELECT sii.counted_stock, si.completed_date
+                                    FROM stock_inventaire_item sii
+                                    JOIN stock_inventaire si ON sii.inventory_id = si.id
+                                    WHERE sii.product_id = :pid
+                                      AND si.status = 'COMPLETED'
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
+                                    LIMIT 1
+                                """), {'pid': pid, 'start_day': start_day, 'end_day': end_day}).fetchone()
+                            if r_prod_inv:
+                                initial_q = float(r_prod_inv.counted_stock or 0)
+                            else:
+                                initial_q = None
                         except Exception as e:
                             print(f"⚠️ Erreur calcul Q initiale pour produit {pid}: {e}")
-                            initial_q = 0.0
+                            initial_q = None
 
                         # AJOUTS DU JOUR = ENTREE + TRANSFERT IN (reçus uniquement)
                         # On ne compte que les entrées réelles (achats) et les transferts entrants
@@ -1339,8 +1292,9 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             adjustments_q = 0.0
 
                     sold = float(it.get('sold', 0.0))
-                    # Quantité finale = Q_initiale + Ajouts + Ajustements - Ventes
-                    final_q = initial_q + added_q + adjustments_q - sold
+                    # Quantité finale (reste) = Q_initiale + Ajouts - Ventes (par spec)
+                    _initial_for_calc = initial_q if initial_q is not None else 0.0
+                    final_q = _initial_for_calc + added_q - sold
                     unit_price = float(it.get('unit_price', 0.0))
                     total_amount = sold * unit_price
 

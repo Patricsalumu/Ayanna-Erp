@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from ayanna_erp.database.database_manager import get_database_manager
 from sqlalchemy import text
 from sqlalchemy.orm.exc import DetachedInstanceError
+import logging
 from ayanna_erp.modules.restaurant.models.restaurant import (
     RestauPanier, RestauProduitPanier, RestauPayment, RestauTable
 )
@@ -16,6 +17,7 @@ class VenteController:
     def __init__(self, entreprise_id=1):
         self.db = get_database_manager()
         self.entreprise_id = entreprise_id
+        self.logger = logging.getLogger(__name__)
 
     def _calculate_payment_status(self, total_paid, total_final):
         """
@@ -149,7 +151,9 @@ class VenteController:
                     except Exception:
                         prod_name = f'Produit {p}'
                     msgs.append(f"{prod_name}: demandé {q}, disponible {a}")
-                raise ValueError("Stock insuffisant: " + "; ".join(msgs))
+                msg_text = "; ".join(msgs)
+                self.logger.warning(f"Stock insuffisant pour panier {panier_id}: {msg_text}")
+                raise ValueError("Stock insuffisant: " + msg_text)
             
             # Récupérer le total à payer
             try:
@@ -240,17 +244,23 @@ class VenteController:
                     )
             # Finaliser la vente (écritures comptables + stock) uniquement lors du premier passage à 'valide'
             # Si le panier était déjà 'valide', finalize_sale a déjà été appelé et a traité la vente.
-            try:
-                if original_status != 'valide':
-                    try:
-                        # IMPORTANT: Commit avant finalize_sale (ouvre sa propre session et lit depuis la DB)
-                        session.commit()
-                        ok, msg = self.finalize_sale(panier_id, amount, payment_method=payment_method, user_id=user_id)
-                        print(f"DEBUG: finalize_sale result for panier {panier_id}: {ok} - {msg}")
-                    except Exception as e:
-                        print(f"DEBUG: Erreur finalize_sale pour panier {panier_id}: {e}")
-            except Exception:
-                pass
+            # NOTE: On n'effectue PAS de `session.commit()` avant `finalize_sale` afin de garder
+            # l'opération atomique côté paiement: si finalize_sale échoue, on rollback le paiement
+            # et on informe l'utilisateur.
+            if original_status != 'valide':
+                try:
+                    ok, msg = self.finalize_sale(panier_id, payment_amount, payment_method=payment_method, user_id=user_id)
+                except Exception as e:
+                    session.rollback()
+                    self.logger.exception(f"Exception inattendue lors de finalize_sale pour panier {panier_id}: {e}")
+                    raise ValueError(f"Erreur interne lors de finalisation vente: {e}")
+
+                # Si finalize_sale indique un échec métier (ex: stock insuffisant, config manquante)
+                if not ok:
+                    # Annuler les changements locaux (paiement non validé)
+                    session.rollback()
+                    self.logger.error(f"finalize_sale a échoué pour panier {panier_id}: {msg}")
+                    raise ValueError(f"Échec finalisation vente: {msg}")
 
             # Calculer les statuts et montants
             total_paid = sum([p.amount for p in panier.payments]) if panier.payments else 0.0
@@ -454,6 +464,7 @@ class VenteController:
                 # fallback: try without filter
                 cfg = session.execute(text("SELECT compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id FROM compta_config LIMIT 1")).fetchone()
             if not cfg:
+                self.logger.error(f"Configuration comptable introuvable pour entreprise {self.entreprise_id}")
                 return False, "Configuration comptable introuvable"
 
             compte_vente_id, compte_caisse_id, compte_client_id, compte_remise_id, compte_stock_id, compte_variation_stock_id, compte_achat_id = cfg
@@ -674,10 +685,8 @@ class VenteController:
                 ordre_stock += 1
 
                 # Mettre à jour le stock réel dans l'entrepôt POS_4 (pour chaque ligne)
-                try:
-                    self._update_pos_stock_restaurant(session, getattr(ligne, 'product_id', None), int(qty), getattr(ligne, 'price', 0.0), item_total, f"CMD-{panier.id}")
-                except Exception as e:
-                    print(f"DEBUG: Erreur mise à jour stock pour produit {getattr(ligne, 'product_id', None)}: {e}")
+                # Laisser remonter les exceptions critiques pour provoquer un rollback global
+                self._update_pos_stock_restaurant(session, getattr(ligne, 'product_id', None), int(qty), getattr(ligne, 'price', 0.0), item_total, f"CMD-{panier.id}")
 
             # 3) Journal encaissement (si paiement)
             if float(amount_received or 0.0) > 0 and compte_caisse_id:
@@ -792,6 +801,7 @@ class VenteController:
             return True, f"Vente finalisée et écritures créées pour panier {panier.id}"
         except Exception as e:
             session.rollback()
+            self.logger.exception(f"Erreur inattendue lors de la finalisation de la vente panier {panier_id}: {e}")
             return False, f"Erreur finalisation vente: {e}"
         finally:
             try:
@@ -808,8 +818,8 @@ class VenteController:
             # Chercher l'entrepôt POS_4
             warehouse_row = session.execute(text("SELECT id FROM stock_warehouses WHERE code = 'POS_4' AND is_active = 1 LIMIT 1")).fetchone()
             if not warehouse_row:
-                print(f"⚠️ Entrepôt POS_4 non trouvé pour le produit {product_id}")
-                return
+                self.logger.error(f"Entrepôt POS_4 non trouvé pour le produit {product_id}")
+                raise RuntimeError(f"Entrepôt POS_4 introuvable")
             warehouse_id = warehouse_row[0]
 
             # Récupérer le stock actuel
@@ -822,12 +832,12 @@ class VenteController:
             new_stock = max(0, int(current_stock) - int(quantity_sold))
 
             if stock_row:
-                session.execute(
+                res = session.execute(
                     text("UPDATE stock_produits_entrepot SET quantity = :new_quantity, updated_at = :updated_at WHERE product_id = :product_id AND warehouse_id = :warehouse_id"),
                     {'product_id': product_id, 'new_quantity': new_stock, 'warehouse_id': warehouse_id, 'updated_at': datetime.now()}
                 )
             else:
-                session.execute(
+                res = session.execute(
                     text("INSERT INTO stock_produits_entrepot (product_id, warehouse_id, quantity, reserved_quantity, unit_cost, total_cost, min_stock_level, created_at, updated_at) VALUES (:product_id, :warehouse_id, :quantity, 0, 0, 0, 0, :created_at, :updated_at)"),
                     {'product_id': product_id, 'warehouse_id': warehouse_id, 'quantity': new_stock, 'created_at': datetime.now(), 'updated_at': datetime.now()}
                 )
@@ -858,6 +868,8 @@ class VenteController:
                     'created_at': datetime.now()
                 }
             )
-            print(f"📦 Stock mis à jour (POS_4) - Produit {product_id}: {current_stock} → {new_stock}")
+            self.logger.info(f"Stock mis à jour (POS_4) - Produit {product_id}: {current_stock} → {new_stock}")
         except Exception as e:
-            print(f"❌ Erreur mise à jour stock (POS_4): {e}")
+            self.logger.exception(f"Erreur mise à jour stock (POS_4) pour produit {product_id}: {e}")
+            # Remonter l'exception pour assurer rollback global
+            raise

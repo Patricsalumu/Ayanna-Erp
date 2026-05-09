@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QLabel, QLineEdit, QPushButton, QComboBox, 
     QMessageBox, QGroupBox, QScrollArea, QFrame, QWidget
 )
+from PyQt6.QtWidgets import QCheckBox
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
@@ -134,7 +135,7 @@ class SimpleUserWidget(QDialog):
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
-        
+
         # Titre
         title_label = QLabel("Modifier l'utilisateur" if self.is_editing else "Créer un nouvel utilisateur")
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -151,11 +152,25 @@ class SimpleUserWidget(QDialog):
             }
         """)
         layout.addWidget(title_label)
-        
+
+        # Make the main form scrollable (horizontal and vertical as needed)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+
         # Formulaire principal
         form_group = self.create_form_group()
-        layout.addWidget(form_group)
-        
+        content_layout.addWidget(form_group)
+
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
+
         # Boutons d'action
         button_layout = self.create_button_layout()
         layout.addLayout(button_layout)
@@ -216,6 +231,28 @@ class SimpleUserWidget(QDialog):
             note_label = QLabel("Laissez le mot de passe vide pour le conserver")
             note_label.setStyleSheet("color: #7f8c8d; font-style: italic; font-size: 10px;")
             layout.addRow("", note_label)
+
+        # Modules accessibles
+        self.module_options = [
+            ("SalleFete", "Salle de Fête"),
+            ("Vente", "Boutique / Vente"),
+            ("Pharmacie", "Pharmacie"),
+            ("Restaurant", "Restaurant"),
+            ("Hotel", "Hôtel"),
+            ("Achats", "Achats"),
+            ("Stock", "Stock"),
+            ("Comptabilite", "Comptabilité")
+        ]
+
+        modules_box = QGroupBox("Modules accessibles")
+        modules_layout = QVBoxLayout(modules_box)
+        self.module_checkboxes = {}
+        for mname, mlabel in self.module_options:
+            cb = QCheckBox(mlabel)
+            self.module_checkboxes[mname] = cb
+            modules_layout.addWidget(cb)
+
+        layout.addRow(modules_box)
         
         return group
     
@@ -263,6 +300,14 @@ class SimpleUserWidget(QDialog):
             if self.role_combo.itemData(i) == user_role:
                 self.role_combo.setCurrentIndex(i)
                 break
+        # Modules
+        modules = self.user_data.get('modules', []) or []
+        modules_set = set([str(m) for m in modules])
+        for mname, cb in getattr(self, 'module_checkboxes', {}).items():
+            try:
+                cb.setChecked(mname in modules_set)
+            except Exception:
+                pass
     
     def validate_form(self):
         """Valider les données du formulaire"""
@@ -313,6 +358,13 @@ class SimpleUserWidget(QDialog):
         password = self.password_edit.text()
         if password:
             data['password'] = password
+
+        # Modules
+        modules = []
+        for mname, cb in getattr(self, 'module_checkboxes', {}).items():
+            if cb.isChecked():
+                modules.append(mname)
+        data['modules'] = modules
         
         return data
     

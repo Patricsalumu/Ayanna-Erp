@@ -1,3 +1,8 @@
+from ayanna_erp.core.session_manager import SessionManager
+from ayanna_erp.utils.formatting import get_currency
+from sqlalchemy import text
+
+
 def export_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = 'boutique') -> str:
         """
         Génère un fichier CSV listant chaque produit/service vendu sur la période avec colonnes:
@@ -139,78 +144,54 @@ def export_products_summary(self, date_debut, date_fin, include_services: bool =
                 for idx, (key, it) in enumerate(items.items(), start=1):
                     print("DEBUG 1 : Verifier si on entre dans la boucle")
                     if it.get('is_service'):
-                        # Pas de stock pour les services
-                        initial_q = 0.0
+                        # Pas de stock pour les services -> pas d'initial
+                        initial_q = None
                         added_q = 0.0
                         purchases_q = 0.0
                     else:
                         pid = it.get('product_id')
-                        # quantité initiale : tenter par entrepôt POS selon canal de vente (boutique->POS_2, restau->POS_4)
-                        # choisir l'entrepôt où l'article est majoritairement vendu
+                        # quantité initiale : PRIMER INVENTAIRE DE LA JOURNÉE (le premier inventaire complété
+                        # sur la journée de d1 sera considéré comme quantité initiale). Si aucun inventaire
+                        # ce jour-là pour le produit, laisser `initial_q` à None.
                         try:
-                            # Chercher le dernier inventaire COMPLETED qui contient CE produit spécifiquement
-                            inv_base = None
-                            inv_base_dt = None
-                            if wid:
-                                r_prod_inv = session.execute(text("""
-                                    SELECT sii.counted_stock, si.completed_date
-                                    FROM stock_inventaire_item sii
-                                    JOIN stock_inventaire si ON sii.inventory_id = si.id
-                                    WHERE sii.product_id = :pid
-                                      AND si.warehouse_id = :wid
-                                      AND si.status = 'COMPLETED'
-                                      AND si.completed_date <= :d1
-                                    ORDER BY si.completed_date DESC
-                                    LIMIT 1
-                                """), {'pid': pid, 'wid': wid, 'd1': d1}).fetchone()
-                                if r_prod_inv:
-                                    inv_base = float(r_prod_inv.counted_stock or 0)
-                                    inv_base_dt = r_prod_inv.completed_date
-
-                            if inv_base is not None and inv_base_dt:
-                                # Variation signée des mouvements entre la date d'inventaire et d1
-                                q_var = text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                        ELSE 0 END),0) as var
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
-                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """)
-                                r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_base_dt, 'd1': d1, 'wid': wid}).fetchone()
-                                variation = float(r_var.var or 0)
-                                initial_q = float(inv_base + variation)
-                            else:
-                                # Aucun inventaire pour ce produit -> somme signée de tous les mouvements avant d1
+                            # Chercher le premier inventaire COMPLETED de la journée de d1 qui contient CE produit
+                            initial_q = None
+                            try:
+                                start_day = datetime.combine(d1.date(), datetime.min.time())
+                                end_day = datetime.combine(d1.date(), datetime.max.time())
                                 if wid:
-                                    q_init = text("""
-                                        SELECT COALESCE(SUM(CASE
-                                            WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                            WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                            WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                            WHEN movement_type = 'ANNULATION' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                            ELSE 0
-                                        END),0) as qty
-                                        FROM stock_mouvements
-                                        WHERE product_id = :pid AND movement_date < :d1
-                                          AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                    """)
-                                    params_init = {'pid': pid, 'd1': d1, 'wid': wid}
+                                    r_prod_inv = session.execute(text("""
+                                        SELECT sii.counted_stock, si.completed_date
+                                        FROM stock_inventaire_item sii
+                                        JOIN stock_inventaire si ON sii.inventory_id = si.id
+                                        WHERE sii.product_id = :pid
+                                          AND si.warehouse_id = :wid
+                                          AND si.status = 'COMPLETED'
+                                          AND si.completed_date >= :start_day
+                                          AND si.completed_date <= :end_day
+                                        ORDER BY si.completed_date ASC
+                                        LIMIT 1
+                                    """), {'pid': pid, 'wid': wid, 'start_day': start_day, 'end_day': end_day}).fetchone()
                                 else:
-                                    q_init = text("SELECT COALESCE(SUM(quantity),0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1")
-                                    params_init = {'pid': pid, 'd1': d1}
-                                r_init = session.execute(q_init, params_init).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                    r_prod_inv = session.execute(text("""
+                                        SELECT sii.counted_stock, si.completed_date
+                                        FROM stock_inventaire_item sii
+                                        JOIN stock_inventaire si ON sii.inventory_id = si.id
+                                        WHERE sii.product_id = :pid
+                                          AND si.status = 'COMPLETED'
+                                          AND si.completed_date >= :start_day
+                                          AND si.completed_date <= :end_day
+                                        ORDER BY si.completed_date ASC
+                                        LIMIT 1
+                                    """), {'pid': pid, 'start_day': start_day, 'end_day': end_day}).fetchone()
+                                if r_prod_inv:
+                                    initial_q = float(r_prod_inv.counted_stock)
+                            except Exception:
+                                initial_q = None
                         except Exception:
-                            initial_q = 0.0
+                            initial_q = None
 
-                        # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT, AJUSTEMENT)
+                        # quantité ajoutée pendant l'intervalle (ENTREE, TRANSFERT)
                         try:
                             if wid:
                                 q_added = text("""
@@ -283,46 +264,80 @@ def export_products_summary(self, date_debut, date_fin, include_services: bool =
                 filename = f"produits_vendus_{timestamp}.csv"
                 path = os.path.join(export_dir, filename)
                 import csv
+                # Si aucun produit n'a d'inventaire initial pour la période, masquer les colonnes Initial/Remaining
+                any_initial = any((r.get('initial_quantity') is not None) for r in rows_out)
                 with open(path, 'w', newline='', encoding='utf-8') as csvfile:
-                    fieldnames = ['No', 'Name', 'Initial Quantity', 'Quantity Added', 'Purchases/Transfers', 'Total Initial+Added', 'Remaining', 'Sold', 'Unit Price', 'Total']
+                    if any_initial:
+                        fieldnames = ['No', 'Name', 'Initial Quantity', 'Quantity Added', 'Purchases/Transfers', 'Total Initial+Added', 'Remaining', 'Sold', 'Unit Price', 'Total']
+                    else:
+                        fieldnames = ['No', 'Name', 'Quantity Added', 'Purchases/Transfers', 'Total Initial+Added', 'Sold', 'Unit Price', 'Total']
                     writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
                     writer.writeheader()
+                    # Totals accumulator
                     total_row = { 'Initial Quantity':0, 'Quantity Added':0, 'Purchases/Transfers':0, 'Total Initial+Added':0, 'Remaining':0, 'Sold':0, 'Total':0 }
                     for r in rows_out:
-                        writer.writerow({
-                            'No': r['no'],
-                            'Name': r['name'],
-                            'Initial Quantity': f"{r['initial_quantity']:.3f}",
-                            'Quantity Added': f"{r['quantity_added']:.3f}",
-                            'Purchases/Transfers': f"{r['purchases_transfers']:.3f}",
-                            'Total Initial+Added': f"{r['total_initial_plus_added']:.3f}",
-                            'Remaining': f"{r['reste']:.3f}",
-                            'Sold': f"{r['sold']:.3f}",
-                            'Unit Price': f"{r['unit_price']:.2f}",
-                            'Total': f"{r['total']:.2f}"
-                        })
-                        total_row['Initial Quantity'] += r['initial_quantity']
+                        if any_initial:
+                            init_val = '' if r['initial_quantity'] is None else f"{r['initial_quantity']:.3f}"
+                            remaining_val = '' if r['initial_quantity'] is None else f"{r['reste']:.3f}"
+                            row_dict = {
+                                'No': r['no'],
+                                'Name': r['name'],
+                                'Initial Quantity': init_val,
+                                'Quantity Added': f"{r['quantity_added']:.3f}",
+                                'Purchases/Transfers': f"{r['purchases_transfers']:.3f}",
+                                'Total Initial+Added': f"{r['total_initial_plus_added']:.3f}",
+                                'Remaining': remaining_val,
+                                'Sold': f"{r['sold']:.3f}",
+                                'Unit Price': f"{r['unit_price']:.2f}",
+                                'Total': f"{r['total']:.2f}"
+                            }
+                        else:
+                            row_dict = {
+                                'No': r['no'],
+                                'Name': r['name'],
+                                'Quantity Added': f"{r['quantity_added']:.3f}",
+                                'Purchases/Transfers': f"{r['purchases_transfers']:.3f}",
+                                'Total Initial+Added': f"{r['total_initial_plus_added']:.3f}",
+                                'Sold': f"{r['sold']:.3f}",
+                                'Unit Price': f"{r['unit_price']:.2f}",
+                                'Total': f"{r['total']:.2f}"
+                            }
+                        writer.writerow(row_dict)
+                        total_row['Initial Quantity'] += (r.get('initial_quantity') or 0)
                         total_row['Quantity Added'] += r['quantity_added']
                         total_row['Purchases/Transfers'] += r['purchases_transfers']
                         total_row['Total Initial+Added'] += r['total_initial_plus_added']
-                        total_row['Remaining'] += r['reste']
+                        total_row['Remaining'] += (r.get('reste') or 0)
                         total_row['Sold'] += r['sold']
                         total_row['Total'] += r['total']
 
                     # Totals line
-                    writer.writerow({})
-                    writer.writerow({
-                        'No': '',
-                        'Name': 'TOTALS',
-                        'Initial Quantity': f"{total_row['Initial Quantity']:.3f}",
-                        'Quantity Added': f"{total_row['Quantity Added']:.3f}",
-                        'Purchases/Transfers': f"{total_row['Purchases/Transfers']:.3f}",
-                        'Total Initial+Added': f"{total_row['Total Initial+Added']:.3f}",
-                        'Remaining': f"{total_row['Remaining']:.3f}",
-                        'Sold': f"{total_row['Sold']:.3f}",
-                        'Unit Price': '',
-                        'Total': f"{total_row['Total']:.2f}"
-                    })
+                    if any_initial:
+                        writer.writerow({})
+                        writer.writerow({
+                            'No': '',
+                            'Name': 'TOTALS',
+                            'Initial Quantity': f"{total_row['Initial Quantity']:.3f}",
+                            'Quantity Added': f"{total_row['Quantity Added']:.3f}",
+                            'Purchases/Transfers': f"{total_row['Purchases/Transfers']:.3f}",
+                            'Total Initial+Added': f"{total_row['Total Initial+Added']:.3f}",
+                            'Remaining': f"{total_row['Remaining']:.3f}",
+                            'Sold': f"{total_row['Sold']:.3f}",
+                            'Unit Price': '',
+                            'Total': f"{total_row['Total']:.2f}"
+                        })
+                    else:
+                        writer.writerow({})
+                        writer.writerow({
+                            'No': '',
+                            'Name': 'TOTALS',
+                            'Quantity Added': f"{total_row['Quantity Added']:.3f}",
+                            'Purchases/Transfers': f"{total_row['Purchases/Transfers']:.3f}",
+                            'Total Initial+Added': f"{total_row['Total Initial+Added']:.3f}",
+                            'Sold': f"{total_row['Sold']:.3f}",
+                            'Unit Price': '',
+                            'Total': f"{total_row['Total']:.2f}"
+                        })
 
                 return path
 
@@ -330,7 +345,7 @@ def export_products_summary(self, date_debut, date_fin, include_services: bool =
             print(f"❌ Erreur export_products_summary: {e}")
             return ''
 
-def get_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = None, pos_id: int = None):
+def get_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = None, pos_id: int = None, search_term: str = None, selected_product_ids: list = None, selected_category_ids: list = None):
         """
         Retourne la liste des produits/services vendus (rows_out) pour la période donnée.
         Même logique qu'export_products_summary mais renvoie les lignes au lieu d'écrire un CSV.
@@ -348,8 +363,8 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
 
         try:
             with self.db_manager.get_session() as session:
-                # Rassembler ventes produits (boutique)
-                q_products = text("""
+                # Rassembler ventes produits (boutique) avec filtres optionnels
+                prod_base = """
                     SELECT cp.id as product_id, cp.name as product_name,
                            COALESCE(SUM(spp.quantity),0) as sold_qty,
                            COALESCE(MAX(cp.price_unit),0) as unit_price
@@ -358,12 +373,38 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                     LEFT JOIN core_products cp ON spp.product_id = cp.id
                     WHERE p.created_at >= :d1 AND p.created_at <= :d2
                     AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                    GROUP BY cp.id, cp.name
-                """)
-                prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
+                """
+                prod_params = {'d1': d1, 'd2': d2}
+                # Apply search term filter
+                if search_term:
+                    prod_base += " AND (cp.name LIKE :search OR CAST(cp.id AS TEXT) LIKE :search)"
+                    prod_params['search'] = f"%{search_term}%"
+                # Apply selected product ids filter
+                if selected_product_ids:
+                    # ensure list of ints
+                    ids = tuple(int(x) for x in selected_product_ids)
+                    if len(ids) == 1:
+                        prod_base += " AND cp.id = :pid_filter"
+                        prod_params['pid_filter'] = ids[0]
+                    else:
+                        prod_base += f" AND cp.id IN :pids"
+                        prod_params['pids'] = ids
+                # Apply category filter if provided (core_products.category_id)
+                if selected_category_ids:
+                    cats = tuple(int(x) for x in selected_category_ids)
+                    if len(cats) == 1:
+                        prod_base += " AND cp.category_id = :cat_filter"
+                        prod_params['cat_filter'] = cats[0]
+                    else:
+                        prod_base += f" AND cp.category_id IN :cats"
+                        prod_params['cats'] = cats
 
-                # Ventes restaurant
-                q_restau = text("""
+                prod_base += " GROUP BY cp.id, cp.name"
+                q_products = text(prod_base)
+                prod_rows = session.execute(q_products, prod_params).fetchall()
+
+                # Ventes restaurant (avec mêmes filtres)
+                rest_base = """
                     SELECT cp.id as product_id, cp.name as product_name,
                            COALESCE(SUM(rpp.quantity),0) as sold_qty,
                            COALESCE(MAX(cp.price_unit),0) as unit_price
@@ -372,9 +413,31 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                     LEFT JOIN core_products cp ON rpp.product_id = cp.id
                     WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
                     AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
-                    GROUP BY cp.id, cp.name
-                """)
-                restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
+                """
+                rest_params = {'d1': d1, 'd2': d2}
+                if search_term:
+                    rest_base += " AND (cp.name LIKE :search OR CAST(cp.id AS TEXT) LIKE :search)"
+                    rest_params['search'] = f"%{search_term}%"
+                if selected_product_ids:
+                    ids = tuple(int(x) for x in selected_product_ids)
+                    if len(ids) == 1:
+                        rest_base += " AND cp.id = :pid_filter"
+                        rest_params['pid_filter'] = ids[0]
+                    else:
+                        rest_base += f" AND cp.id IN :pids"
+                        rest_params['pids'] = ids
+                if selected_category_ids:
+                    cats = tuple(int(x) for x in selected_category_ids)
+                    if len(cats) == 1:
+                        rest_base += " AND cp.category_id = :cat_filter"
+                        rest_params['cat_filter'] = cats[0]
+                    else:
+                        rest_base += f" AND cp.category_id IN :cats"
+                        rest_params['cats'] = cats
+
+                rest_base += " GROUP BY cp.id, cp.name"
+                q_restau = text(rest_base)
+                restau_rows = session.execute(q_restau, rest_params).fetchall()
 
                 # Services (shop)
                 service_map = []
@@ -481,17 +544,16 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                 rows_out = []
                 for idx, (key, it) in enumerate(items.items(), start=1):
                     if it.get('is_service'):
-                        # Pas de stock pour les services
-                        initial_q = 0.0
+                        # Pas de stock pour les services -> pas d'initial
+                        initial_q = None
                         added_q = 0.0
                         adjustments_q = 0.0
                     else:
                         pid = it.get('product_id')
                         # QUANTITÉ INITIALE = dernier inventaire COMPLETED qui contient CE produit spécifiquement
                         try:
-                            initial_q = 0.0
-                            inv_base = None
-                            inv_base_dt = None
+                            start_day = datetime.combine(d1.date(), datetime.min.time())
+                            end_day = datetime.combine(d1.date(), datetime.max.time())
                             if warehouse_id:
                                 r_prod_inv = session.execute(text("""
                                     SELECT sii.counted_stock, si.completed_date
@@ -500,56 +562,30 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                                     WHERE sii.product_id = :pid
                                       AND si.warehouse_id = :wid
                                       AND si.status = 'COMPLETED'
-                                      AND si.completed_date <= :d1
-                                    ORDER BY si.completed_date DESC
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
                                     LIMIT 1
-                                """), {'pid': pid, 'wid': warehouse_id, 'd1': d1}).fetchone()
-                                if r_prod_inv:
-                                    inv_base = float(r_prod_inv.counted_stock or 0)
-                                    inv_base_dt = r_prod_inv.completed_date
-
-                            if inv_base is not None and inv_base_dt:
-                                # Variation signée des mouvements entre la date d'inventaire et d1
-                                q_var = text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        ELSE 0 END),0) as var
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date > :inv_dt AND movement_date < :d1
-                                    AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """)
-                                r_var = session.execute(q_var, {'pid': pid, 'inv_dt': inv_base_dt, 'd1': d1, 'wid': warehouse_id}).fetchone()
-                                variation = float(r_var.var or 0)
-                                initial_q = float(inv_base + variation)
-                            elif warehouse_id:
-                                # Aucun inventaire pour ce produit -> somme signée de tous les mouvements avant d1
-                                r_init = session.execute(text("""
-                                    SELECT COALESCE(SUM(CASE
-                                        WHEN movement_type = 'ENTREE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'SORTIE' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN -quantity
-                                        WHEN movement_type = 'AJUSTEMENT' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        WHEN movement_type = 'TRANSFERT' AND destination_warehouse_id = :wid THEN ABS(quantity)
-                                        WHEN movement_type = 'TRANSFERT' AND warehouse_id = :wid THEN -ABS(quantity)
-                                        WHEN movement_type = 'ANNULATION' AND (warehouse_id = :wid OR destination_warehouse_id = :wid) THEN quantity
-                                        ELSE 0
-                                    END),0) as qty
-                                    FROM stock_mouvements
-                                    WHERE product_id = :pid AND movement_date < :d1
-                                      AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                                """), {'pid': pid, 'd1': d1, 'wid': warehouse_id}).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                """), {'pid': pid, 'wid': warehouse_id, 'start_day': start_day, 'end_day': end_day}).fetchone()
                             else:
-                                # Sans entrepôt : fallback sur la somme globale des mouvements avant d1
-                                r_init = session.execute(text(
-                                    "SELECT COALESCE(SUM(CASE WHEN movement_type = 'ENTREE' THEN quantity WHEN movement_type = 'SORTIE' THEN -quantity WHEN movement_type = 'AJUSTEMENT' THEN quantity WHEN movement_type = 'ANNULATION' THEN quantity ELSE 0 END), 0) as qty FROM stock_mouvements WHERE product_id = :pid AND movement_date < :d1"
-                                ), {'pid': pid, 'd1': d1}).fetchone()
-                                initial_q = float(r_init.qty or 0)
+                                r_prod_inv = session.execute(text("""
+                                    SELECT sii.counted_stock, si.completed_date
+                                    FROM stock_inventaire_item sii
+                                    JOIN stock_inventaire si ON sii.inventory_id = si.id
+                                    WHERE sii.product_id = :pid
+                                      AND si.status = 'COMPLETED'
+                                      AND si.completed_date >= :start_day
+                                      AND si.completed_date <= :end_day
+                                    ORDER BY si.completed_date ASC
+                                    LIMIT 1
+                                """), {'pid': pid, 'start_day': start_day, 'end_day': end_day}).fetchone()
+                            if r_prod_inv:
+                                initial_q = float(r_prod_inv.counted_stock or 0)
+                            else:
+                                initial_q = None
                         except Exception as e:
                             print(f"⚠️ Erreur calcul Q initiale pour produit {pid}: {e}")
-                            initial_q = 0.0
+                            initial_q = None
 
                         # AJOUTS DU JOUR = ENTREE + TRANSFERT IN (reçus uniquement)
                         # On ne compte que les entrées réelles (achats) et les transferts entrants
@@ -590,40 +626,12 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                             print(f"⚠️ Erreur calcul ajouts pour produit {pid}: {e}")
                             added_q = 0.0
 
-                        # AJUSTEMENTS = Corrections d'inventaire (peuvent être + ou -)
-                        if warehouse_id:
-                            q_adj_sql = text("""
-                                SELECT COALESCE(SUM(quantity), 0) as qty
-                                FROM stock_mouvements
-                                WHERE product_id = :pid 
-                                AND movement_date >= :d1 
-                                AND movement_date <= :d2
-                                AND movement_type = 'AJUSTEMENT'
-                                AND (warehouse_id = :wid OR destination_warehouse_id = :wid)
-                            """)
-                        else:
-                            q_adj_sql = text("""
-                                SELECT COALESCE(SUM(quantity), 0) as qty
-                                FROM stock_mouvements
-                                WHERE product_id = :pid 
-                                AND movement_date >= :d1 
-                                AND movement_date <= :d2
-                                AND movement_type = 'AJUSTEMENT'
-                            """)
-                        
-                        try:
-                            params_adj = {'pid': pid, 'd1': d1, 'd2': d2}
-                            if warehouse_id:
-                                params_adj['wid'] = warehouse_id
-                            r_adj = session.execute(q_adj_sql, params_adj).fetchone()
-                            adjustments_q = float(r_adj.qty or 0)
-                        except Exception as e:
-                            print(f"⚠️ Erreur calcul ajustements pour produit {pid}: {e}")
-                            adjustments_q = 0.0
+                        # On ne renvoie plus les ajustements comme colonne séparée dans l'export.
+                        adjustments_q = 0.0
 
                     sold = float(it.get('sold', 0.0))
-                    # Quantité finale = Q_initiale + Ajouts + Ajustements - Ventes
-                    final_q = initial_q + added_q + adjustments_q - sold
+                    # Quantité finale = Q_initiale + Ajouts - Ventes
+                    final_q = (initial_q if initial_q is not None else 0) + added_q - sold
                     unit_price = float(it.get('unit_price', 0.0))
                     total_amount = sold * unit_price
                     
@@ -644,7 +652,7 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                         'name': it['name'],
                         'initial_quantity': initial_q,
                         'quantity_added': added_q,
-                        'adjustments': adjustments_q,
+                        # adjustments removed on request
                         'product_id': it.get('product_id'),
                         'service_id': it.get('service_id'),
                         'sold': sold,
@@ -655,10 +663,339 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                         'total': total_amount
                     })
 
+                # If at least one product has an initial inventory (not None),
+                # set initial_quantity to 0 for products without inventory so column appears.
+                any_initial = any((r.get('initial_quantity') is not None) for r in rows_out)
+                if any_initial:
+                    for r in rows_out:
+                        if r.get('initial_quantity') is None:
+                            r['initial_quantity'] = 0.0
+
                 return rows_out
 
         except Exception as e:
             print(f"❌ Erreur get_products_summary: {e}")
+            
+def print_products_report(self, date_debut, date_fin, paper: str = 'A4', include_services: bool = True, module: str = None, pos_id: int = None, search_term: str = None, selected_product_ids: list = None, selected_category_ids: list = None, rows: list = None):
+    """Génère et ouvre un PDF du rapport produits.
+    - `paper` peut être 'A4' (tableau complet) ou '80mm' (format ticket thermique simplifié).
+    Pour 80mm, on affiche seulement: Q.init, Ajouts, Ventes, Reste, Montant total vendu.
+    """
+    try:
+        from PyQt6.QtGui import QPdfWriter, QTextDocument
+        from PyQt6.QtCore import QSizeF
+        from PyQt6.QtGui import QPageSize
+        from PyQt6.QtGui import QPdfWriter as _QPdfWriter
+        from PyQt6.QtGui import QPagedPaintDevice
+        from PyQt6.QtCore import QMarginsF
+        import tempfile, subprocess, os
+        from datetime import datetime
+
+        # Prefer using an existing controller attached to the caller widget (has db_manager).
+        # If caller provided rows, use them directly (keeps A4 selection behaviour)
+        if rows is None:
+            try:
+                controller = getattr(self, 'commande_controller', None)
+                if controller and hasattr(controller, 'get_products_summary'):
+                    rows = controller.get_products_summary(date_debut, date_fin, include_services=include_services, module=module, pos_id=pos_id, search_term=search_term, selected_product_ids=selected_product_ids, selected_category_ids=selected_category_ids) or []
+                else:
+                    from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
+                    commande_controller = CommandeController()
+                    if hasattr(commande_controller, 'get_products_summary'):
+                        rows = commande_controller.get_products_summary(date_debut, date_fin, include_services=include_services, module=module, pos_id=pos_id, search_term=search_term, selected_product_ids=selected_product_ids, selected_category_ids=selected_category_ids) or []
+                    else:
+                        rows = get_products_summary(self, date_debut, date_fin, include_services=include_services, module=module, pos_id=pos_id, search_term=search_term, selected_product_ids=selected_product_ids, selected_category_ids=selected_category_ids) or []
+            except Exception:
+                rows = []
+
+        # Company header/footer
+        try:
+            from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+            enterprise_id = SessionManager.get_current_enterprise_id() or None
+            ent_ctrl = EntrepriseController()
+            company_info = ent_ctrl.get_company_info_for_pdf(enterprise_id)
+        except Exception:
+            company_info = {'name': 'Entreprise', 'address': '', 'phone': '', 'logo': None}
+
+        # Determine first COMPLETED inventory name for the date (NB)
+        inventory_note = None
+        try:
+            from ayanna_erp.database.database_manager import DatabaseManager
+            from sqlalchemy import text
+            dbm = DatabaseManager()
+            # normalize to day
+            try:
+                sd = date_debut if isinstance(date_debut, datetime) else datetime.combine(date_debut, datetime.min.time())
+                start_day = datetime.combine(sd.date(), datetime.min.time())
+                end_day = datetime.combine(sd.date(), datetime.max.time())
+            except Exception:
+                start_day = datetime.combine(datetime.now().date(), datetime.min.time())
+                end_day = datetime.combine(datetime.now().date(), datetime.max.time())
+
+            with dbm.get_session() as sess:
+                q = text("""
+                    SELECT session_name FROM stock_inventaire
+                    WHERE status = 'COMPLETED' AND completed_date >= :start_day AND completed_date <= :end_day
+                    ORDER BY completed_date ASC LIMIT 1
+                """)
+                r = sess.execute(q, {'start_day': start_day, 'end_day': end_day}).fetchone()
+                if r and getattr(r, 'session_name', None):
+                    inventory_note = r.session_name
+        except Exception:
+            inventory_note = None
+
+        # Sort rows alphabetically by product/service name so exports are ordered
+        try:
+            rows = sorted(rows or [], key=lambda r: (str(r.get('name') if isinstance(r, dict) else getattr(r, 'name', '') or '')).lower())
+        except Exception:
+            rows = rows or []
+
+        # Assign sequential numbers for A4 display (used as 'no' column)
+        try:
+            for idx, rr in enumerate(rows, start=1):
+                if isinstance(rr, dict):
+                    rr['no'] = idx
+        except Exception:
+            pass
+
+        # Construire HTML
+        currency = get_currency(SessionManager.get_current_enterprise_id()) if 'get_currency' in globals() else ''
+        import tempfile
+        logo_path = None
+        try:
+            if company_info.get('logo'):
+                tmp = tempfile.NamedTemporaryFile(suffix='.png', delete=False)
+                tmp.write(company_info.get('logo'))
+                tmp.flush()
+                tmp.close()
+                logo_path = tmp.name
+        except Exception:
+            logo_path = None
+
+        html = '<html><head><meta charset="utf-8"><style>body{font-family:Arial,Helvetica,sans-serif;}table{width:100%;border-collapse:collapse;}td,th{padding:6px;border:1px solid #ddd;font-size:11px;}th{background:#f2f2f2;font-weight:bold;font-size:12px;}</style></head><body>'
+        # Header
+        if logo_path:
+            html += f"<div style='text-align:center'><img src='file://{logo_path}' style='width:50px;height:50px;'/><div><b>{company_info.get('name','')}</b><br/>{company_info.get('address','')}<br/>Tel: {company_info.get('phone','')}</div></div><hr/>"
+        else:
+            html += f"<div style='text-align:center'><b>{company_info.get('name','')}</b><br/>{company_info.get('address','')}<br/>Tel: {company_info.get('phone','')}</div><hr/>"
+
+        title = f"RAPPORT PRODUITS {date_debut} → {date_fin}"
+        html += f"<h2 style='text-align:center'>{title}</h2>"
+
+        # Detecter si on a des qtes initiales pour afficher/masquer colonnes
+        has_initials = any((r.get('initial_quantity') is not None) for r in rows)
+
+        if paper == '80mm':
+            # Generate a proper 80mm ticket using ReportLab (like other receipts)
+            try:
+                from reportlab.lib.units import mm
+                from reportlab.lib import colors
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                from reportlab.lib.enums import TA_CENTER, TA_RIGHT
+
+                page_width = 80 * mm
+                page_height = 297 * mm
+
+                temp_dir = tempfile.gettempdir()
+                filename = f"rapport_produits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+                pdf_path = os.path.join(temp_dir, filename)
+
+                doc = SimpleDocTemplate(
+                    pdf_path,
+                    pagesize=(page_width, page_height),
+                    rightMargin=2*mm, leftMargin=2*mm, topMargin=3*mm, bottomMargin=3*mm
+                )
+
+                styles = getSampleStyleSheet()
+                style_title = ParagraphStyle('Title80', parent=styles['Normal'], fontName='Helvetica-Bold', fontSize=12, alignment=TA_CENTER, spaceAfter=2)
+                style_normal = ParagraphStyle('Normal80', parent=styles['Normal'], fontName='Helvetica', fontSize=10, alignment=TA_CENTER, spaceAfter=1)
+                style_small = ParagraphStyle('Small80', parent=styles['Normal'], fontName='Helvetica', fontSize=9, alignment=TA_CENTER)
+                style_line = ParagraphStyle('Line80', parent=styles['Normal'], fontName='Helvetica', fontSize=9)
+
+                flow = []
+
+                # Header company
+                # Determine display name: prefer company_info, fallback to core_entreprises table
+                company_display_name = company_info.get('name') if company_info and company_info.get('name') else None
+                if not company_display_name:
+                    try:
+                        from ayanna_erp.database.database_manager import DatabaseManager
+                        from sqlalchemy import text
+                        dbm2 = DatabaseManager()
+                        with dbm2.get_session() as s2:
+                            rname = s2.execute(text("SELECT name FROM core_entreprises LIMIT 1")).fetchone()
+                            if rname:
+                                # rname may be Row or tuple
+                                company_display_name = getattr(rname, 'name', None) or (rname[0] if len(rname) > 0 else None)
+                    except Exception:
+                        company_display_name = None
+                if not company_display_name:
+                    company_display_name = 'Entreprise'
+
+                flow.append(Paragraph(f"<b>{company_display_name}</b>", style_title))
+                if company_info.get('address'):
+                    flow.append(Paragraph(company_info.get('address',''), style_small))
+                if company_info.get('phone'):
+                    flow.append(Paragraph(f"Tél: {company_info.get('phone','')}", style_small))
+                flow.append(Spacer(1, 2*mm))
+                flow.append(Paragraph("=" * 40, style_normal))
+
+                # Title and date range (use 'RAPPORT VENTE')
+                flow.append(Paragraph(f"<b>RAPPORT VENTE</b>", style_title))
+                flow.append(Paragraph(f"{date_debut} → {date_fin}", style_small))
+                flow.append(Spacer(1, 1*mm))
+                flow.append(Paragraph("-" * 40, style_normal))
+
+                # Table header with abbreviated column names (QI, QA, QV, RST, TT)
+                if has_initials:
+                    table_header = [Paragraph("<b>Nom</b>", style_line), Paragraph("<b>QI</b>", style_line), Paragraph("<b>QA</b>", style_line), Paragraph("<b>QV</b>", style_line), Paragraph("<b>RST</b>", style_line), Paragraph("<b>TT</b>", style_line)]
+                    # Reduce name column, enlarge total column
+                    col_widths = [25*mm, 8*mm, 8*mm, 8*mm, 8*mm, 23*mm]
+                else:
+                    # No initial inventories -> only show Sold (QV) and Total (TT)
+                    table_header = [Paragraph("<b>Nom</b>", style_line), Paragraph("<b>QV</b>", style_line), Paragraph("<b>TT</b>", style_line)]
+                    col_widths = [35*mm, 12*mm, (page_width - (35+12)*mm - 4*mm)]
+
+                # Rows
+                total_amount = 0.0
+                articles = []
+                for r in rows:
+                    name = str(r.get('name',''))
+                    # Truncate product name to 15 characters
+                    if len(name) > 15:
+                        name = name[:13] + '..'
+                    sold = float(r.get('sold', 0) or 0)
+                    amount = float(r.get('total', 0) or 0)
+                    qty_added = float(r.get('quantity_added', 0) or 0)
+                    final_q = r.get('final_quantity')
+                    init_q = r.get('initial_quantity')
+                    total_amount += amount
+
+                    # Format amounts without trailing .00 and with space thousands separator
+                    def fmt(v):
+                        try:
+                            iv = int(round(float(v or 0)))
+                        except Exception:
+                            iv = 0
+                        return f"{iv:,}".replace(",", " ")
+
+                    if has_initials:
+                        init_val = '' if init_q is None else f"{int(round(init_q))}"
+                        reste_val = '' if init_q is None else f"{int(round(final_q or 0))}"
+                        articles.append([Paragraph(name, style_line), Paragraph(init_val, style_line), Paragraph(f"{int(round(qty_added))}", style_line), Paragraph(f"{int(round(sold))}", style_line), Paragraph(reste_val, style_line), Paragraph(fmt(amount), style_line)])
+                    else:
+                        # Only show sold and total when no initial exist
+                        articles.append([Paragraph(name, style_line), Paragraph(f"{int(round(sold))}", style_line), Paragraph(fmt(amount), style_line)])
+
+                if len(articles) == 0:
+                    flow.append(Paragraph("Aucun produit vendu.", style_line))
+                else:
+                    # Build table
+                    if has_initials:
+                        tbl = Table([table_header] + articles, colWidths=col_widths)
+                    else:
+                        tbl = Table([table_header] + articles, colWidths=col_widths)
+                    tbl.setStyle(TableStyle([
+                        ('GRID', (0,0), (-1,-1), 0.25, colors.grey),
+                        ('FONTSIZE', (0,0), (-1,-1), 9),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('LEFTPADDING', (0,0), (-1,-1), 2),
+                        ('RIGHTPADDING', (0,0), (-1,-1), 2),
+                    ]))
+                    flow.append(tbl)
+
+                flow.append(Spacer(1, 2*mm))
+                flow.append(Paragraph("-" * 40, style_normal))
+                # Total formatted without decimals and with space separators
+                try:
+                    total_fmt = f"{int(round(total_amount)):,}".replace(",", " ")
+                except Exception:
+                    total_fmt = str(total_amount)
+                flow.append(Paragraph(f"Total ventes: {total_fmt} {currency}", style_line))
+                flow.append(Spacer(1, 2*mm))
+                note_text = f"NB: Inventaire pris en compte pour Q.init: {inventory_note}" if inventory_note else "NB: Aucun inventaire complété ce jour"
+                flow.append(Paragraph(note_text, style_small))
+                flow.append(Paragraph("Généré par Ayanna ERP", style_small))
+                flow.append(Paragraph(f"Imprimé le {datetime.now().strftime('%d/%m/%Y %H:%M')}", style_small))
+
+                doc.build(flow)
+                return pdf_path
+            except Exception as e:
+                print(f"Erreur génération PDF 80mm produits: {e}")
+                return None
+        else:
+            # A4 full
+            html += '<table>'
+            if has_initials:
+                html += '<tr><th>N°</th><th>Nom</th><th>Q.init</th><th>Ajouts</th><th>Reste</th><th>Vendu</th><th>P.U</th><th>Total</th></tr>'
+            else:
+                # If no initial inventories for the period, show only Sold and Total columns
+                html += '<tr><th>N°</th><th>Nom</th><th>Vendu</th><th>Total</th></tr>'
+            for r in rows:
+                if has_initials:
+                    init_val = '' if r.get('initial_quantity') is None else f"{r.get('initial_quantity'):.3f}"
+                    reste_val = '' if r.get('initial_quantity') is None else f"{r.get('final_quantity'):.3f}"
+                    html += f"<tr><td>{r.get('no','')}</td><td>{r.get('name','')}</td><td align='right'>{init_val}</td><td align='right'>{r.get('quantity_added',0):.3f}</td><td align='right'>{reste_val}</td><td align='right'>{r.get('sold',0):.3f}</td><td align='right'>{r.get('unit_price',0):.2f}</td><td align='right'>{r.get('total',0):.2f}</td></tr>"
+                else:
+                    # Only sold and total
+                    html += f"<tr><td>{r.get('no','')}</td><td>{r.get('name','')}</td><td align='right'>{r.get('sold',0):.3f}</td><td align='right'>{r.get('total',0):.2f}</td></tr>"
+            html += '</table>'
+            page_mm = QSizeF(210, 297)  # A4 portrait
+
+        html += '</body></html>'
+
+        # Footer
+        printed_ts = datetime.now().strftime('%d/%m/%Y %H:%M')
+        footer_html = "<hr/>"
+        note_text = f"NB: Inventaire pris en compte pour Q.init: {inventory_note}" if inventory_note else "NB: Aucun inventaire complété ce jour"
+        footer_html += f"<div style='text-align:center;font-size:10px;font-weight:bold;'>{note_text}</div>"
+        footer_html += f"<div style='text-align:center;font-size:10px;'>Informatisé par Ayanna ERP — www.ayanna.top</div>"
+        footer_html += f"<div style='text-align:center;font-size:9px;'>Imprimé le {printed_ts}</div>"
+
+        # PDF temp file
+        temp_dir = tempfile.gettempdir()
+        filename = f"rapport_produits_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+        pdf_path = os.path.join(temp_dir, filename)
+
+        doc = QTextDocument()
+        # attach footer
+        html += footer_html
+        doc.setHtml(html)
+
+        pdf_writer = QPdfWriter(pdf_path)
+        pdf_writer.setPageSize(QPageSize(page_mm, QPageSize.Unit.Millimeter))
+        try:
+            pdf_writer.setPageMargins(QMarginsF(5,5,5,5), QPageLayout.Unit.Millimeter)
+        except Exception:
+            try:
+                pdf_writer.setPageMargins(QMarginsF(5,5,5,5))
+            except Exception:
+                pass
+        pdf_writer.setResolution(300)
+
+        doc.print(pdf_writer)
+
+        # Ouvrir le PDF
+        try:
+            if os.name == 'nt':
+                os.startfile(pdf_path)
+            else:
+                subprocess.run(['xdg-open', pdf_path])
+        except Exception:
+            pass
+
+        # cleanup logo temp
+        try:
+            if logo_path and os.path.exists(logo_path):
+                os.unlink(logo_path)
+        except Exception:
+            pass
+
+        return pdf_path
+    except Exception as e:
+        print(f"Erreur génération PDF produits: {e}")
+        return None
             
 def export_daily_report(date_debut, date_fin, module=None, pos_id=None, search_term=None, payment_filter=None, currency_symbol=None, selected_categories=None):
     """Génère un PDF quotidien (CA, Remises, Créances, Dépenses, Espèces, Marge) aligné avec export produits.

@@ -20,7 +20,7 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "2.0.0"
+    APP_VERSION = "2.0.1"
     
     # Notes de version
     VERSION_NOTES = {
@@ -40,6 +40,18 @@ class Config:
                 "AMÉLIORATION: Affichage des chambres du tableau de bord trié par date de création",
                 "BUGFIX: Correction valeurs NULL (reserved_quantity) dans stock_produits_entrepot",
                 "BUGFIX: Trigger SQLite pour forcer DEFAULT 0 sur les colonnes numériques du stock",
+            ]
+        },
+        "2.0.1": {
+            "date": "9 Mai 2026",
+            "titre": "Mise à jour 2.0.1 — Exports 80mm, inventaires, accès modules et synchronisation API",
+            "changements": [
+                "AMÉLIORATION: Export des produits et inventaires au format 80mm (tickets) amélioré",
+                "AMÉLIORATION: La quantité initiale d'un produit pour la journée est prise à partir du premier inventaire du jour",
+                "AMÉLIORATION: Restrictions d'accès aux modules appliquées par utilisateur (persistées en base de données)",
+                "NOUVEAU: Colonne `modules` ajoutée à `core_users` pour stocker l'accès aux modules (JSON)",
+                "NOUVEAU: Scaffolding d'une API de synchronisation des données (en cours d'implémentation)",
+                "BUGFIX: Divers correctifs mineurs liés aux exports et à l'UI des inventaires"
             ]
         },
         "1.9.1": {

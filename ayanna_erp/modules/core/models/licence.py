@@ -8,10 +8,12 @@ class Licence(Base):
 
     Stocke les licences activées localement.
     """
-    __tablename__ = 'licence'
+    # Use plural `licences` to match server schema and new local table
+    __tablename__ = 'licences'
     __table_args__ = {'extend_existing': True}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
+    # Use TEXT primary key to match the actual `licences` table (server uses UUIDs)
+    id = Column(String(64), primary_key=True)
     cle = Column(String(255), unique=True, nullable=False)  # stocke le hash
     type = Column(String(50), nullable=False)  # Essai, Mensuel, Annuel
     date_activation = Column(DateTime, nullable=False, default=func.current_timestamp())

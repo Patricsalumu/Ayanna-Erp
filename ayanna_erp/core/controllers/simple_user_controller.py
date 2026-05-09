@@ -9,6 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy import desc, or_
 from PyQt6.QtCore import QObject, pyqtSignal
 import bcrypt
+import json
 
 # Import du gestionnaire de base de données et des modèles existants
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
@@ -120,6 +121,15 @@ class SimpleUserController(QObject):
             
             # Hasher le mot de passe
             user.set_password(data['password'])
+            # modules
+            if 'modules' in data:
+                try:
+                    user.set_modules_list(data.get('modules'))
+                except Exception:
+                    try:
+                        user.modules = json.dumps(data.get('modules') or [])
+                    except Exception:
+                        user.modules = None
             
             session.add(user)
             session.commit()
@@ -172,6 +182,7 @@ class SimpleUserController(QObject):
                     'role_display': self.ROLES.get(user.role, user.role),
                     'enterprise_id': user.enterprise_id,
                     'created_at': user.created_at,
+                    'modules': (user.get_modules_list() if hasattr(user, 'get_modules_list') else ([] if not getattr(user, 'modules', None) else (json.loads(user.modules) if isinstance(user.modules, str) else user.modules))) ,
                     'is_active': True  # Par défaut actif dans l'ancien modèle
                 })
             
@@ -238,6 +249,16 @@ class SimpleUserController(QObject):
             # Mot de passe (optionnel)
             if data.get('password'):
                 user.set_password(data['password'])
+            # Modules (persist as JSON text)
+            if 'modules' in data:
+                try:
+                    user.set_modules_list(data.get('modules'))
+                except Exception:
+                    try:
+                        import json
+                        user.modules = json.dumps(data.get('modules') or [])
+                    except Exception:
+                        user.modules = None
             
             session.commit()
             
@@ -249,7 +270,8 @@ class SimpleUserController(QObject):
                 'role': user.role,
                 'role_display': self.ROLES.get(user.role, user.role),
                 'enterprise_id': user.enterprise_id,
-                'created_at': user.created_at
+                'created_at': user.created_at,
+                'modules': (user.get_modules_list() if hasattr(user, 'get_modules_list') else ([] if not getattr(user, 'modules', None) else (json.loads(user.modules) if isinstance(user.modules, str) else user.modules)))
             }
             
             session.close()
