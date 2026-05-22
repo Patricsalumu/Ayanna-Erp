@@ -102,7 +102,11 @@ class DatabaseManager:
     
     def __init__(self, database_url=None):
         if database_url is None:
-            database_url = "sqlite:///ayanna_erp.db"
+            try:
+                from ayanna_erp.core.config import Config
+                database_url = Config.DATABASE_URL
+            except Exception:
+                database_url = "sqlite:///ayanna_erp.db"
         self.engine = create_engine(
             database_url,
             poolclass=StaticPool,

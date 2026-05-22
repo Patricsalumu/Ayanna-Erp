@@ -348,6 +348,12 @@ class FirstRunWizard(QDialog):
         self._set_busy(False)
         if result['ok']:
             self.server_mode_used = True
+            # Compléter avec les données par défaut locales manquantes
+            # (modules, POS, modes de paiement…) que le serveur ne pousse pas
+            try:
+                self._db.initialize_database()
+            except Exception:
+                pass
             self._success_lbl.setText(
                 result['message'] + "\n\nVous pouvez maintenant vous connecter."
             )

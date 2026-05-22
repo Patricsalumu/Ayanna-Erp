@@ -105,44 +105,23 @@ def main():
         print(f"Avertissement lors de la création des tables : {_e}")
     _log('after_db_table_create')
 
-    # ── Premier démarrage ─────────────────────────────────────────────────────
-    # Si la BDD est vide (aucun utilisateur), afficher le wizard de configuration.
-    # Le wizard demande les identifiants du serveur :
-    #   • Succès  → login() + pull() : toutes les données sont rapatriées.
-    #               La vérification de licence locale est sautée (server_mode_used).
-    #   • Échec / pas de serveur → clic sur "Continuer sans serveur" →
-    #               initialize_database() avec les données par défaut.
-    skip_licence = False
-    if db_manager.is_first_run():
-        _log('first_run_wizard')
-        from PyQt6.QtWidgets import QDialog
-        from ayanna_erp.ui.first_run_wizard import FirstRunWizard
-        wizard = FirstRunWizard(db_manager)
-        result = wizard.exec()
-        if result != QDialog.DialogCode.Accepted:
-            # L'utilisateur a fermé le wizard sans terminer la configuration
-            sys.exit(0)
-        skip_licence = getattr(wizard, 'server_mode_used', False)
-        _log('first_run_wizard_done')
-    else:
-        # Démarrage normal : s'assurer que toutes les données par défaut existent
-        if not db_manager.initialize_database():
-            print("Erreur lors de l'initialisation de la base de données")
-            _log('db_init_failed')
-            sys.exit(1)
-    _log('after_db_init')
+    # ── Logique de démarrage selon l'état de la BDD ───────────────────────────
+    # • BDD vide (premier démarrage) :
+    #     1. Afficher la fenêtre d'activation de licence
+    #     2. Si licence valide → afficher le wizard de synchronisation/configuration
+    # • BDD existante (démarrage normal) :
+    #     1. Initialiser les données par défaut si besoin
+    #     2. Vérifier la licence → afficher le login
 
-    # ── Vérification de la licence ───────────────────────────────────────────
-    # Sautée si les données (dont la licence) ont déjà été récupérées du serveur.
-    if not skip_licence:
+    def _check_and_activate_licence():
+        """Vérifie la licence ; affiche LicenceActivationDialog si invalide.
+        Retourne True si la licence est valide, False sinon (quitte l'app)."""
         try:
             _log('before_licence_check')
             valid, msg = verifier_licence()
             if not valid:
-                # afficher la fenêtre d'activation en mode modal
                 dlg = LicenceActivationDialog()
                 result = dlg.exec()
-                # Si l'utilisateur a accepté, re-vérifier
                 if result == 1:
                     _log('before_licence_check_2')
                     valid2, msg2 = verifier_licence()
@@ -156,6 +135,30 @@ def main():
         except Exception as e:
             print("Erreur lors de la vérification de la licence:", e)
             sys.exit(1)
+
+    if db_manager.is_first_run():
+        # ── Premier démarrage : licence D'ABORD, puis wizard de configuration ──
+        _log('first_run_licence_check')
+        _check_and_activate_licence()
+
+        # Licence valide → afficher le wizard de synchronisation/configuration
+        _log('first_run_wizard')
+        from PyQt6.QtWidgets import QDialog
+        from ayanna_erp.ui.first_run_wizard import FirstRunWizard
+        wizard = FirstRunWizard(db_manager)
+        result = wizard.exec()
+        if result != QDialog.DialogCode.Accepted:
+            # L'utilisateur a fermé le wizard sans terminer la configuration
+            sys.exit(0)
+        _log('first_run_wizard_done')
+    else:
+        # ── Démarrage normal : initialiser les données par défaut + vérifier licence ──
+        if not db_manager.initialize_database():
+            print("Erreur lors de l'initialisation de la base de données")
+            _log('db_init_failed')
+            sys.exit(1)
+        _log('after_db_init')
+        _check_and_activate_licence()
     
     # Créer et afficher la fenêtre de connexion
     login_window = LoginWindow()
