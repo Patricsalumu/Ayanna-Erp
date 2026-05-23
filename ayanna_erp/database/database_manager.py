@@ -102,11 +102,7 @@ class DatabaseManager:
     
     def __init__(self, database_url=None):
         if database_url is None:
-            try:
-                from ayanna_erp.core.config import Config
-                database_url = Config.DATABASE_URL
-            except Exception:
-                database_url = "sqlite:///ayanna_erp.db"
+            database_url = "sqlite:///ayanna_erp.db"
         self.engine = create_engine(
             database_url,
             poolclass=StaticPool,
@@ -154,6 +150,10 @@ class DatabaseManager:
                     pass
                 try:
                     self._migrate_licences_table()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_init_compta_configs()
                 except Exception:
                     pass
             finally:
@@ -934,17 +934,16 @@ class DatabaseManager:
                     config = ComptaConfig(
                         enterprise_id=enterprise_id,
                         pos_id=pos.id,
-                        compte_caisse_id=comptes_created.get("57").id if comptes_created.get("57") else None,
+                        compte_caisse_id=comptes_created.get("571").id if comptes_created.get("571") else None,
                         compte_banque_id=comptes_created.get("521").id if comptes_created.get("521") else None,
                         compte_client_id=comptes_created.get("411").id if comptes_created.get("411") else None,
                         compte_fournisseur_id=comptes_created.get("401").id if comptes_created.get("401") else None,
+                        compte_fournisseur_debiteur_id=comptes_created.get("409").id if comptes_created.get("409") else None,
                         compte_vente_id=comptes_created.get("701").id if comptes_created.get("701") else None,
                         compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None,
-                        compte_stock_id=comptes_created.get("304").id if comptes_created.get("304") else None,
-                        compte_variation_stock_id=comptes_created.get("604").id if comptes_created.get("604") else None,
+                        compte_stock_id=comptes_created.get("301").id if comptes_created.get("301") else None,
                         compte_tva_id=comptes_created.get("4431").id if comptes_created.get("4431") else None,
-                        compte_remise_id =comptes_created.get("680").id if comptes_created.get("680") else None
-                        
+                        compte_remise_id=comptes_created.get("682").id if comptes_created.get("682") else None,
                     )
                     session.add(config)
                     try:
@@ -1023,72 +1022,58 @@ class DatabaseManager:
                         print("ℹ️ Legacy `licence` detected but `licences` already contains data; skipping copy")
         except Exception as e:
             print(f"⚠️ _migrate_licences_table (legacy copy) : {e}")
-        
-            for compte_data in comptes_default:
-                classe_code = compte_data.pop("classe")
-                classe = classes_created.get(classe_code)
-                
-                if classe:
-                    existing = session.query(ComptaComptes).filter_by(
-                        numero=compte_data["numero"]
-                    ).join(ComptaClasses).filter(ComptaClasses.enterprise_id == enterprise_id).first()
-                    
-                    if not existing:
-                        compte = ComptaComptes(
-                            classe_comptable_id=classe.id,
-                            is_default=True,
-                            **compte_data
+
+    def _migrate_init_compta_configs(self):
+        """Migration idempotente : crée un ComptaConfig par défaut pour tout POS
+        qui n'en possède pas encore, en utilisant les comptes par défaut (is_default=True)
+        déjà présents dans la base."""
+        try:
+            with self.session_scope() as session:
+                enterprises = session.query(Entreprise).all()
+                for enterprise in enterprises:
+                    pos_list = session.query(POSPoint).filter_by(enterprise_id=enterprise.id).all()
+                    for pos in pos_list:
+                        existing = session.query(ComptaConfig).filter_by(
+                            enterprise_id=enterprise.id,
+                            pos_id=pos.id
+                        ).first()
+                        if existing:
+                            continue
+
+                        def _default_compte(numero):
+                            compte = (
+                                session.query(ComptaComptes)
+                                .join(ComptaClasses)
+                                .filter(
+                                    ComptaClasses.enterprise_id == enterprise.id,
+                                    ComptaComptes.numero == numero
+                                )
+                                .first()
+                            )
+                            return compte.id if compte else None
+
+                        config = ComptaConfig(
+                            enterprise_id=enterprise.id,
+                            pos_id=pos.id,
+                            compte_caisse_id=_default_compte("571"),
+                            compte_banque_id=_default_compte("521"),
+                            compte_client_id=_default_compte("411"),
+                            compte_fournisseur_id=_default_compte("401"),
+                            compte_fournisseur_debiteur_id=_default_compte("409"),
+                            compte_vente_id=_default_compte("701"),
+                            compte_achat_id=_default_compte("601"),
+                            compte_stock_id=_default_compte("301"),
+                            compte_tva_id=_default_compte("4431"),
+                            compte_remise_id=_default_compte("682"),
                         )
-                        session.add(compte)
-                        session.flush()  # Pour obtenir l'ID
-                        comptes_created[compte_data["numero"]] = compte
-                        print(f"✅ Compte comptable créé: {compte.numero} - {compte.nom}")
-                    else:
-                        # Marquer les comptes existants comme is_default s'ils ne le sont pas
-                        if not getattr(existing, 'is_default', False):
-                            try:
-                                existing.is_default = True
-                            except Exception:
-                                pass
-                        comptes_created[compte_data["numero"]] = existing
-            
-            # Créer une configuration comptable pour chaque POS de l'entreprise
-            pos_list = session.query(POSPoint).filter_by(enterprise_id=enterprise_id).all()
-            
-            for pos in pos_list:
-                existing_config = session.query(ComptaConfig).filter_by(
-                    enterprise_id=enterprise_id, 
-                    pos_id=pos.id
-                ).first()
-                
-                if not existing_config:
-                    config = ComptaConfig(
-                        enterprise_id=enterprise_id,
-                        pos_id=pos.id,
-                        compte_caisse_id=comptes_created.get("57").id if comptes_created.get("57") else None,
-                        compte_banque_id=comptes_created.get("521").id if comptes_created.get("521") else None,
-                        compte_client_id=comptes_created.get("411").id if comptes_created.get("411") else None,
-                        compte_fournisseur_id=comptes_created.get("401").id if comptes_created.get("401") else None,
-                        compte_vente_id=comptes_created.get("701").id if comptes_created.get("701") else None,
-                        compte_achat_id=comptes_created.get("601").id if comptes_created.get("601") else None,
-                        compte_stock_id=comptes_created.get("304").id if comptes_created.get("304") else None,
-                        compte_variation_stock_id=comptes_created.get("604").id if comptes_created.get("604") else None,
-                        compte_tva_id=comptes_created.get("4431").id if comptes_created.get("4431") else None,
-                        compte_remise_id =comptes_created.get("680").id if comptes_created.get("680") else None
-                        
-                    )
-                    session.add(config)
-                    print(f"✅ Configuration comptable créée pour POS: {pos.name}")
-            
-            if not pos_list:
-                print("⚠️  Aucun POS trouvé pour l'entreprise, configuration comptable non créée")
-            
-            session.flush()
-            
+                        session.add(config)
+                        try:
+                            print(f"✅ ComptaConfig initialisé pour POS: {pos.name} (entreprise {enterprise.id})")
+                        except Exception:
+                            pass
         except Exception as e:
-            print(f"❌ Erreur lors de l'insertion des données comptables: {e}")
-            raise
-    
+            print(f"⚠️ _migrate_init_compta_configs : {e}")
+
     def _insert_default_services_and_products(self, session, enterprise_id):
         """Insérer les services et produits par défaut pour une nouvelle entreprise"""
         try:

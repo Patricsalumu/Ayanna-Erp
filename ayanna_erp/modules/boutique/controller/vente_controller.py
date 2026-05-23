@@ -352,8 +352,8 @@ class VenteController:
 
             # Si on a des produits physiques, s'assurer que les comptes stock/charge sont configurés
             has_product_items = any(item.get('type') == 'product' for item in cart_items)
-            if has_product_items and (not compte_stock_id or not compte_variation_stock_id):
-                return False, "Inventaire permanent requis: configurez les comptes stock et compte_variation_stock_id (compte_stock_id, compte_variation_stock_id) dans la configuration comptable."
+            # if has_product_items and (not compte_stock_id or not compte_variation_stock_id):
+            #     return False, "Inventaire permanent requis: configurez les comptes stock et compte_variation_stock_id (compte_stock_id, compte_variation_stock_id) dans la configuration comptable."
 
             # 3. Créer les écritures de VENTE (journal de vente) - toujours, même si paiement partiel
             # Journal de vente
