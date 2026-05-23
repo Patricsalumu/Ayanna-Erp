@@ -14,9 +14,10 @@ except ImportError:
 import os
 import json
 import importlib
+import threading
 from datetime import datetime
 import re
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text, event
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
@@ -94,6 +95,112 @@ except ImportError:
     pass
 
 
+# =============================================================================
+# Auto-journalisation SQLAlchemy → core_sync
+# =============================================================================
+
+# Tables qui ne doivent jamais être journalisées (internes sync + locales uniquement)
+_SYNC_EXCLUDED_TABLES = frozenset({
+    'core_sync', 'core_sync_settings', 'core_configsync', 'core_sync_history',
+    'modules',
+    'licence',
+    'shop_comptes_config',
+    'alembic_version',
+})
+
+# Flag thread-local pour éviter la journalisation récursive
+# (record_change() écrit dans core_sync → déclenche le listener → boucle infinie)
+_sync_writing = threading.local()
+
+
+def _obj_to_sync_dict(obj) -> dict | None:
+    """Convertit une instance ORM SQLAlchemy en dict JSON-sérialisable.
+    Retourne None si l'objet ne possède pas __table__."""
+    try:
+        result = {}
+        for col in obj.__table__.columns:
+            val = getattr(obj, col.name, None)
+            if isinstance(val, bytes):
+                val = None          # ignorer les BLOBs (logo, etc.)
+            elif hasattr(val, 'isoformat'):
+                val = val.isoformat()
+            result[col.name] = val
+        return result
+    except Exception:
+        return None
+
+
+def _register_sync_listener(db_manager: 'DatabaseManager') -> None:
+    """Enregistre les listeners after_flush / after_commit / after_rollback
+    sur db_manager.SessionLocal pour journaliser automatiquement tout
+    INSERT/UPDATE ORM dans core_sync.
+
+    Mécanisme en 2 temps (évite les transactions imbriquées sur SQLite) :
+      1. after_flush  → capture les objets new/dirty dans session.info['_sync_pending']
+      2. after_commit → vide le buffer et appelle SyncManager.record_change()
+         (la session principale est déjà commitée → pas de conflit SQLite)
+    """
+    if not _SYNC_AVAILABLE:
+        return
+
+    def _after_flush(session, flush_context):
+        """Capture les objets nouveaux/modifiés dans un buffer attaché à la session."""
+        # Ne pas capturer si on est déjà en train d'écrire dans core_sync
+        if getattr(_sync_writing, 'active', False):
+            return
+
+        pending = session.info.setdefault('_sync_pending', [])
+
+        for obj in list(session.new):
+            try:
+                tbl = obj.__tablename__
+                if tbl in _SYNC_EXCLUDED_TABLES:
+                    continue
+                d = _obj_to_sync_dict(obj)
+                if d and d.get('id') is not None:
+                    pending.append((tbl, 'INSERT', str(d['id']), d))
+            except Exception:
+                pass
+
+        for obj in list(session.dirty):
+            try:
+                tbl = obj.__tablename__
+                if tbl in _SYNC_EXCLUDED_TABLES:
+                    continue
+                d = _obj_to_sync_dict(obj)
+                if d and d.get('id') is not None:
+                    pending.append((tbl, 'UPDATE', str(d['id']), d))
+            except Exception:
+                pass
+
+    def _after_commit(session):
+        """Écrit les changements bufférisés dans core_sync après le commit."""
+        pending = session.info.pop('_sync_pending', [])
+        if not pending:
+            return
+
+        sm = db_manager.sync_manager
+        if sm is None:
+            return
+
+        _sync_writing.active = True
+        try:
+            for tbl, op, record_id, data in pending:
+                try:
+                    sm.record_change(tbl, op, record_id, data)
+                except Exception:
+                    pass
+        finally:
+            _sync_writing.active = False
+
+    def _after_rollback(session):
+        """Vide le buffer en cas de rollback (les changements ne sont pas persistés)."""
+        session.info.pop('_sync_pending', None)
+
+    event.listen(db_manager.SessionLocal, 'after_flush',    _after_flush)
+    event.listen(db_manager.SessionLocal, 'after_commit',   _after_commit)
+    event.listen(db_manager.SessionLocal, 'after_rollback', _after_rollback)
+
 
 class DatabaseManager:
     """Gestionnaire principal de la base de données"""
@@ -160,6 +267,9 @@ class DatabaseManager:
                 DatabaseManager._migrations_executed = True
         # Initialiser le gestionnaire de synchronisation
         self._sync_manager = None
+        # Enregistrer le listener de journalisation automatique (after_flush/after_commit)
+        # Toute opération ORM INSERT/UPDATE sera capturée et envoyée dans core_sync.
+        _register_sync_listener(self)
 
     def set_current_enterprise(self, enterprise_id):
         """Définit l'entreprise actuellement sélectionnée (ID)"""
