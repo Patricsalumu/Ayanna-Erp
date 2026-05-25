@@ -118,7 +118,7 @@ def jours_reels(date_entree) -> int:
     delta_days = (now.date() - date_entree.date()).days
     if delta_days <= 0:
         return 1
-    if now.hour >= 10:
+    if now.hour >= 11:
         return delta_days + 1
     return delta_days
 

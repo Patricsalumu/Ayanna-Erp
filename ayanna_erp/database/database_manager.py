@@ -244,6 +244,10 @@ class DatabaseManager:
                 except Exception:
                     pass
                 try:
+                    self._migrate_user_modules_column()
+                except Exception:
+                    pass
+                try:
                     self._migrate_core_sync_tables()
                 except Exception:
                     pass
@@ -728,6 +732,25 @@ class DatabaseManager:
             except Exception:
                 pass  # colonne déjà présente
         print("✅ Migration : colonne compte_fournisseur_debiteur_id ajoutée à compta_config")
+
+    def _migrate_user_modules_column(self):
+        """
+        Ajoute la colonne modules à core_users si elle est absente.
+        Cette colonne (TEXT nullable) stocke la liste JSON des modules
+        accessibles par l'utilisateur. Elle a été ajoutée lors du travail
+        sur l'API et peut manquer dans les anciennes bases de données.
+        """
+        with self.engine.connect() as conn:
+            exists = conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_users'")
+            ).fetchone()
+            if not exists:
+                return
+            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(core_users)")).fetchall()]
+            if 'modules' not in cols:
+                conn.execute(text("ALTER TABLE core_users ADD COLUMN modules TEXT"))
+                conn.commit()
+                print("✅ Migration : colonne modules ajoutée à core_users")
 
     def _migrate_core_sync_tables(self):
         """

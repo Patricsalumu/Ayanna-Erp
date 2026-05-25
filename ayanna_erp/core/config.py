@@ -20,10 +20,33 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "2.0.1"
+    APP_VERSION = "2.0.3"
     
     # Notes de version
     VERSION_NOTES = {
+        "2.0.3": {
+            "date": "25 Mai 2026",
+            "titre": "Restructuration module Salle de Fête & amélioration checkout Hôtel",
+            "changements": [
+                "AMÉLIORATION: Restructuration complète du module Salle de Fête (filtres, exports, calendrier)",
+                "NOUVEAU: Filtre de réservations par date de création (created_at) avec plages précises",
+                "NOUVEAU: Export PDF liste des réservations en A4 paysage avec créateur et téléphone",
+                "NOUVEAU: Calendrier mensuel PDF paysage avec badges colorés (orange à venir, gris passé)",
+                "AMÉLIORATION: Impression réservation A4 compacte sur une page (client + téléphone sur une ligne)",
+                "AMÉLIORATION: Section Notes masquée automatiquement si vide dans l'impression réservation",
+                "BUGFIX: Correction reconnaissance des anciennes bases de données (colonne modules manquante)",
+                "BUGFIX: Migration automatique de la colonne `modules` dans `core_users` au démarrage",
+                "AMÉLIORATION: Module Hôtel — heure de checkout configurable"
+            ]
+        },
+        "2.0.2": {
+            "date": "18 Mai 2026",
+            "titre": "Mise à jour 2.0.2 — Stabilisation et corrections mineures",
+            "changements": [
+                "BUGFIX: Corrections mineures de stabilité",
+                "AMÉLIORATION: Performances générales"
+            ]
+        },
         "2.0.0": {
             "date": "1er Mai 2026",
             "titre": "Module Hôtel complet, Livraisons et initialisation API",
