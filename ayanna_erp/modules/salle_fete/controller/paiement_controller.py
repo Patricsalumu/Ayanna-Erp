@@ -212,14 +212,14 @@ class PaiementController(QObject):
     
     def filter_reservations_by_date(self, start_date=None, end_date=None):
         """
-        Filtrer les réservations par date d'événement
+        Filtrer les réservations par date de création (created_at)
         
         Args:
-            start_date (datetime): Date de début (optionnelle)
-            end_date (datetime): Date de fin (optionnelle)
+            start_date (datetime): Début de période (00:00:00 du jour concerné)
+            end_date (datetime): Fin de période (23:59:59.999999 du jour concerné)
             
         Returns:
-            list: Liste des réservations dans la plage de dates
+            list: Liste des réservations créées dans la plage de dates
         """
         try:
             session = self.get_session()
@@ -229,14 +229,13 @@ class PaiementController(QObject):
                 .filter(EventReservation.pos_id == self.pos_id)
             
             if start_date:
-                query = query.filter(EventReservation.event_date >= start_date)
+                query = query.filter(EventReservation.created_at >= start_date)
             
             if end_date:
-                # Ajouter 1 jour pour inclure toute la journée de fin
-                end_date_inclusive = end_date + timedelta(days=1)
-                query = query.filter(EventReservation.event_date < end_date_inclusive)
+                # Borne de fin inclusive (end_date est déjà 23:59:59.999999 du dernier jour)
+                query = query.filter(EventReservation.created_at <= end_date)
             
-            reservations = query.order_by(EventReservation.event_date).all()
+            reservations = query.order_by(EventReservation.created_at.desc()).all()
             
             result = []
             for reservation in reservations:
@@ -368,6 +367,16 @@ class PaiementController(QObject):
             
             # Calculer le solde
             balance = (reservation.total_amount or 0) - total_paid
+
+            # Nom de l'utilisateur créateur
+            created_by_name = 'Inconnu'
+            if reservation.created_by:
+                creator_row = session.execute(
+                    text("SELECT name FROM core_users WHERE id = :uid LIMIT 1"),
+                    {'uid': reservation.created_by}
+                ).fetchone()
+                if creator_row:
+                    created_by_name = creator_row[0]
             
             reservation_details = {
                 'id': reservation.id,
@@ -387,6 +396,8 @@ class PaiementController(QObject):
                 'discount_percent': reservation.discount_percent or 0,
                 'total_cost': reservation.total_cost or 0,
                 'created_at': reservation.created_at,
+                'created_by': reservation.created_by,
+                'created_by_name': created_by_name,
                 'services': services,
                 'products': products,
                 'payments': payments,
@@ -401,7 +412,78 @@ class PaiementController(QObject):
             print(f"Erreur lors de la récupération des détails: {str(e)}")
             self.error_occurred.emit(f"Erreur lors de la récupération des détails: {str(e)}")
             return None
-    
+
+    def resolve_creators(self, reservations):
+        """
+        Enrichit une liste de dicts réservation avec 'created_by_name'.
+        - Priorité 1 : reservation.created_by → core_users
+        - Priorité 2 (si created_by absent) : 1er paiement event_payments → core_users
+        """
+        if not reservations:
+            return reservations
+        try:
+            session = self.get_session()
+
+            reservation_ids = [r['id'] for r in reservations]
+
+            # ── 1. Résolution via created_by de la réservation ──────────────────
+            res_created_by = {
+                r['id']: r.get('created_by')
+                for r in reservations if r.get('created_by')
+            }
+            all_user_ids = set(res_created_by.values())
+
+            # ── 2. 1er paiement pour les réservations sans created_by ────────────
+            no_creator_ids = [r['id'] for r in reservations if not r.get('created_by')]
+            payment_user_map = {}  # {reservation_id: user_id}
+            if no_creator_ids:
+                placeholders = ','.join(str(i) for i in no_creator_ids)
+                rows = session.execute(text(f"""
+                    SELECT ep.reservation_id, ep.user_id
+                    FROM event_payments ep
+                    INNER JOIN (
+                        SELECT reservation_id, MIN(id) AS min_id
+                        FROM event_payments
+                        WHERE reservation_id IN ({placeholders})
+                        GROUP BY reservation_id
+                    ) t ON ep.reservation_id = t.reservation_id AND ep.id = t.min_id
+                """)).fetchall()
+                for row in rows:
+                    if row[1]:
+                        payment_user_map[row[0]] = row[1]
+                        all_user_ids.add(row[1])
+
+            # ── 3. Batch lookup des noms d'utilisateurs ──────────────────────────
+            user_names = {}
+            if all_user_ids:
+                placeholders = ','.join(str(i) for i in all_user_ids)
+                name_rows = session.execute(
+                    text(f"SELECT id, name FROM core_users WHERE id IN ({placeholders})")
+                ).fetchall()
+                for row in name_rows:
+                    user_names[row[0]] = row[1]
+
+            session.close()
+
+            # ── 4. Enrichissement ────────────────────────────────────────────────
+            result = []
+            for r in reservations:
+                r = dict(r)
+                created_by = r.get('created_by')
+                if created_by and created_by in user_names:
+                    r['created_by_name'] = user_names[created_by]
+                elif r['id'] in payment_user_map:
+                    puid = payment_user_map[r['id']]
+                    r['created_by_name'] = user_names.get(puid, 'Inconnu')
+                else:
+                    r['created_by_name'] = r.get('created_by_name') or 'Inconnu'
+                result.append(r)
+            return result
+
+        except Exception as e:
+            print(f"Erreur resolve_creators: {e}")
+            return reservations
+
     def create_payment(self, payment_data):
         """
         Créer un nouveau paiement pour une réservation
@@ -492,6 +574,24 @@ class PaiementController(QObject):
                 # Récupérer les comptes configurés
                 compte_caisse_id = getattr(config, 'compte_caisse_id', None)
                 compte_client_id = getattr(config, 'compte_client_id', None)
+
+                # Utiliser le compte du mode de paiement si disponible,
+                # sinon fallback sur le compte caisse de la config comptable
+                try:
+                    from ayanna_erp.database.database_manager import PaymentMode as _PaymentModeModel
+                    _eid = entreprise_ctrl.get_connected_enterprise_id()
+                    _mode = session.query(_PaymentModeModel).filter(
+                        _PaymentModeModel.enterprise_id == _eid,
+                        _PaymentModeModel.label == payment_data.get('payment_method'),
+                        _PaymentModeModel.is_active == 1
+                    ).first()
+                    if _mode and _mode.compte_id:
+                        compte_caisse_id = _mode.compte_id
+                        print(f"  💰 Compte caisse du mode '{_mode.label}': {_mode.compte_id} ({_mode.compte_label})")
+                    else:
+                        print(f"  💰 Mode '{payment_data.get('payment_method')}' sans compte associé, compte caisse par défaut: {compte_caisse_id}")
+                except Exception as _mode_err:
+                    print(f"  ⚠️ Impossible de résoudre le compte du mode de paiement: {_mode_err}")
 
                 compte_debit = session.query(CompteComptable).filter(CompteComptable.id == compte_caisse_id).first() if compte_caisse_id else None
                 compte_client = session.query(CompteComptable).filter(CompteComptable.id == compte_client_id).first() if compte_client_id else None

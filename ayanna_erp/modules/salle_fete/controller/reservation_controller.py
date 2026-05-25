@@ -829,6 +829,22 @@ class ReservationController(QObject):
             # ============================================================
             if payment is not None:
                 montant_paye = round(float(payment.amount or 0), 2)
+                # Utiliser le compte du mode de paiement si disponible,
+                # sinon fallback sur le compte caisse de la config comptable
+                try:
+                    from ayanna_erp.database.database_manager import PaymentMode as _PaymentModeModel
+                    _mode = session.query(_PaymentModeModel).filter(
+                        _PaymentModeModel.enterprise_id == enterprise_id,
+                        _PaymentModeModel.label == getattr(payment, 'payment_method', None),
+                        _PaymentModeModel.is_active == 1
+                    ).first()
+                    if _mode and _mode.compte_id:
+                        compte_caisse_id = _mode.compte_id
+                        print(f"  💰 Compte caisse du mode '{_mode.label}': {_mode.compte_id} ({_mode.compte_label})")
+                    else:
+                        print(f"  💰 Mode '{getattr(payment, 'payment_method', '?')}' sans compte associé, compte caisse par défaut: {compte_caisse_id}")
+                except Exception as _mode_err:
+                    print(f"  ⚠️ Impossible de résoudre le compte du mode de paiement: {_mode_err}")
                 if not compte_caisse_id:
                     print("⚠️ compte_caisse_id non configuré, journal caisse non créé")
                 elif montant_paye <= 0:

@@ -237,6 +237,7 @@ class PaiementIndex(QWidget):
         
         # Partie gauche - Liste des réservations
         left_widget = QWidget()
+        left_widget.setMinimumWidth(1)
         left_layout = QVBoxLayout(left_widget)
         
         # Barre de recherche
@@ -253,59 +254,125 @@ class PaiementIndex(QWidget):
         search_input_layout.addWidget(self.search_button)
         search_layout.addLayout(search_input_layout)
         
-        # Filtre par date
+        # Filtre par plage de dates
         date_layout = QHBoxLayout()
-        date_layout.addWidget(QLabel("Date:"))
-        self.date_filter = QDateEdit()
-        self.date_filter.setDate(QDate.currentDate())
-        self.date_filter.setSpecialValueText("Toutes les dates")
+        date_layout.addWidget(QLabel("Du:"))
+        self.date_from_filter = QDateEdit()
+        self.date_from_filter.setDate(QDate.currentDate())
+        self.date_from_filter.setCalendarPopup(True)
+        self.date_from_filter.setDisplayFormat("dd/MM/yyyy")
+        date_layout.addWidget(self.date_from_filter)
+        date_layout.addWidget(QLabel("Au:"))
+        self.date_to_filter = QDateEdit()
+        self.date_to_filter.setDate(QDate.currentDate())
+        self.date_to_filter.setCalendarPopup(True)
+        self.date_to_filter.setDisplayFormat("dd/MM/yyyy")
+        date_layout.addWidget(self.date_to_filter)
         self.clear_date_button = QPushButton("❌")
         self.clear_date_button.setMaximumWidth(30)
-        
-        date_layout.addWidget(self.date_filter)
         date_layout.addWidget(self.clear_date_button)
         search_layout.addLayout(date_layout)
         
         left_layout.addWidget(search_group)
+        
+        # Statistiques du jour
+        stats_group = QGroupBox("📊 Statistiques du jour")
+        stats_layout = QFormLayout(stats_group)
+        
+        self.stats_count_label = QLabel("0")
+        self.stats_total_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        self.stats_paid_label = QLabel(f"0.00 {self.get_currency_symbol()}")
+        
+        bold_style = "font-weight: bold; font-size: 12px;"
+        self.stats_count_label.setStyleSheet(bold_style)
+        self.stats_total_label.setStyleSheet(bold_style + "color: #2980B9;")
+        self.stats_paid_label.setStyleSheet(bold_style + "color: #27AE60;")
+        
+        stats_layout.addRow("Réservations:", self.stats_count_label)
+        stats_layout.addRow("Montant total:", self.stats_total_label)
+        stats_layout.addRow("Montant payé:", self.stats_paid_label)
+        
+        left_layout.addWidget(stats_group)
         
         # Liste des réservations
         reservations_group = QGroupBox("📋 Réservations")
         reservations_layout = QVBoxLayout(reservations_group)
         
         self.reservations_table = QTableWidget()
-        self.reservations_table.setColumnCount(5)
+        self.reservations_table.setColumnCount(6)
         self.reservations_table.setHorizontalHeaderLabels([
-            "Référence", "Client", "Date", "Total", "Solde"
+            "Référence", "Client", "Date", "Total", "Payé", "Solde"
         ])
         self.reservations_table.horizontalHeader().setStretchLastSection(True)
         self.reservations_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.reservations_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         
         reservations_layout.addWidget(self.reservations_table)
+
+        # Bouton d'export PDF
+        export_row = QHBoxLayout()
+        self.export_pdf_button = QPushButton("📤 Exporter PDF")
+        self.export_pdf_button.setStyleSheet("""
+            QPushButton {
+                background-color: #C0392B;
+                color: white;
+                border: none;
+                padding: 6px 14px;
+                border-radius: 4px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #922B21; }
+        """)
+        export_row.addStretch()
+        export_row.addWidget(self.export_pdf_button)
+        reservations_layout.addLayout(export_row)
+
         left_layout.addWidget(reservations_group)
         
         # Partie droite - Détails et paiement
         right_widget = QWidget()
+        right_widget.setMinimumWidth(1)
         right_layout = QVBoxLayout(right_widget)
         
         # Détails de la réservation sélectionnée
         details_group = QGroupBox("📋 Détails de la réservation")
         details_layout = QVBoxLayout(details_group)
         
-        # Informations client
-        client_info_layout = QFormLayout()
+        # Informations client — grille 2 colonnes pour économiser la hauteur
         self.client_name_label = QLabel("Aucune réservation sélectionnée")
         self.client_phone_label = QLabel("-")
         self.event_date_label = QLabel("-")
         self.event_type_label = QLabel("-")
         self.guest_count_label = QLabel("-")
-        
-        client_info_layout.addRow("Client:", self.client_name_label)
-        client_info_layout.addRow("Téléphone:", self.client_phone_label)
-        client_info_layout.addRow("Date événement:", self.event_date_label)
-        client_info_layout.addRow("Type:", self.event_type_label)
-        client_info_layout.addRow("Nombre d'invités:", self.guest_count_label)
-        
+        self.created_at_label = QLabel("-")
+        self.created_by_label = QLabel("-")
+
+        client_info_layout = QGridLayout()
+        client_info_layout.setHorizontalSpacing(8)
+        client_info_layout.setVerticalSpacing(4)
+
+        # Ligne 0 : Client | Téléphone
+        client_info_layout.addWidget(QLabel("Client:"),         0, 0)
+        client_info_layout.addWidget(self.client_name_label,    0, 1)
+        client_info_layout.addWidget(QLabel("Téléphone:"),      0, 2)
+        client_info_layout.addWidget(self.client_phone_label,   0, 3)
+        # Ligne 1 : Date événement | Type
+        client_info_layout.addWidget(QLabel("Date événement:"), 1, 0)
+        client_info_layout.addWidget(self.event_date_label,     1, 1)
+        client_info_layout.addWidget(QLabel("Type:"),           1, 2)
+        client_info_layout.addWidget(self.event_type_label,     1, 3)
+        # Ligne 2 : Nombre d'invités (pleine largeur)
+        client_info_layout.addWidget(QLabel("Invités:"),        2, 0)
+        client_info_layout.addWidget(self.guest_count_label,    2, 1, 1, 3)
+        # Ligne 3 : Créé par | Créé le
+        client_info_layout.addWidget(QLabel("Créé par:"),       3, 0)
+        client_info_layout.addWidget(self.created_by_label,     3, 1)
+        client_info_layout.addWidget(QLabel("Créé le:"),        3, 2)
+        client_info_layout.addWidget(self.created_at_label,     3, 3)
+
+        client_info_layout.setColumnStretch(1, 1)
+        client_info_layout.setColumnStretch(3, 1)
+
         details_layout.addLayout(client_info_layout)
         
         # Services et produits
@@ -315,7 +382,12 @@ class PaiementIndex(QWidget):
         self.services_table = QTableWidget()
         self.services_table.setColumnCount(4)
         self.services_table.setHorizontalHeaderLabels(["Type", "Nom", "Quantité", "Prix"])
-        self.services_table.horizontalHeader().setStretchLastSection(True)
+        self.services_table.horizontalHeader().setStretchLastSection(False)
+        self.services_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self.services_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        self.services_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.services_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.services_table.setColumnWidth(3, 90)
         self.services_table.setMaximumHeight(200)
         
         services_layout.addWidget(self.services_table)
@@ -359,7 +431,13 @@ class PaiementIndex(QWidget):
         self.payments_table = QTableWidget()
         self.payments_table.setColumnCount(4)
         self.payments_table.setHorizontalHeaderLabels(["Date", "Montant", "Méthode", "Utilisateur"])
-        self.payments_table.horizontalHeader().setStretchLastSection(True)
+        self.payments_table.horizontalHeader().setStretchLastSection(False)
+        self.payments_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Fixed)
+        self.payments_table.setColumnWidth(0, 200)
+        self.payments_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.payments_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.payments_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
+        self.payments_table.setColumnWidth(3, 150)
         self.payments_table.setMaximumHeight(150)
         
         payments_layout.addWidget(self.payments_table)
@@ -456,17 +534,32 @@ class PaiementIndex(QWidget):
         # Assemblage final
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
-        splitter.setSizes([500, 700])  # Proportion 40-60
+        splitter.setStretchFactor(0, 1)  # Panel gauche : 50%
+        splitter.setStretchFactor(1, 1)  # Panel droit  : 50%
+        self.splitter = splitter  # Conserver la référence pour showEvent
         
         main_layout.addWidget(splitter)
-    
+
+    def showEvent(self, event):
+        """Appliquer la répartition 50/50 une fois la fenêtre visible"""
+        super().showEvent(event)
+        QTimer.singleShot(0, self._apply_splitter_sizes)
+
+    def _apply_splitter_sizes(self):
+        total = self.splitter.width()
+        if total > 10:
+            half = total // 2
+            self.splitter.setSizes([half, total - half])
+
     def connect_signals(self):
         """Connecter les signaux"""
         # Recherche
         self.search_input.textChanged.connect(self.perform_search)
         self.search_button.clicked.connect(self.perform_search)
-        self.date_filter.dateChanged.connect(self.filter_by_date)
+        self.date_from_filter.dateChanged.connect(self.filter_by_date)
+        self.date_to_filter.dateChanged.connect(self.filter_by_date)
         self.clear_date_button.clicked.connect(self.clear_date_filter)
+        self.export_pdf_button.clicked.connect(self.export_reservations_pdf)
         
         # Sélection de réservation - plusieurs signaux pour garantir la sélection
         self.reservations_table.itemSelectionChanged.connect(self.on_reservation_selected)
@@ -496,8 +589,19 @@ class PaiementIndex(QWidget):
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des réservations: {str(e)}")
     
+    def update_day_stats(self, reservations):
+        """Mettre à jour les statistiques du jour affiché"""
+        count = len(reservations)
+        total = sum(float(r.get('total_amount', 0) or 0) for r in reservations)
+        paid = sum(float((r.get('total_amount', 0) or 0)) - float((r.get('balance', 0) or 0)) for r in reservations)
+        
+        self.stats_count_label.setText(str(count))
+        self.stats_total_label.setText(self.format_amount(total))
+        self.stats_paid_label.setText(self.format_amount(paid))
+
     def populate_reservations_table(self, reservations):
         """Remplir le tableau des réservations avec les données de la BDD"""
+        self.update_day_stats(reservations)
         self.reservations_table.setRowCount(len(reservations))
         
         for row, reservation in enumerate(reservations):
@@ -505,7 +609,8 @@ class PaiementIndex(QWidget):
             balance = reservation.get('balance', 0)
             
             # Remplir les colonnes
-            self.reservations_table.setItem(row, 0, QTableWidgetItem(str(reservation.get('reference', ''))))
+            ref_id = reservation.get('id') or reservation.get('reference', '')
+            self.reservations_table.setItem(row, 0, QTableWidgetItem(f"RES-{ref_id}"))
             self.reservations_table.setItem(row, 1, QTableWidgetItem(str(reservation.get('client_nom', ''))))
             
             # Date formatée
@@ -519,11 +624,17 @@ class PaiementIndex(QWidget):
                 date_str = 'N/A'
             self.reservations_table.setItem(row, 2, QTableWidgetItem(date_str))
             
-            # Total et solde
+            # Total
             total = reservation.get('total_amount', 0)
             self.reservations_table.setItem(row, 3, QTableWidgetItem(self.format_amount(total)))
             
-            # Colorer le solde selon le statut
+            # Payé
+            total_paid = float(total) - float(balance)
+            paid_item = QTableWidgetItem(self.format_amount(total_paid))
+            paid_item.setForeground(Qt.GlobalColor.darkGreen)
+            self.reservations_table.setItem(row, 4, paid_item)
+            
+            # Solde (reste à payer) - coloré selon statut
             balance_item = QTableWidgetItem(self.format_amount(balance))
             if balance > 0:
                 balance_item.setBackground(Qt.GlobalColor.red)
@@ -532,7 +643,7 @@ class PaiementIndex(QWidget):
                 balance_item.setBackground(Qt.GlobalColor.green)
                 balance_item.setForeground(Qt.GlobalColor.white)
             
-            self.reservations_table.setItem(row, 4, balance_item)
+            self.reservations_table.setItem(row, 5, balance_item)
             
             # Stocker les données de la réservation
             self.reservations_table.item(row, 0).setData(Qt.ItemDataRole.UserRole, reservation)
@@ -562,15 +673,18 @@ class PaiementIndex(QWidget):
             QMessageBox.warning(self, "Erreur", f"Erreur lors de la recherche: {str(e)}")
     
     def filter_by_date(self):
-        """Filtrer les réservations par date d'événement"""
-        selected_date = self.date_filter.date().toPython() if hasattr(self.date_filter.date(), 'toPython') else self.date_filter.date().toPyDate()
-        
+        """Filtrer les réservations par plage de dates d'événement"""
+        qdate_from = self.date_from_filter.date()
+        qdate_to   = self.date_to_filter.date()
+        date_from = qdate_from.toPython() if hasattr(qdate_from, 'toPython') else qdate_from.toPyDate()
+        date_to   = qdate_to.toPython()   if hasattr(qdate_to,   'toPython') else qdate_to.toPyDate()
+
+        # Bornes inclusives : début du jour ≤ event_date ≤ fin du jour
+        start_date = datetime(date_from.year, date_from.month, date_from.day, 0, 0, 0)
+        end_date   = datetime(date_to.year,   date_to.month,   date_to.day,   23, 59, 59, 999999)
+
         try:
             if self.paiement_controller:
-                # Filtrer par date d'événement (jour entier)
-                start_date = datetime.combine(selected_date, datetime.min.time())
-                end_date = datetime.combine(selected_date, datetime.max.time())
-                
                 reservations = self.paiement_controller.filter_reservations_by_date(start_date, end_date)
                 self.populate_reservations_table(reservations)
             else:
@@ -580,9 +694,70 @@ class PaiementIndex(QWidget):
     
     def clear_date_filter(self):
         """Effacer le filtre de date et recharger toutes les réservations"""
-        self.date_filter.setDate(QDate.currentDate())
+        today = QDate.currentDate()
+        self.date_from_filter.setDate(today)
+        self.date_to_filter.setDate(today)
         self.load_reservations()
-    
+
+    def export_reservations_pdf(self):
+        """Générer un PDF A4 paysage listant les réservations affichées et l'ouvrir."""
+        import tempfile
+        import os
+
+        # Collecter les réservations depuis le tableau
+        row_count = self.reservations_table.rowCount()
+        if row_count == 0:
+            QMessageBox.information(self, "Export", "Aucune réservation à exporter.")
+            return
+
+        raw_reservations = []
+        for row in range(row_count):
+            item = self.reservations_table.item(row, 0)
+            if item:
+                data = item.data(Qt.ItemDataRole.UserRole)
+                if data:
+                    raw_reservations.append(data)
+
+        if not raw_reservations:
+            QMessageBox.information(self, "Export", "Aucune donnée disponible pour l'export.")
+            return
+
+        # Résolution des créateurs (batch)
+        if self.paiement_controller:
+            reservations = self.paiement_controller.resolve_creators(raw_reservations)
+        else:
+            reservations = raw_reservations
+
+        # Label de la période filtrée
+        d_from = self.date_from_filter.date().toString('dd/MM/yyyy')
+        d_to   = self.date_to_filter.date().toString('dd/MM/yyyy')
+        period_label = (
+            f"Période : du {d_from} au {d_to}   |   "
+            f"{len(reservations)} réservation(s)   |   "
+            f"Généré le {datetime.now().strftime('%d/%m/%Y à %H:%M')}"
+        )
+
+        # Fichier temporaire
+        with tempfile.NamedTemporaryFile(
+            suffix='_reservations.pdf', delete=False
+        ) as tmp:
+            tmp_path = tmp.name
+
+        try:
+            self.payment_printer.print_reservations_list_pdf(
+                reservations, period_label, tmp_path
+            )
+            # Ouverture avec l'application par défaut du système
+            if os.name == 'nt':
+                os.startfile(tmp_path)
+            else:
+                import subprocess
+                subprocess.call(['xdg-open', tmp_path])
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export",
+                                 f"Impossible de générer le PDF :\n{str(e)}")
+
+
     def on_reservation_selected(self):
         """Callback quand une réservation est sélectionnée"""
         current_row = self.reservations_table.currentRow()
@@ -646,8 +821,19 @@ class PaiementIndex(QWidget):
                     self.event_type_label.setText(reservation_details.get('event_type', 'N/A'))
                     
                     # Nombre d'invités
-                    guest_count = reservation_details.get('guests_count', 0)  # Utiliser 'guests_count' avec un 's'
+                    guest_count = reservation_details.get('guests_count', 0)
                     self.guest_count_label.setText(str(guest_count) if guest_count else "Non spécifié")
+
+                    # Date et utilisateur de création
+                    created_at = reservation_details.get('created_at')
+                    if created_at:
+                        if isinstance(created_at, str):
+                            self.created_at_label.setText(created_at)
+                        else:
+                            self.created_at_label.setText(created_at.strftime('%d/%m/%Y à %H:%M'))
+                    else:
+                        self.created_at_label.setText('N/A')
+                    self.created_by_label.setText(reservation_details.get('created_by_name', 'N/A'))
                     
                     # Mettre à jour la réservation sélectionnée avec les détails complets
                     self.selected_reservation = reservation_details
@@ -818,6 +1004,8 @@ class PaiementIndex(QWidget):
         self.event_date_label.setText("-")
         self.event_type_label.setText("-")
         self.guest_count_label.setText("-")
+        self.created_at_label.setText("-")
+        self.created_by_label.setText("-")
         
         self.services_table.setRowCount(0)
         self.payments_table.setRowCount(0)

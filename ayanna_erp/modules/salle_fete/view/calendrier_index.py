@@ -109,25 +109,26 @@ class EventCalendarWidget(QWidget):
         
         for date, events in self.events_by_date.items():
             qdate = QDate(date.year, date.month, date.day)
-            
-            # Déterminer la couleur selon le statut des événements
-            color = self.get_date_color(events)
-            
-            # Créer le format pour cette date avec le nom du client
+
+            bg_color, fg_color = self.get_date_color(events)
+
+            # Créer le format pour cette date
             format_date = QTextCharFormat()
-            format_date.setBackground(QColor(color))
-            format_date.setForeground(QColor("white"))
-            format_date.setFontWeight(QFont.Weight.Bold)
-            format_date.setFontPointSize(9)  # Taille de police lisible
-            
+            if bg_color:
+                format_date.setBackground(QColor(bg_color))
+                format_date.setForeground(QColor(fg_color))
+                format_date.setFontWeight(QFont.Weight.Bold)
+                format_date.setFontPointSize(9)
+
             # Créer un texte personnalisé pour la cellule
             if events:
                 total_events += len(events)
-                
-                # Ajouter au tooltip global
+
+                # Ajouter au tooltip global avec nom + code réservation
                 global_tooltip += f"📅 {date.strftime('%d/%m')} - {len(events)} événement(s)\n"
                 for event in events:
-                    global_tooltip += f"   🎉 {event['client_name']} - {event['event_type']}\n"
+                    ref = f"RES-{event['id']}"
+                    global_tooltip += f"   🎉 [{ref}] {event['client_name']} - {event['event_type']}\n"
                 global_tooltip += "\n"
                 
                 # Prendre le premier client pour l'affichage
@@ -158,29 +159,20 @@ class EventCalendarWidget(QWidget):
         self.update_current_tooltip()
     
     def get_date_color(self, events):
-        """Déterminer la couleur d'une date selon ses événements"""
+        """Retourne (bg_color, fg_color) selon que l'événement est futur ou passé."""
         if not events:
-            return "#FFFFFF"  # Blanc par défaut
-        
-        # Priorité: Annulé > En attente > Confirmé > Passé
-        has_cancelled = any(event['status'] in ['cancelled', 'Annulée'] for event in events)
-        has_pending = any(event['status'] in ['draft', 'En attente'] for event in events)
-        has_confirmed = any(event['status'] in ['confirmed', 'Confirmée'] for event in events)
-        
-        # Vérifier si l'événement est passé
+            return None, None
+
         now = datetime.now()
-        has_past = any(event['datetime'] < now for event in events)
-        
-        if has_cancelled:
-            return "#E74C3C"  # Rouge pour annulé
-        elif has_pending:
-            return "#F39C12"  # Orange pour en attente
-        elif has_past:
-            return "#3498DB"  # Bleu pour passé
-        elif has_confirmed:
-            return "#27AE60"  # Vert pour confirmé
+        all_cancelled = all(e['status'] in ['cancelled', 'Annulée'] for e in events)
+        has_future   = any(e['datetime'] >= now for e in events)
+
+        if all_cancelled:
+            return ("#E74C3C", "#FFFFFF")   # Rouge vif / texte blanc
+        elif has_future:
+            return ("#F39C12", "#FFFFFF")   # Orange vif / texte blanc
         else:
-            return "#95A5A6"  # Gris par défaut
+            return ("#BDC3C7", "#566573")   # Gris fondu / texte gris foncé
     
     def on_date_clicked(self, date):
         """Callback quand une date est cliquée"""
@@ -233,6 +225,17 @@ class CalendrierIndex(QWidget):
         # Utiliser le pos_id du contrôleur principal
         pos_id = getattr(main_controller, 'pos_id', 1)
         self.calendrier_controller = CalendrierController(pos_id=pos_id)
+
+        # Initialiser le gestionnaire d'impression PDF
+        try:
+            from ayanna_erp.core.session_manager import SessionManager
+            from ayanna_erp.modules.salle_fete.utils.payment_printer import PaymentPrintManager
+            enterprise_id = SessionManager.get_current_enterprise_id()
+            self.payment_printer = PaymentPrintManager(enterprise_id=enterprise_id)
+        except Exception as _e_pp:
+            print(f"Avertissement: PaymentPrintManager non disponible: {_e_pp}")
+            self.payment_printer = None
+
         self.setup_ui()
         self.connect_signals()
         self.load_upcoming_events()
@@ -276,6 +279,31 @@ class CalendrierIndex(QWidget):
         self.refresh_button.setToolTip("Actualiser les données du calendrier et de la liste des événements")
         
         toolbar_layout.addWidget(self.refresh_button)
+
+        self.export_cal_button = QPushButton("📤 Exporter PDF")
+        self.export_cal_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 5px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+            QPushButton:pressed {
+                background-color: #922B21;
+            }
+            QPushButton:disabled {
+                background-color: #AEB6BF;
+            }
+        """)
+        self.export_cal_button.setToolTip("Exporter le calendrier du mois affiché en PDF")
+        toolbar_layout.addWidget(self.export_cal_button)
+
         toolbar_layout.addStretch()  # Espacer vers la droite
         
         right_layout.addLayout(toolbar_layout)
@@ -349,7 +377,55 @@ class CalendrierIndex(QWidget):
         
         # Connecter le bouton de rafraîchissement
         self.refresh_button.clicked.connect(self.refresh_data)
+        # Bouton export PDF calendrier
+        self.export_cal_button.clicked.connect(self.export_calendar_pdf)
     
+    def export_calendar_pdf(self):
+        """Exporter le calendrier du mois affiché en PDF et l'ouvrir."""
+        import tempfile
+        import os
+
+        if self.payment_printer is None:
+            QMessageBox.warning(self, "Non disponible",
+                                "Le module d'impression n'est pas initialisé.")
+            return
+
+        # Mois/année affiché dans le widget calendrier (pas forcément le mois courant)
+        year  = self.event_calendar.calendar.yearShown()
+        month = self.event_calendar.calendar.monthShown()
+        events_by_date = self.event_calendar.events_by_date
+
+        MONTH_FR = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+                    'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre']
+        period_label = f"{MONTH_FR[month - 1]} {year}"
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                    suffix=f'_calendrier_{year}_{month:02d}.pdf',
+                    delete=False) as tmp:
+                tmp_path = tmp.name
+
+            self.export_cal_button.setEnabled(False)
+            self.export_cal_button.setText("⏳ Génération...")
+            import PyQt6.QtWidgets as _qw
+            _qw.QApplication.processEvents()
+
+            self.payment_printer.print_calendar_month_pdf(
+                year, month, events_by_date, tmp_path)
+
+            if os.name == 'nt':
+                os.startfile(tmp_path)
+            else:
+                import subprocess
+                subprocess.call(['xdg-open', tmp_path])
+
+        except Exception as e:
+            QMessageBox.critical(self, "Erreur d'export",
+                                 f"Impossible de générer le PDF du calendrier:\n{e}")
+        finally:
+            self.export_cal_button.setEnabled(True)
+            self.export_cal_button.setText("📤 Exporter PDF")
+
     def load_upcoming_events(self):
         """Charger tous les prochains événements du mois"""
         self.calendrier_controller.get_upcoming_events(50)  # Augmenter la limite pour afficher plus d'événements

@@ -119,15 +119,11 @@ class SalleFeteWindow(QMainWindow):
         self.calendrier_widget = CalendrierIndex(self.main_controller, self.current_user)
         self.tab_widget.addTab(self.calendrier_widget, "📅 Calendrier")
         
-        # Onglet Réservations
-        self.reservations_widget = ReservationIndex(self.main_controller, self.current_user)
-        self.tab_widget.addTab(self.reservations_widget, "📋 Réservations")
-        
-        # # Onglet Clients
-        # self.clients_widget = ClientIndex(self.main_controller, self.current_user)
-        # self.tab_widget.addTab(self.clients_widget, "👥 Clients")
-        
-        # Onglet Services
+
+        # Onglet Paiements
+        self.paiements_widget = PaiementIndex(self.main_controller, self.current_user)
+        self.tab_widget.addTab(self.paiements_widget, "💳 Réservations")
+
 
         self.services_widget = ServiceIndex(self.main_controller, self.current_user, user_controller=self.user_controller)
         self.tab_widget.addTab(self.services_widget, "🔧 Services")
@@ -141,9 +137,6 @@ class SalleFeteWindow(QMainWindow):
         self.entree_sortie_widget = EntreeSortieIndex(self.main_controller, self.current_user)
         self.tab_widget.addTab(self.entree_sortie_widget, "📥📤 Caisse")
         
-        # Onglet Paiements
-        self.paiements_widget = PaiementIndex(self.main_controller, self.current_user)
-        self.tab_widget.addTab(self.paiements_widget, "💳 Paiements")
         
         # Onglet Rapports
         self.rapports_widget = RapportIndex(self.main_controller, self.current_user)
