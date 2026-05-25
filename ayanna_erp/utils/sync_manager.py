@@ -1147,10 +1147,16 @@ class SyncManager:
             final_message = f'PUSH echoue : {e}'
 
         # 2. PULL
-        # Si c'est la premiere synchronisation (pas de last_sync sauvegarde),
-        # on utilise le timestamp pre-push pour eviter l'echo des donnees poussees.
-        settings = self.get_settings()
-        pull_override = pre_push_time if not (settings and settings.last_sync) else None
+        # On utilise toujours pre_push_time comme borne inférieure du pull :
+        #   - évite que le serveur renvoie en echo les enregistrements qu'on vient
+        #     de lui pousser (ils ont updated_at >= début du push)
+        #   - les changements serveur arrivés AVANT pre_push_time sont couverts
+        #     par le last_sync précédent ; ceux arrivés APRÈS seront inclus dans
+        #     ce pull car server_time (capturé avant la requête côté serveur) sera
+        #     légèrement en avance sur pre_push_time.
+        # Exception : première sync (pas de last_sync) — on prend aussi pre_push_time
+        # pour ne pas rapatrier toute la base du serveur en boucle.
+        pull_override = pre_push_time
         try:
             pull_result = self.pull(triggered_by=synced_by, override_last_sync=pull_override)
         except Exception as e:

@@ -70,6 +70,11 @@ class SyncController extends Controller
             ? Carbon::parse($request->input('last_sync'))
             : Carbon::createFromTimestamp(0);
 
+        // Capturer server_time AVANT la requête pour éviter la race condition :
+        // tout enregistrement créé entre la fin du WHERE et now() serait manqué
+        // définitivement si server_time était capturé après.
+        $serverTime = now()->toIso8601String();
+
         $data = $this->syncService->pull($lastSync);
 
         // Journaliser le résumé côté serveur
@@ -82,7 +87,7 @@ class SyncController extends Controller
         ]);
 
         return response()->json([
-            'server_time' => now()->toIso8601String(),
+            'server_time' => $serverTime,
             'data'        => $data,
         ]);
     }

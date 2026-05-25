@@ -35,11 +35,6 @@ class ReservationController(QObject):
         self.pos_id = pos_id
         
     def create_reservation(self, reservation_data, services_data=None, products_data=None):
-        from ayanna_erp.modules.comptabilite.model.comptabilite import (
-            ComptaEcritures as EcritureComptable, 
-            ComptaJournaux as JournalComptable, 
-            ComptaComptes as CompteComptable
-        )
         """
         Créer une nouvelle réservation avec services et produits
         
@@ -137,102 +132,29 @@ class ReservationController(QObject):
             
             # Créer un paiement automatique si un acompte est fourni
             deposit_amount = reservation_data.get('deposit', 0.0)
-            
+            payment = None
+
             if deposit_amount > 0:
                 from ayanna_erp.modules.salle_fete.model.salle_fete import EventPayment
-                from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaConfig
-                
                 payment = EventPayment(
                     reservation_id=reservation.id,
                     amount=deposit_amount,
-                    payment_method='Espèces',  # Simplifier en utilisant espèces par défaut
+                    payment_method='Espèces',
                     payment_date=datetime.now(),
                     status='validated',
-                    user_id=1,  # TODO: Récupérer l'ID de l'utilisateur connecté
+                    user_id=1,
                     notes=f"Acompte automatique pour réservation {reservation.client_nom} {reservation.client_prenom}"
                 )
                 session.add(payment)
-                session.flush()  # Pour avoir l'ID du paiement
+                session.flush()
                 print(f"💰 Paiement d'acompte créé: {deposit_amount}€")
-                
-                # Récupérer la configuration comptable pour ce POS
-                config = session.query(ComptaConfig).filter_by(pos_id=self.pos_id).first()
-                if not config:
-                    print("⚠️  Configuration comptable manquante pour ce point de vente")
-                else:
-                    # Créer la ligne de journal comptable
-                    libelle = f"Paiement Accompte Reservation: {reservation.client_nom} {reservation.client_prenom}"
-                    from ayanna_erp.core.entreprise_controller import EntrepriseController
-                    entreprise_ctrl = EntrepriseController()
-                    journal = JournalComptable(
-                        enterprise_id=entreprise_ctrl.get_connected_enterprise_id(),
-                        libelle=libelle,
-                        montant=deposit_amount,
-                        type_operation="entree",  # 'entree' pour un paiement
-                        reference=f"PAY-{payment.id}",
-                        description=f"Acompte réservation ID: {reservation.id}",
-                        user_id=entreprise_ctrl.get_connected_user_id(),
-                        date_operation=datetime.now()
-                    )
-                    session.add(journal)
-                    session.flush()  # Pour avoir l'id du journal
-
-                    # Récupérer les comptes configurés
-                    compte_debit = session.query(CompteComptable).filter(CompteComptable.id == config.compte_caisse_id).first()
-                    if not compte_debit:
-                        raise Exception("Le compte caisse configuré n'existe pas ou n'est pas actif.")
-
-                    # Vérifier si le compte TVA est configuré
-                    compte_tva_id = config.compte_tva_id if hasattr(config, 'compte_tva_id') else None
-                    if compte_tva_id:
-                        compte_tva = session.query(CompteComptable).filter(CompteComptable.id == compte_tva_id).first()
-                        if not compte_tva:
-                            print("⚠️  Compte TVA configuré mais inexistant, TVA sera ignorée")
-                            compte_tva_id = None
-
-                    # Calculer la répartition du paiement selon les comptes spécifiques
-                    repartition = self.calculer_repartition_paiement(reservation, deposit_amount)
-                    
-                    # Créer les écritures comptables réparties
-                    ecritures = self.creer_ecritures_comptables_reparties(
-                        session=session,
-                        reservation=reservation,
-                        payment=payment,
-                        repartition=repartition,
-                        compte_debit_id=compte_debit.id,
-                        compte_tva_id=compte_tva_id,
-                        journal_id=journal.id
-                    )
-                    
-                    if ecritures:
-                        print(f"📊 {len(ecritures)} écritures comptables créées avec répartition")
-                    else:
-                        # Fallback à l'ancienne méthode si problème
-                        print("⚠️  Fallback: création d'écriture simple")
-                        ecriture_debit = EcritureComptable(
-                            journal_id=journal.id,
-                            compte_comptable_id=compte_debit.id,
-                            debit=deposit_amount,
-                            credit=0,
-                            ordre=1,
-                            libelle=f"Encaissement acompte - {reservation.client_nom}"
-                        )
-                        session.add(ecriture_debit)
-                        
-                        # Utiliser le compte vente général en fallback
-                        compte_vente_general = session.query(CompteComptable).filter(CompteComptable.id == config.compte_vente_id).first()
-                        if compte_vente_general:
-                            ecriture_credit = EcritureComptable(
-                                journal_id=journal.id,
-                                compte_comptable_id=compte_vente_general.id,
-                                debit=0,
-                                credit=deposit_amount,
-                                ordre=2,
-                                libelle=f"Avance reçue - {reservation.client_nom}"
-                            )
-                            session.add(ecriture_credit)
             else:
                 print("ℹ️  Aucun acompte fourni, pas de paiement créé")
+
+            # Créer les écritures comptables (journal vente + journal caisse si paiement)
+            ecritures = self.creer_ecritures_comptables(session, reservation, payment)
+            if ecritures:
+                print(f"📊 {len(ecritures)} écritures comptables créées")
                 
             session.commit()
             session.refresh(reservation)
@@ -721,320 +643,248 @@ class ReservationController(QObject):
         finally:
             db_manager.close_session()
 
-    def calculer_repartition_paiement(self, reservation, montant_paiement):
-        """
-        Calcule la répartition proportionnelle d'un paiement selon les comptes spécifiques
-        
-        NOUVELLE LOGIQUE : 
-        - reservation.total_amount contient le TTC SANS remise
-        - Calculer les proportions basées sur les montants BRUTS de chaque service/produit
-        - La remise est gérée séparément dans les écritures comptables
-        
-        Args:
-            reservation: Instance de EventReservation
-            montant_paiement: Montant du paiement à répartir
-            
-        Returns:
-            dict: {
-                'services': {account_id: montant},
-                'produits': {account_id: montant},
-                'tva': montant_tva,
-                'total_ht': montant_ht
-            }
-        """
-        try:
-            repartition = {
-                'services': {},
-                'produits': {},
-                'tva': 0.0,
-                'total_ht': 0.0
-            }
-            
-            # Total TTC SANS remise (nouveau système)
-            total_ttc_sans_remise = float(reservation.total_amount or 0)
-            
-            if total_ttc_sans_remise <= 0:
-                print("⚠️  Total de la réservation = 0, aucune répartition possible")
-                return repartition
-            
-            print(f"📊 Répartition paiement: {montant_paiement}€ sur {total_ttc_sans_remise}€ TTC brut ({montant_paiement/total_ttc_sans_remise:.2%})")
-            
-            # === CALCUL DES MONTANTS BRUTS (HT SANS REMISE) ===
-            
-            # Services : montant brut = prix_unitaire * quantité (SANS remise)
-            services_details = {}  # {compte_produit_id: {'total_brut': x, 'names': []}}
-            for service_item in reservation.services:
-                service = service_item.service
-                if service and hasattr(service, 'compte_produit_id') and service.compte_produit_id:
-                    # Montant brut HT (sans remise)
-                    montant_ht_brut = float(service_item.unit_price or 0) * float(service_item.quantity or 1)
-                    
-                    compte_produit_id = service.compte_produit_id
-                    if compte_produit_id not in services_details:
-                        services_details[compte_produit_id] = {'total_brut': 0, 'names': []}
-                    
-                    services_details[compte_produit_id]['total_brut'] += montant_ht_brut
-                    services_details[compte_produit_id]['names'].append(service.name)
-            
-            # Produits : montant brut = prix_unitaire * quantité (SANS remise)
-            produits_details = {}  # {compte_produit_id: {'total_brut': x, 'names': []}}
-            for product_item in reservation.products:
-                product = product_item.product
-                if product and hasattr(product, 'compte_produit_id') and product.compte_produit_id:
-                    # Montant brut HT (sans remise)
-                    montant_ht_brut = float(product_item.unit_price or 0) * float(product_item.quantity or 1)
-                    
-                    compte_produit_id = product.compte_produit_id
-                    if compte_produit_id not in produits_details:
-                        produits_details[compte_produit_id] = {'total_brut': 0, 'names': []}
-                    
-                    produits_details[compte_produit_id]['total_brut'] += montant_ht_brut
-                    produits_details[compte_produit_id]['names'].append(product.name)
-            
-            # === RÉPARTITION PROPORTIONNELLE SELON MONTANT BRUT / TOTAL TTC BRUT ===
-            
-            # Répartition des services
-            for compte_produit_id, details in services_details.items():
-                proportion = details['total_brut'] / total_ttc_sans_remise
-                montant_service = montant_paiement * proportion
-                repartition['services'][compte_produit_id] = {
-                    'montant_net': montant_service,
-                    'total_brut': details['total_brut'],
-                    'proportion': proportion
-                }
-                
-                names_str = ', '.join(details['names'][:3])
-                if len(details['names']) > 3:
-                    names_str += f" (+{len(details['names'])-3} autres)"
-                
-                print(f"  🛎️  Services [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_service:.2f}€ sur compte {compte_produit_id}")
-            
-            # Répartition des produits
-            for compte_produit_id, details in produits_details.items():
-                proportion = details['total_brut'] / total_ttc_sans_remise
-                montant_produit = montant_paiement * proportion
-                repartition['produits'][compte_produit_id] = {
-                    'montant_net': montant_produit,
-                    'total_brut': details['total_brut'],
-                    'proportion': proportion
-                }
-                
-                names_str = ', '.join(details['names'][:3])
-                if len(details['names']) > 3:
-                    names_str += f" (+{len(details['names'])-3} autres)"
-                
-                print(f"  📦 Produits [{names_str}]: {details['total_brut']:.2f}€ brut ({proportion:.1%}) -> {montant_produit:.2f}€ sur compte {compte_produit_id}")
-            
-            # === CALCUL DE LA TVA ===
-            
-            # TVA brute de la réservation (calculée sur montants bruts)
-            tva_totale_brute = float(reservation.tax_amount or 0)
-            if tva_totale_brute > 0:
-                proportion_tva = tva_totale_brute / total_ttc_sans_remise
-                repartition['tva'] = montant_paiement * proportion_tva
-                repartition['tva_proportion'] = proportion_tva  # Stocker la proportion
-                print(f"  🧾 TVA: {tva_totale_brute:.2f}€ brute ({proportion_tva:.1%}) -> {repartition['tva']:.2f}€")
-            else:
-                repartition['tva'] = 0.0
-                repartition['tva_proportion'] = 0.0
-                print(f"  🧾 TVA: 0.00€")
-            
-            # Total HT
-            total_ht_reparti = sum([item['montant_net'] for item in repartition['services'].values()]) + sum([item['montant_net'] for item in repartition['produits'].values()])
-            repartition['total_ht'] = total_ht_reparti
-            
-            # === VÉRIFICATION ===
-            total_reparti = total_ht_reparti + repartition['tva']
-            ecart = abs(total_reparti - montant_paiement)
-            
-            print(f"  💰 Total HT: {total_ht_reparti:.2f}€")
-            print(f"  📊 Total réparti: {total_reparti:.2f}€ (écart: {ecart:.2f}€)")
-            
-            if ecart > 0.01:  # Plus de 1 centime d'écart
-                print(f"  ⚠️  Écart de répartition détecté: {ecart:.2f}€")
-            
-            return repartition
-            
-        except Exception as e:
-            print(f"❌ Erreur lors du calcul de répartition: {e}")
-            import traceback
-            traceback.print_exc()
-            return {
-                'services': {},
-                'produits': {},
-                'tva': 0.0,
-                'total_ht': 0.0
-            }
 
-    def creer_ecritures_comptables_reparties(self, session, reservation, payment, repartition, compte_debit_id, compte_tva_id, journal_id):
+    def creer_ecritures_comptables(self, session, reservation, payment=None):
         """
-        Crée les écritures comptables réparties selon les comptes spécifiques
-        
+        Crée deux journaux et leurs écritures comptables pour une réservation.
+
+        Journal 1 - Vente (Facture) — toujours créé :
+          Débit  411 Client         : net à payer (TTC brut - remise)
+          Débit  609 Remise         : montant remise (si remise > 0)
+          Crédit 7xx Service        : montant HT brut par service (compte_produit_id du service)
+          Crédit 7xx Produit        : montant HT brut par produit (compte_produit_id ou compte_vente_id)
+          Crédit 44571 TVA          : montant TVA brut (si TVA > 0)
+
+        Journal 2 - Caisse (Paiement) — créé seulement si payment != None :
+          Débit  5xx Caisse         : montant payé
+          Crédit 411 Client         : montant payé
+
         Args:
-            session: Session de base de données
-            reservation: Instance de EventReservation  
-            payment: Instance de EventPayment
-            repartition: Résultat de calculer_repartition_paiement
-            compte_debit_id: Compte caisse/banque (débit)
-            compte_tva_id: Compte TVA collectée
-            journal_id: Journal comptable
-            
+            session   : Session de base de données
+            reservation : Instance de EventReservation
+            payment   : Instance de EventPayment (optionnel)
+
         Returns:
-            list: Liste des écritures créées
+            list: Liste de toutes les écritures créées
         """
         try:
-            from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures as EcritureComptable, ComptaConfig, ComptaComptes as CompteComptable
+            from ayanna_erp.modules.comptabilite.model.comptabilite import (
+                ComptaEcritures as EcritureComptable,
+                ComptaJournaux as JournalComptable,
+                ComptaConfig,
+            )
+            from ayanna_erp.core.entreprise_controller import EntrepriseController
+
+            entreprise_ctrl = EntrepriseController()
+            enterprise_id = entreprise_ctrl.get_connected_enterprise_id()
+            user_id = entreprise_ctrl.get_connected_user_id()
+
+            config = session.query(ComptaConfig).filter_by(pos_id=self.pos_id).first()
+            if not config:
+                print("⚠️ Configuration comptable manquante pour ce point de vente")
+                return []
 
             ecritures = []
-            libelle_base = f"Facture Réservation: {reservation.get_client_name()}"
+            client_name = reservation.get_client_name()
 
-            # Récupérer la configuration comptable
-            config = session.query(ComptaConfig).first()
-            compte_client_id = getattr(config, 'compte_client_id', None) if config else None
-            compte_vente_general_id = getattr(config, 'compte_vente_id', None) if config else None
-            compte_remise_id = getattr(config, 'compte_remise_id', None) if config else None
-            compte_tva_id = getattr(config, 'compte_tva_id', None) if config else None
+            # Comptes configurés
+            compte_client_id      = getattr(config, 'compte_client_id', None)
+            compte_caisse_id      = getattr(config, 'compte_caisse_id', None)
+            compte_tva_id         = getattr(config, 'compte_tva_id', None)
+            compte_remise_id      = getattr(config, 'compte_remise_id', None)
+            compte_vente_general_id = getattr(config, 'compte_vente_id', None)
 
-            # === Calcul des montants par compte ===
-            services_by_account = {}
-            produits_by_account = {}
-            total_services = 0.0
-            total_produits = 0.0
+            # Calculs financiers
+            tva_total      = round(float(reservation.tax_amount or 0), 2)
+            total_ttc_brut = round(float(reservation.total_amount or 0), 2)  # TTC sans remise
+            remise_totale  = round(total_ttc_brut * (float(reservation.discount_percent or 0) / 100.0), 2)
+            net_a_payer    = round(total_ttc_brut - remise_totale, 2)
 
-            # Services : utiliser unit_price * quantity (ou line_total si présent)
-            for s in reservation.services:
-                service = s.service
-                if not service:
-                    continue
-                compte_id = getattr(service, 'compte_produit_id', None)
-                montant = float(s.line_total or (s.unit_price or 0) * (s.quantity or 1))
-                if not compte_id:
-                    # si pas de compte service défini, on l'ignore et on affiche un warning
-                    print(f"⚠️ Service '{getattr(service,'name', '')}' sans compte produit, ignoré pour l'écriture comptable")
-                    continue
-                services_by_account.setdefault(compte_id, 0.0)
-                services_by_account[compte_id] += montant
-                total_services += montant
+            # ============================================================
+            # JOURNAL 1 : VENTE (FACTURE)
+            # ============================================================
+            journal_vente = JournalComptable(
+                enterprise_id=enterprise_id,
+                libelle=f"Facture Réservation: {client_name}",
+                montant=net_a_payer,
+                type_operation="vente",
+                reference=f"RES-{reservation.id}",
+                description=f"Réservation ID: {reservation.id}",
+                user_id=user_id,
+                date_operation=datetime.now()
+            )
+            session.add(journal_vente)
+            session.flush()
+            print(f"📒 Journal vente créé: {net_a_payer:.2f}€")
 
-            # Produits : utiliser unit_price * quantity (ou line_total si présent) -> créditer sur compte_vente_id de la config
-            for p in reservation.products:
-                product = p.product
-                if not product:
-                    continue
-                montant = float(p.line_total or (p.unit_price or 0) * (p.quantity or 1))
-                # compte de vente: toujours le compte_vente général de la config
-                compte_id = compte_vente_general_id
-                if not compte_id:
-                    print(f"⚠️ Produit '{getattr(product,'name','')}' sans compte de vente configuré, ignoré pour l'écriture comptable")
-                    continue
-                produits_by_account.setdefault(compte_id, 0.0)
-                produits_by_account[compte_id] += montant
-                total_produits += montant
+            ordre = 1
 
-            # TVA totale (si renseignée)
-            tva_total = float(reservation.tax_amount or 0)
-
-            # Calcul de la remise totale (sur le TTC stocké sans remise)
-            total_ttc_brut = float(reservation.total_amount or 0)
-            remise_totale = total_ttc_brut * (float(reservation.discount_percent or 0) / 100.0)
-
-            # === 1. Débit du compte client (net à payer = total brut + tva - remise) ===
-            if not compte_client_id:
-                print("⚠️ Aucun compte client configuré (compte_client_id). Impossible de créer l'écriture débit client.")
-            else:
-                montant_debit_client = (total_services + total_produits) + tva_total - remise_totale
-                montant_debit_client = round(montant_debit_client, 2)
-                if montant_debit_client != 0:
-                    ecriture_client = EcritureComptable(
-                        journal_id=journal_id,
-                        compte_comptable_id=compte_client_id,
-                        debit=montant_debit_client,
-                        credit=0,
-                        ordre=1,
-                        libelle=f"{libelle_base} - Client"
-                    )
-                    session.add(ecriture_client)
-                    ecritures.append(ecriture_client)
-                    print(f"  � Débit Client: {montant_debit_client:.2f} sur compte {compte_client_id}")
-
-            ordre = 2
-
-            # === 2. Crédits pour les services (par compte) ===
-            for compte_id, montant in services_by_account.items():
-                montant = round(montant, 2)
-                if montant <= 0:
-                    continue
+            # Débit compte client (net à payer)
+            if compte_client_id and net_a_payer > 0:
                 e = EcritureComptable(
-                    journal_id=journal_id,
-                    compte_comptable_id=compte_id,
-                    debit=0,
-                    credit=montant,
+                    journal_id=journal_vente.id,
+                    compte_comptable_id=compte_client_id,
+                    debit=net_a_payer,
+                    credit=0,
                     ordre=ordre,
-                    libelle=f"{libelle_base} - Services"
+                    libelle=f"Facture {client_name} - Net à payer"
                 )
                 session.add(e)
                 ecritures.append(e)
-                print(f"  📤 Crédit Services: {montant:.2f} sur compte {compte_id}")
+                print(f"  📥 Débit Client: {net_a_payer:.2f} sur compte {compte_client_id}")
                 ordre += 1
+            elif not compte_client_id:
+                print("⚠️ compte_client_id non configuré, écriture débit client ignorée")
 
-            # === 3. Crédits pour les produits (par compte) ===
-            for compte_id, montant in produits_by_account.items():
-                montant = round(montant, 2)
-                if montant <= 0:
-                    continue
-                e = EcritureComptable(
-                    journal_id=journal_id,
-                    compte_comptable_id=compte_id,
-                    debit=0,
-                    credit=montant,
-                    ordre=ordre,
-                    libelle=f"{libelle_base} - Produits"
-                )
-                session.add(e)
-                ecritures.append(e)
-                print(f"  📤 Crédit Produits: {montant:.2f} sur compte {compte_id}")
-                ordre += 1
-
-            # === 4. Crédit TVA (si applicable) ===
-            if tva_total > 0 and compte_tva_id:
-                montant_tva = round(tva_total, 2)
-                e_tva = EcritureComptable(
-                    journal_id=journal_id,
-                    compte_comptable_id=compte_tva_id,
-                    debit=0,
-                    credit=montant_tva,
-                    ordre=ordre,
-                    libelle=f"{libelle_base} - TVA"
-                )
-                session.add(e_tva)
-                ecritures.append(e_tva)
-                print(f"  📤 Crédit TVA: {montant_tva:.2f} sur compte {compte_tva_id}")
-                ordre += 1
-
-            # === 5. Débit Remise (si applicable) ===
-            if remise_totale and remise_totale > 0:
-                if not compte_remise_id:
-                    print("⚠️ Remise définie mais aucun compte_remise_id configuré. Remise non enregistrée comptablement.")
-                else:
-                    montant_remise = round(remise_totale, 2)
-                    e_remise = EcritureComptable(
-                        journal_id=journal_id,
+            # Débit compte remise (si remise)
+            if remise_totale > 0:
+                if compte_remise_id:
+                    e = EcritureComptable(
+                        journal_id=journal_vente.id,
                         compte_comptable_id=compte_remise_id,
-                        debit=montant_remise,
+                        debit=remise_totale,
                         credit=0,
                         ordre=ordre,
-                        libelle=f"{libelle_base} - Remise {reservation.discount_percent}%"
+                        libelle=f"Remise {reservation.discount_percent}% - {client_name}"
                     )
-                    session.add(e_remise)
-                    ecritures.append(e_remise)
-                    print(f"  💳 Débit Remise: {montant_remise:.2f} sur compte {compte_remise_id}")
+                    session.add(e)
+                    ecritures.append(e)
+                    print(f"  💳 Débit Remise: {remise_totale:.2f} sur compte {compte_remise_id}")
                     ordre += 1
+                else:
+                    print(f"⚠️ Remise de {remise_totale:.2f}€ non enregistrée: compte_remise_id non configuré")
 
-            print(f"  ✅ Écritures facture créées: {len(ecritures)}")
+            # Crédit services (par compte_produit_id du service, fallback compte_vente_general)
+            for service_item in reservation.services:
+                service = service_item.service
+                if not service:
+                    continue
+                montant_ht = round(float(service_item.line_total or (service_item.unit_price or 0) * (service_item.quantity or 1)), 2)
+                if montant_ht <= 0:
+                    continue
+                compte_id = getattr(service, 'compte_produit_id', None) or compte_vente_general_id
+                if not compte_id:
+                    print(f"⚠️ Service '{getattr(service, 'name', '')}' sans compte configuré, ignoré")
+                    continue
+                e = EcritureComptable(
+                    journal_id=journal_vente.id,
+                    compte_comptable_id=compte_id,
+                    debit=0,
+                    credit=montant_ht,
+                    ordre=ordre,
+                    libelle=f"Vente service: {getattr(service, 'name', '')} - {client_name}"
+                )
+                session.add(e)
+                ecritures.append(e)
+                print(f"  📤 Crédit Service '{getattr(service, 'name', '')}': {montant_ht:.2f} sur compte {compte_id}")
+                ordre += 1
+
+            # Crédit produits (par compte_produit_id du produit, fallback compte_vente_general)
+            for product_item in reservation.products:
+                product = product_item.product
+                if not product:
+                    continue
+                montant_ht = round(float(product_item.line_total or (product_item.unit_price or 0) * (product_item.quantity or 1)), 2)
+                if montant_ht <= 0:
+                    continue
+                compte_id = getattr(product, 'compte_produit_id', None) or compte_vente_general_id
+                if not compte_id:
+                    print(f"⚠️ Produit '{getattr(product, 'name', '')}' sans compte configuré, ignoré")
+                    continue
+                e = EcritureComptable(
+                    journal_id=journal_vente.id,
+                    compte_comptable_id=compte_id,
+                    debit=0,
+                    credit=montant_ht,
+                    ordre=ordre,
+                    libelle=f"Vente produit: {getattr(product, 'name', '')} - {client_name}"
+                )
+                session.add(e)
+                ecritures.append(e)
+                print(f"  📤 Crédit Produit '{getattr(product, 'name', '')}': {montant_ht:.2f} sur compte {compte_id}")
+                ordre += 1
+
+            # Crédit TVA (si applicable)
+            if tva_total > 0:
+                if compte_tva_id:
+                    e = EcritureComptable(
+                        journal_id=journal_vente.id,
+                        compte_comptable_id=compte_tva_id,
+                        debit=0,
+                        credit=tva_total,
+                        ordre=ordre,
+                        libelle=f"TVA collectée {reservation.tax_rate}% - {client_name}"
+                    )
+                    session.add(e)
+                    ecritures.append(e)
+                    print(f"  📤 Crédit TVA: {tva_total:.2f} sur compte {compte_tva_id}")
+                    ordre += 1
+                else:
+                    print(f"⚠️ TVA de {tva_total:.2f}€ non enregistrée: compte_tva_id non configuré")
+
+            print(f"  ✅ Journal vente: {len(ecritures)} écritures")
+
+            # ============================================================
+            # JOURNAL 2 : CAISSE (PAIEMENT) — seulement si paiement fourni
+            # ============================================================
+            if payment is not None:
+                montant_paye = round(float(payment.amount or 0), 2)
+                if not compte_caisse_id:
+                    print("⚠️ compte_caisse_id non configuré, journal caisse non créé")
+                elif montant_paye <= 0:
+                    print("⚠️ Montant paiement = 0, journal caisse non créé")
+                else:
+                    journal_caisse = JournalComptable(
+                        enterprise_id=enterprise_id,
+                        libelle=f"Paiement Réservation: {client_name}",
+                        montant=montant_paye,
+                        type_operation="entree",
+                        reference=f"PAY-{payment.id}",
+                        description=f"Acompte réservation ID: {reservation.id}",
+                        user_id=user_id,
+                        date_operation=datetime.now()
+                    )
+                    session.add(journal_caisse)
+                    session.flush()
+                    print(f"📒 Journal caisse créé: {montant_paye:.2f}€")
+
+                    nb_caisse = 0
+
+                    # Débit caisse
+                    e = EcritureComptable(
+                        journal_id=journal_caisse.id,
+                        compte_comptable_id=compte_caisse_id,
+                        debit=montant_paye,
+                        credit=0,
+                        ordre=1,
+                        libelle=f"Encaissement acompte - {client_name}"
+                    )
+                    session.add(e)
+                    ecritures.append(e)
+                    nb_caisse += 1
+                    print(f"  📥 Débit Caisse: {montant_paye:.2f} sur compte {compte_caisse_id}")
+
+                    # Crédit client
+                    if compte_client_id:
+                        e = EcritureComptable(
+                            journal_id=journal_caisse.id,
+                            compte_comptable_id=compte_client_id,
+                            debit=0,
+                            credit=montant_paye,
+                            ordre=2,
+                            libelle=f"Règlement client - {client_name}"
+                        )
+                        session.add(e)
+                        ecritures.append(e)
+                        nb_caisse += 1
+                        print(f"  📤 Crédit Client: {montant_paye:.2f} sur compte {compte_client_id}")
+
+                    print(f"  ✅ Journal caisse: {nb_caisse} écritures")
+
             return ecritures
 
         except Exception as e:
-            print(f"❌ Erreur lors de la création des écritures facture: {e}")
+            print(f"❌ Erreur lors de la création des écritures comptables: {e}")
             import traceback
             traceback.print_exc()
             return []
