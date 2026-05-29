@@ -32,13 +32,15 @@ class CoreProductController:
         finally:
             session.close()
 
-    def get_products(self, session: Session, category_id: Optional[int] = None, search_term: Optional[str] = None, active_only: Optional[bool] = None) -> List[CoreProduct]:
+    def get_products(self, session: Session, category_id: Optional[int] = None, search_term: Optional[str] = None, active_only: Optional[bool] = None, allowed_types: Optional[list] = None) -> List[CoreProduct]:
         """
         Récupérer tous les produits du POS, filtrés par catégorie, recherche et statut
         """
         query = session.query(CoreProduct).filter(CoreProduct.entreprise_id == self.entreprise_id)
         if category_id:
             query = query.filter(CoreProduct.category_id == category_id)
+        if allowed_types is not None:
+            query = query.filter(CoreProduct.product_type.in_(allowed_types))
         if search_term:
             like_term = f"%{search_term}%"
             query = query.filter((CoreProduct.name.ilike(like_term)) | (CoreProduct.description.ilike(like_term)))
@@ -49,11 +51,16 @@ class CoreProductController:
     def get_product_by_id(self, session: Session, product_id: int) -> Optional[CoreProduct]:
         return session.query(CoreProduct).filter(CoreProduct.id == product_id, CoreProduct.entreprise_id == self.entreprise_id).first()
 
-    def create_product(self, session: Session, nom: str, prix, category_id: int, description: Optional[str] = None, unit: str = "pièce", stock_initial: float = 0.0, cost: float = 0.0, barcode: Optional[str] = None, image: Optional[str] = None, stock_min: float = 0.0, compte_produit_id: Optional[int] = None, compte_charge_id: Optional[int] = None, is_active: bool = True) -> CoreProduct:
+    def create_product(self, session: Session, nom: str, prix, category_id: int, description: Optional[str] = None, unit: str = "pièce", stock_initial: float = 0.0, cost: float = 0.0, barcode: Optional[str] = None, image: Optional[str] = None, stock_min: float = 0.0, compte_produit_id: Optional[int] = None, compte_charge_id: Optional[int] = None, stock_account_id: Optional[int] = None, product_type: Optional[str] = None, is_active: bool = True) -> CoreProduct:
         """
         Créer un produit et initialiser son stock sur l'entrepôt correspondant au POS
         Le stock initial est toujours 0 - l'approvisionnement vient des achats
         """
+        # Validate product_type
+        allowed_types = {'raw_material', 'semi_finished', 'finished_good', 'resale_product', 'consumable'}
+        if product_type and product_type not in allowed_types:
+            raise ValueError(f"Invalid product_type: {product_type}")
+
         product = CoreProduct(
             entreprise_id=self.entreprise_id,
             name=nom,
@@ -66,7 +73,9 @@ class CoreProductController:
             image=image,
             compte_produit_id=compte_produit_id,
             compte_charge_id=compte_charge_id,
-            is_active=is_active
+            is_active=is_active,
+            product_type=product_type or 'resale_product',
+            stock_account_id=stock_account_id,
         )
         session.add(product)
         session.commit()
@@ -121,6 +130,12 @@ class CoreProductController:
         product = self.get_product_by_id(session, product_id)
         if not product:
             return None
+        # Validate product_type
+        if 'product_type' in kwargs:
+            allowed_types = {'raw_material', 'semi_finished', 'finished_good', 'resale_product', 'consumable'}
+            if kwargs['product_type'] not in allowed_types:
+                raise ValueError(f"Invalid product_type: {kwargs['product_type']}")
+
         for key, value in kwargs.items():
             if hasattr(product, key):
                 setattr(product, key, value)

@@ -108,7 +108,7 @@ class Config:
     ENABLE_ACCOUNTING = os.getenv("ENABLE_ACCOUNTING", "True").lower() == "true"
     
     # Configuration des modules
-    MODULES_ENABLED = os.getenv("MODULES_ENABLED", "SalleFete,Boutique,Pharmacie,Restaurant,Hotel,Achats,Stock,Comptabilite").split(",")
+    MODULES_ENABLED = os.getenv("MODULES_ENABLED", "SalleFete,Boutique,Pharmacie,Restaurant,Hotel,Achats,Stock,Comptabilite,Fabrication").split(",")
     
     # Configuration UI
     WINDOW_MIN_WIDTH = 1200

@@ -22,6 +22,7 @@ from ayanna_erp.core.utils.image_utils import ImageUtils
 import os
 import shutil
 from datetime import datetime
+from ayanna_erp.modules.fabrication.print_export import export_product_pdf
 
 
 class ProduitIndex(QWidget):
@@ -204,6 +205,16 @@ class ProduitIndex(QWidget):
         
         self.detail_layout.addLayout(details_container)
 
+        # Impression produit (A4 / 80mm)
+        print_buttons = QHBoxLayout()
+        self.print_a4_product_btn = QPushButton("Imprimer produit (A4)")
+        self.print_a4_product_btn.clicked.connect(self.on_print_product_a4)
+        self.print_80_product_btn = QPushButton("Imprimer produit (80mm)")
+        self.print_80_product_btn.clicked.connect(self.on_print_product_80)
+        print_buttons.addWidget(self.print_a4_product_btn)
+        print_buttons.addWidget(self.print_80_product_btn)
+        self.detail_layout.addLayout(print_buttons)
+
         # Ajout au layout principal avec proportions 70/30
         main_layout.addWidget(left_widget, stretch=7)
         main_layout.addWidget(self.detail_widget, stretch=3)
@@ -233,6 +244,7 @@ class ProduitIndex(QWidget):
             # Affichage des détails textuels
             details = f"<b>Nom :</b> {product.name}<br>"
             details += f"<b>Catégorie :</b> {product.category_id}<br>"
+            details += f"<b>Type de produit :</b> {product.product_type if hasattr(product, 'product_type') else 'N/A'}<br>"
             details += f"<b>Prix :</b> {product.price_unit} {self.get_currency_symbol()}<br>"
             details += f"<b>Coût :</b> {product.cost} {self.get_currency_symbol()}<br>"
             # Récupérer le stock depuis le module stock
@@ -273,6 +285,21 @@ class ProduitIndex(QWidget):
             else:
                 details += f"<b>Compte charge :</b> Non défini<br>"
             
+            if hasattr(product, 'stock_account_id') and product.stock_account_id:
+                try:
+                    comptabilite_controller = ComptabiliteController()
+                    with self.db_manager.get_session() as session:
+                        comptabilite_controller.session = session
+                        compte_stock = comptabilite_controller.get_compte_by_id(product.stock_account_id)
+                        if compte_stock:
+                            details += f"<b>Compte stock :</b> {compte_stock.numero} - {compte_stock.nom}<br>"
+                        else:
+                            details += f"<b>Compte stock :</b> {product.stock_account_id} (introuvable)<br>"
+                except Exception as e:
+                    details += f"<b>Compte stock :</b> {product.stock_account_id} (erreur)<br>"
+            else:
+                details += f"<b>Compte stock :</b> Non défini<br>"
+            
             details += f"<b>Statut :</b> {'Actif' if product.is_active else 'Inactif'}<br>"
             details += f"<b>Description :</b> {product.description or ''}<br>"
             
@@ -298,6 +325,9 @@ class ProduitIndex(QWidget):
 
                 # Combiner
                 sales_count = int((sales_stats.get('sales_count') or 0) + (restau_row.panier_count or 0))
+            
+                # store last selected product id for printing
+                self._last_selected_product_id = product.id
                 total_quantity = float((sales_stats.get('total_quantity_sold') or 0.0) + (restau_row.qty_sum or 0.0))
                 # Last sale: choisir la date la plus récente entre les deux sources
                 last_dates = [d for d in [sales_stats.get('last_sale_date'), restau_row.last_date] if d]
@@ -349,6 +379,34 @@ class ProduitIndex(QWidget):
             
             # Affichage de l'image
             self.load_product_image(product.image)
+
+    def on_print_product_a4(self):
+        pid = getattr(self, '_last_selected_product_id', None)
+        if not pid:
+            QMessageBox.warning(self, "Impression", "Veuillez sélectionner un produit à imprimer.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Enregistrer PDF A4 produit", f"produit_{pid}.pdf", "PDF Files (*.pdf)")
+        if not path:
+            return
+        ok = export_product_pdf(pid, path, paper='A4')
+        if ok:
+            QMessageBox.information(self, "Impression", f"Fiche produit exportée: {path}")
+        else:
+            QMessageBox.critical(self, "Erreur", "Échec export PDF produit")
+
+    def on_print_product_80(self):
+        pid = getattr(self, '_last_selected_product_id', None)
+        if not pid:
+            QMessageBox.warning(self, "Impression", "Veuillez sélectionner un produit à imprimer.")
+            return
+        path, _ = QFileDialog.getSaveFileName(self, "Enregistrer PDF 80mm produit", f"produit_{pid}_80mm.pdf", "PDF Files (*.pdf)")
+        if not path:
+            return
+        ok = export_product_pdf(pid, path, paper='80mm')
+        if ok:
+            QMessageBox.information(self, "Impression", f"Fiche produit exportée: {path}")
+        else:
+            QMessageBox.critical(self, "Erreur", "Échec export PDF produit")
 
     def _get_product_stock_info(self, product_id):
         """Récupérer les informations de stock d'un produit depuis l'entrepôt du POS correspondant.
@@ -561,11 +619,16 @@ class ProduitIndex(QWidget):
                 search_term = self.search_input.text().strip() if self.search_input.text() else None
                 category_id = self.selected_category_id
                 active_only = self.status_combo.currentData()
+                # For produit_index: show ALL product types regardless of module
+                allowed_types = None
+                # For restaurant module, show ALL products (no filtering by type)
+
                 products = self.produit_controller.get_products(
                     session,
                     category_id=category_id,
                     search_term=search_term,
-                    active_only=active_only if active_only is not None else True
+                    active_only=active_only if active_only is not None else True,
+                    allowed_types=allowed_types
                 )
                 
                 # Filtrer par état de stock en utilisant le stock minimum par entrepôt
@@ -777,6 +840,8 @@ class ProduitIndex(QWidget):
                         stock_min=product_data.get("stock_min", 0),
                         compte_produit_id=product_data.get("compte_produit_id"),
                         compte_charge_id=product_data.get("compte_charge_id"),
+                        stock_account_id=product_data.get("stock_account_id"),
+                        product_type=product_data.get("product_type"),
                         is_active=product_data.get("is_active", True)
                     )
                     # Mettre à jour le min_stock_level dans stock_produit_entrepot
@@ -810,6 +875,8 @@ class ProduitIndex(QWidget):
                         stock_min=product_data.get("stock_min", 0),
                         compte_produit_id=product_data.get("compte_produit_id"),
                         compte_charge_id=product_data.get("compte_charge_id"),
+                        stock_account_id=product_data.get("stock_account_id"),
+                        product_type=product_data.get("product_type"),
                         is_active=product_data.get("is_active", True)
                     )
                     if updated_product:
@@ -1006,6 +1073,19 @@ class ProductFormDialog(QDialog):
         self.load_categories()
         general_layout.addRow(cat_label, self.category_combo)
 
+        # Type de produit
+        type_label = QLabel("Type produit:")
+        type_label.setStyleSheet(label_style)
+        self.product_type_combo = QComboBox()
+        self.product_type_combo.setStyleSheet(input_style)
+        # Options: raw_material, semi_finished, finished_good, resale_product, consumable
+        self.product_type_combo.addItem("Produit acheté / revente", "resale_product")
+        self.product_type_combo.addItem("Matière première", "raw_material")
+        self.product_type_combo.addItem("Semi-fini", "semi_finished")
+        self.product_type_combo.addItem("Produit fini", "finished_good")
+        self.product_type_combo.addItem("Consommable interne", "consumable")
+        general_layout.addRow(type_label, self.product_type_combo)
+
         # Code-barres avec bouton scanner
         barcode_label = QLabel("Code-barres:")
         barcode_label.setStyleSheet(label_style)
@@ -1133,6 +1213,13 @@ class ProductFormDialog(QDialog):
         self.load_accounting_accounts_produit()
         other_layout.addRow(compte_produit_label, self.compte_produit_combo)
 
+        # Compte stock (classe 3)
+        compte_stock_label = QLabel("Compte stock (classe 3):")
+        compte_stock_label.setStyleSheet(label_style)
+        self.compte_stock_combo = QComboBox()
+        self.compte_stock_combo.setStyleSheet(input_style)
+        self.load_accounting_accounts_stock()
+        other_layout.addRow(compte_stock_label, self.compte_stock_combo)
         # Compte charge (achats)
         compte_charge_label = QLabel("Compte charge (achats):")
         compte_charge_label.setStyleSheet(label_style)
@@ -1315,6 +1402,39 @@ class ProductFormDialog(QDialog):
             self.compte_charge_combo.clear()
             self.compte_charge_combo.addItem("Erreur de chargement", None)
 
+    def load_accounting_accounts_stock(self):
+        """Charger les comptes comptables de classe 3 (stock) dans le combo box"""
+        try:
+            enterprise_id = self.get_enterprise_id()
+            if not enterprise_id:
+                self.compte_stock_combo.addItem("Aucune entreprise trouvée", None)
+                return
+
+            comptabilite_controller = ComptabiliteController()
+            with self.db_manager.get_session() as session:
+                # Récupérer les comptes de classe 3 (Stocks)
+                comptes_stock = session.query(ComptaComptes).join(
+                    ComptaClasses, ComptaComptes.classe_comptable_id == ComptaClasses.id
+                ).filter(
+                    ComptaComptes.numero.like('3%'),
+                    ComptaClasses.enterprise_id == enterprise_id
+                ).order_by(ComptaComptes.numero).all()
+
+                self.compte_stock_combo.clear()
+                self.compte_stock_combo.addItem("Sélectionnez un compte stock", None)
+
+                if not comptes_stock:
+                    self.compte_stock_combo.addItem("Aucun compte stock disponible", None)
+                else:
+                    for compte in comptes_stock:
+                        display_text = f"{compte.numero} - {compte.nom}"
+                        self.compte_stock_combo.addItem(display_text, compte.id)
+
+        except Exception as e:
+            print(f"❌ Erreur lors du chargement des comptes stock: {e}")
+            self.compte_stock_combo.clear()
+            self.compte_stock_combo.addItem("Erreur de chargement", None)
+
     def copy_image_to_project(self, image_path: str) -> str:
         """Copier l'image sélectionnée dans le dossier du projet et retourner le chemin relatif"""
         if not image_path or not os.path.exists(image_path):
@@ -1403,6 +1523,20 @@ class ProductFormDialog(QDialog):
                     if self.compte_charge_combo.itemData(i) == self.product.compte_charge_id:
                         self.compte_charge_combo.setCurrentIndex(i)
                         break
+
+            # Compte stock
+            if getattr(self.product, "stock_account_id", None):
+                for i in range(self.compte_stock_combo.count()):
+                    if self.compte_stock_combo.itemData(i) == self.product.stock_account_id:
+                        self.compte_stock_combo.setCurrentIndex(i)
+                        break
+
+            # Type produit
+            if getattr(self.product, "product_type", None):
+                for i in range(self.product_type_combo.count()):
+                    if self.product_type_combo.itemData(i) == self.product.product_type:
+                        self.product_type_combo.setCurrentIndex(i)
+                        break
             
             self.active_checkbox.setChecked(getattr(self.product, "is_active", True))
     
@@ -1465,6 +1599,8 @@ class ProductFormDialog(QDialog):
             "stock_min": self.stock_min_input.value(),
             "compte_produit_id": self.compte_produit_combo.currentData(),
             "compte_charge_id": self.compte_charge_combo.currentData(),
+            "stock_account_id": self.compte_stock_combo.currentData(),
+            "product_type": self.product_type_combo.currentData(),
             "is_active": self.active_checkbox.isChecked()
         }
         return data

@@ -628,6 +628,15 @@ class MainWindow(QMainWindow):
                 from ayanna_erp.modules.comptabilite.comptabilite_window import ComptabiliteWindow
                 # On suppose que l'instance UserController est accessible via self.user_controller
                 window = ComptabiliteWindow(self.current_user, user_controller=self.user_controller)
+            elif module_name == "Fabrication":
+                # Enregistrer / vérifier config module fabrication
+                from ayanna_erp.modules.fabrication.view.fabrication_window import FabricationWindow
+                pos_id = self.db_manager.get_pos_id_for_enterprise_module(
+                    self.current_user.enterprise_id,
+                    "Fabrication"
+                )
+                # pos_id may be None; pass None and let window handle default
+                window = FabricationWindow(self.user_to_dict(), pos_id=pos_id)
             else:
                 QMessageBox.information(self, "Information", f"Module {module_name} en cours de développement.")
                 return

@@ -50,6 +50,11 @@ MODULE_MODEL_PATHS.update({
     'Restaurant': 'ayanna_erp.modules.restaurant.models.restaurant'
 })
 
+# Mapping for Fabrication module
+MODULE_MODEL_PATHS.update({
+    'Fabrication': 'ayanna_erp.modules.fabrication.models'
+})
+
 # Import des modèles core pour qu'ils soient inclus dans Base.metadata
 try:
     from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory, POSProductAccess
@@ -267,6 +272,10 @@ class DatabaseManager:
                     self._migrate_init_compta_configs()
                 except Exception:
                     pass
+                try:
+                    self._migrate_core_products_columns()
+                except Exception:
+                    pass
             finally:
                 DatabaseManager._migrations_executed = True
         # Initialiser le gestionnaire de synchronisation
@@ -391,7 +400,7 @@ class DatabaseManager:
                 print("   Mot de passe: admin123")
                 print("   Rôle: super_admin")
             
-            # Insérer les modules par défaut
+            # Insérer les modules par défaut (toujours)
             modules_default = [
                 {"name": "SalleFete", "description": "Gestion des salles de fête et événements"},
                 {"name": "Vente", "description": "Gestion des ventes des Produits et services"},
@@ -400,9 +409,10 @@ class DatabaseManager:
                 {"name": "Hotel", "description": "Gestion d'hôtel"},
                 {"name": "Achats", "description": "Gestion des achats fournisseurs"},
                 {"name": "Stock", "description": "Gestion des stocks et inventaires"},
-                {"name": "Comptabilite", "description": "Comptabilité SYSCOHADA"}
+                {"name": "Comptabilite", "description": "Comptabilité SYSCOHADA"},
+                {"name": "Fabrication", "description": "Gestion de la production et fabrication"}
             ]
-            
+
             for module_data in modules_default:
                 existing = session.query(Module).filter_by(name=module_data["name"]).first()
                 if not existing:
@@ -830,6 +840,34 @@ class DatabaseManager:
                         except Exception as e:
                             print(f"⚠️ {col} / {tbl} : {e}")
             conn.commit()
+
+    def _migrate_core_products_columns(self):
+        """
+        Ajoute les colonnes `product_type` et `stock_account_id` à la table `core_products`
+        si elles sont absentes (migration idempotente).
+        """
+        try:
+            with self.engine.connect() as conn:
+                exists = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_products'")).fetchone()
+                if not exists:
+                    return
+                res = conn.execute(text("PRAGMA table_info('core_products')")).fetchall()
+                cols = {r[1] for r in res}
+
+                if 'product_type' not in cols:
+                    try:
+                        conn.execute(text("ALTER TABLE core_products ADD COLUMN product_type TEXT DEFAULT 'resale_product'"))
+                    except Exception:
+                        pass
+                if 'stock_account_id' not in cols:
+                    try:
+                        conn.execute(text("ALTER TABLE core_products ADD COLUMN stock_account_id INTEGER"))
+                    except Exception:
+                        pass
+                conn.commit()
+            print("✅ Migration : colonnes product_type et stock_account_id ajoutées à core_products (si nécessaire)")
+        except Exception as e:
+            print(f"⚠️ _migrate_core_products_columns : {e}")
 
     @property
     def sync_manager(self) -> 'SyncManager | None':

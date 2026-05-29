@@ -515,7 +515,7 @@ class VenteController:
 
                     # Enfin fallback sur le champ cost du produit
                     product_meta = session.execute(text("""
-                        SELECT cost, name, compte_charge_id FROM core_products
+                        SELECT cost, name, compte_charge_id, stock_account_id FROM core_products
                         WHERE id = :product_id
                     """), {'product_id': product_id}).fetchone()
                     product_cost_field = float(product_meta[0]) if product_meta and product_meta[0] is not None else 0.0
@@ -546,14 +546,17 @@ class VenteController:
                     })
                     ordre_stock += 1
 
-                    # Crédit : Compte stock (réduction de l'actif stock)
+                    # Crédit : Compte stock spécifique au produit (réduction de l'actif stock)
+                    # Utiliser stock_account_id du produit s'il existe, sinon fallback au compte stock global
+                    compte_stock_produit = product_meta[3] if product_meta and len(product_meta) > 3 and product_meta[3] is not None else compte_stock_id
+                    
                     session.execute(text("""
                         INSERT INTO compta_ecritures
                         (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
                         VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)
                     """), {
                         'journal_id': journal_stock_id,
-                        'compte_id': compte_stock_id,
+                        'compte_id': compte_stock_produit,
                         'debit': 0,
                         'credit': cogs_amount,
                         'ordre': ordre_stock,

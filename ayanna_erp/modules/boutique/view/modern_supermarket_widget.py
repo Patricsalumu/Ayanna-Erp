@@ -1211,6 +1211,14 @@ class ModernSupermarketWidget(QWidget):
             with self.db_manager.get_session() as session:
                 query = session.query(CoreProduct).filter_by(is_active=True)
 
+                # Filtrer les produits: uniquement produits finis et produits de revente
+                query = query.filter(
+                    or_(
+                        CoreProduct.product_type == 'finished_good',
+                        CoreProduct.product_type == 'resale_product'
+                    )
+                )
+
                 # Appliquer le filtre de catégorie si sélectionné
                 category_id = self.category_combo.currentData()
                 if category_id:

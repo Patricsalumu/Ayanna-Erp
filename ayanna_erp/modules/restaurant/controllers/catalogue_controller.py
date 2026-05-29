@@ -19,7 +19,14 @@ class CatalogueController:
     def list_products(self, search: Optional[str] = None, category_id: Optional[int] = None, active_only: Optional[bool] = True):
         session = self.db.get_session()
         try:
-            prods = self.core_ctrl.get_products(session=session, category_id=category_id, search_term=search, active_only=active_only)
+            # Pour le catalogue restaurant, n'afficher que les produits finis et les produits de revente
+            prods = self.core_ctrl.get_products(
+                session=session,
+                category_id=category_id,
+                search_term=search,
+                active_only=active_only,
+                allowed_types=['finished_good', 'resale_product']
+            )
             return prods
         finally:
             self.db.close_session()

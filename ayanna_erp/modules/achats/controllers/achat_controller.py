@@ -607,7 +607,7 @@ class AchatController:
             traceback.print_exc()
 
     def create_ecriture_comptable_stock(self, session: Session, commande: AchatCommande):
-        """Crée les écritures comptables pour reception stock"""
+        """Crée les écritures comptables pour reception stock - par produit avec compte stock spécifique"""
         try:
             # Récupération de la configuration comptable
             config = session.query(ComptaConfig).filter_by(
@@ -617,8 +617,8 @@ class AchatController:
                 print("⚠️ Configuration comptable manquante pour cette entreprise.")
                 return
 
-            # === JOURNAL 2 : Stock (Stock vs Achat) ===
-    
+            # === JOURNAL 2 : Stock (Stock vs Achat) - PAR PRODUIT ===
+            
             journal_stock = ComptaJournaux(
                 date_operation=self._local_now(),
                 libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - {commande.numero}",
@@ -632,33 +632,46 @@ class AchatController:
             session.add(journal_stock)
             session.flush()
 
-            # Débit : stock
-            ecriture_debit_stock = ComptaEcritures(
-                journal_id=journal_stock.id,
-                compte_comptable_id=config.compte_stock_id,
-                debit=commande.montant_total,
-                credit=Decimal('0'),
-                ordre=1,
-                libelle=f"Réception stock - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
-            )
-            session.add(ecriture_debit_stock)
+            # Pour chaque ligne de commande, créer une écriture avec le compte stock du produit
+            ordre = 1
+            for ligne in commande.lignes:
+                product = session.query(CoreProduct).filter_by(id=ligne.produit_id).first()
+                if not product:
+                    continue
+                
+                ligne_montant = ligne.quantite * ligne.prix_unitaire
+                
+                # Utiliser stock_account_id du produit s'il existe, sinon fallback au compte stock global
+                compte_debit_stock = product.stock_account_id or config.compte_stock_id
+                
+                # Débit : Compte stock spécifique au produit (ou générique si non défini)
+                ecriture_debit_stock = ComptaEcritures(
+                    journal_id=journal_stock.id,
+                    compte_comptable_id=compte_debit_stock,
+                    debit=ligne_montant,
+                    credit=Decimal('0'),
+                    ordre=ordre,
+                    libelle=f"Réception stock - {product.name} (x{ligne.quantite})"
+                )
+                session.add(ecriture_debit_stock)
+                ordre += 1
 
-            # Crédit : Fournisseur débiteur 409 (réduction de la position débiteur à la réception)
+            # Crédit global au fournisseur (une seule écriture, pas par produit)
             # Utilise compte_fournisseur_debiteur_id (409) si configuré,
-            # sinon repli sur compte_fournisseur_id (401) — jamais sur le compte de charge
+            # sinon repli sur compte_fournisseur_id (401)
             compte_credit_stock_id = (
                 getattr(config, 'compte_fournisseur_debiteur_id', None)
                 or config.compte_fournisseur_id
             )
-            ecriture_credit_paiement = ComptaEcritures(
+            ecriture_credit_fournisseur = ComptaEcritures(
                 journal_id=journal_stock.id,
                 compte_comptable_id=compte_credit_stock_id,
                 debit=Decimal('0'),
                 credit=commande.montant_total,
-                ordre=2,
+                ordre=ordre,
                 libelle=f"Fournisseur débiteur (409) - Réception - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'} - Commande {commande.numero}"
             )
-            session.add(ecriture_credit_paiement)
+            session.add(ecriture_credit_fournisseur)
 
             try:
                 ent_ctrl = EntrepriseController(entreprise_id=self.entreprise_id)

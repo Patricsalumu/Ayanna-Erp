@@ -33,6 +33,11 @@ class CoreProduct(Base):
     # Comptabilité
     compte_produit_id = Column(Integer, ForeignKey('compta_comptes.id'))  # Compte produit pour les ventes
     compte_charge_id = Column(Integer, ForeignKey('compta_comptes.id'))   # Compte charge pour les achats
+    # Compte de stock spécifique (pour produit fini / matières)
+    stock_account_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)
+
+    # Type de produit : raw_material, semi_finished, finished_good, resale_product, consumable
+    product_type = Column(String(50), default='resale_product')
     
     # État
     is_active = Column(Boolean, default=True)
@@ -49,7 +54,7 @@ class CoreProduct(Base):
     # Note: D'autres relations seront ajoutées selon les besoins des modules
     
     def __repr__(self):
-        return f"<CoreProduct(id={self.id}, name='{self.name}', entreprise_id={self.entreprise_id})>"
+        return f"<CoreProduct(id={self.id}, name='{self.name}', entreprise_id={self.entreprise_id}, type={self.product_type})>"
 
 
 class CoreProductCategory(Base):

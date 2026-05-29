@@ -241,7 +241,8 @@ class SimpleUserWidget(QDialog):
             ("Hotel", "Hôtel"),
             ("Achats", "Achats"),
             ("Stock", "Stock"),
-            ("Comptabilite", "Comptabilité")
+            ("Comptabilite", "Comptabilité"),
+            ("Fabrication", "Fabrication / Production")
         ]
 
         modules_box = QGroupBox("Modules accessibles")
