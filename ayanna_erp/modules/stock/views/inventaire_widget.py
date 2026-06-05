@@ -28,7 +28,7 @@ from PyQt6.QtGui import QFont, QColor, QPixmap, QIcon
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.stock.controllers.inventaire_controller import InventaireController
-from ayanna_erp.modules.stock.models import StockWarehouse, StockInventaire
+from ayanna_erp.modules.stock.models import StockWarehouse, StockInventaire, StockInventaireItem
 from ayanna_erp.core.entreprise_controller import EntrepriseController
 
 
@@ -39,6 +39,15 @@ def _format_money(value, currency_symbol: str = "FC") -> str:
     except Exception:
         amount = 0.0
     return f"{amount:,.2f}".replace(",", " ") + f" {currency_symbol or 'FC'}"
+
+
+def _fmt_qty(value) -> str:
+    """Format quantity with space as thousands separator and two decimals."""
+    try:
+        v = float(value or 0)
+    except Exception:
+        v = 0.0
+    return f"{v:,.2f}".replace(",", " ")
 
 
 class InventorySessionDialog(QDialog):
@@ -517,6 +526,16 @@ def generate_inventory_ticket_80mm(file_path: str, inventory: StockInventaire, p
             Paragraph(fmt_int(value_sale), line_style)
         ])
 
+    # Totaux quantités
+    total_system_qty = sum(float(p.get('system_stock', 0) or 0) for p in sorted_products)
+    total_counted_qty = sum(float(p.get('counted_stock', 0) or 0) for p in sorted_products)
+    total_variance_value_purchase = sum(float(p.get('variance_value_purchase', 0) or 0) for p in sorted_products)
+    total_variance_value_sale = sum(float(p.get('variance_value_sale', 0) or 0) for p in sorted_products)
+    total_vente_qty = sum(float(p.get('vente', 0) or 0) for p in sorted_products)
+
+    # Afficher les totaux après le tableau
+    table_data.append([Paragraph('<b>Totaux</b>', line_style), Paragraph(fmt_int(total_system_qty), line_style), Paragraph(fmt_int(total_counted_qty), line_style), Paragraph('', line_style), Paragraph(fmt_int(total_variance_value_sale), line_style)])
+
     if len(table_data) == 1:
         story.append(Paragraph("Aucun produit listé.", line_style))
     else:
@@ -554,6 +573,28 @@ def generate_inventory_ticket_80mm(file_path: str, inventory: StockInventaire, p
     story.append(totals_table)
 
     story.append(Spacer(1, 0.2*cm))
+
+    # Totaux valorisés des quantités comptées (au moment de l'inventaire)
+    try:
+        total_counted_purchase = 0
+        total_counted_sale = 0
+        for p in sorted_products:
+            counted = int(round(float(p.get('counted_stock', 0) or 0)))
+            unit_cost = int(round(float(p.get('unit_cost', 0) or 0)))
+            selling_price = int(round(float(p.get('selling_price', p.get('price_unit', 0) or 0) or 0)))
+            total_counted_purchase += counted * unit_cost
+            total_counted_sale += counted * selling_price
+
+        tdata = [
+            [Paragraph('Total Achat (compté)', line_style), Paragraph(fmt_int(total_counted_purchase) + f" {currency}", line_style)],
+            [Paragraph('Total Vente (compté)', line_style), Paragraph(fmt_int(total_counted_sale) + f" {currency}", line_style)]
+        ]
+        val_tbl = Table(tdata, colWidths=[page_width*0.6, page_width*0.3])
+        val_tbl.setStyle(TableStyle([('ALIGN', (1,0), (1,-1), 'RIGHT'), ('FONTSIZE', (0,0), (-1,-1), 9)]))
+        story.append(Spacer(1, 0.1*cm))
+        story.append(val_tbl)
+    except Exception:
+        pass
 
     # Inventories table (same-day completed sessions related to this inventory)
     inv_names = []
@@ -1101,12 +1142,20 @@ class CountingDialog(QDialog):
         total_purchase_variance = sum(p.get('variance_value_purchase', 0) for p in products)
         total_sale_variance = sum(p.get('variance_value_sale', 0) for p in products)
         total_discrepancies = sum(1 for p in products if p.get('variance', 0) != 0)
+        total_vente = sum(float(p.get('vente', 0) or 0) for p in products)
+        total_ecart_plus_vente = sum(float(p.get('ecart_plus_vente', (p.get('vente', 0) - p.get('variance', 0)) or 0)) for p in products)
+        total_system_qty = sum(float(p.get('system_stock', 0) or 0) for p in products)
+        total_counted_qty = sum(float(p.get('counted_stock', 0) or 0) for p in products)
         
         stats_data = [
             ["Total produits:", len(products)],
+            ["Total Achat (compté):", _format_money(sum(float(p.get('counted_stock', 0) or 0) * float(p.get('unit_cost', 0) or 0) for p in products), enterprise.get('currency', 'FC'))],
+            ["Total Vente (compté):", _format_money(sum(float(p.get('counted_stock', 0) or 0) * float(p.get('selling_price', p.get('price_unit', 0) or 0) or 0) for p in products), enterprise.get('currency', 'FC'))],
             ["Écarts détectés:", total_discrepancies],
             ["Écart total achat:", _format_money(total_purchase_variance, enterprise.get('currency', 'FC'))],
-            ["Écart total vente:", _format_money(total_sale_variance, enterprise.get('currency', 'FC'))]
+            ["Écart total vente:", _format_money(total_sale_variance, enterprise.get('currency', 'FC'))],
+            ["Vente totale (qté):", f"{total_vente:.2f}"],
+            ["Ecart+Vente total:", f"{total_ecart_plus_vente:.2f}"]
         ]
         
         stats_table = Table(stats_data, colWidths=[4*cm, 9*cm])
@@ -1274,6 +1323,13 @@ class InventoryDetailsDialog(QDialog):
         self.progress_label = QLabel()
         info_layout.addRow("Progression:", self.progress_label)
 
+        # Date associée (modifiable par l'utilisateur) — agit comme filtre pour les ventes
+        self.associated_date = QDateEdit()
+        self.associated_date.setCalendarPopup(True)
+        self.associated_date.setDate(QDate.currentDate())
+        self.associated_date.dateChanged.connect(self.on_associated_date_changed)
+        info_layout.addRow("Date associée:", self.associated_date)
+
         layout.addWidget(info_group)
 
     def create_products_tab(self) -> QWidget:
@@ -1299,11 +1355,11 @@ class InventoryDetailsDialog(QDialog):
         filters_layout.addStretch()
         layout.addLayout(filters_layout)
 
-        # Table des produits
+        # Table des produits (ajout des colonnes 'Vente' et 'Écart+Vente')
         self.products_table = QTableWidget()
-        self.products_table.setColumnCount(8)
+        self.products_table.setColumnCount(10)
         self.products_table.setHorizontalHeaderLabels([
-            "Produit", "Stock Système", "Stock Compté", "Écart", "Écart %",
+            "Produit", "Stock Système", "Stock Compté", "Écart", "Vente", "Ecart+Vente", "Écart %",
             "Valeur Écart Achat", "Valeur Écart Vente", "Statut"
         ])
         self.products_table.setAlternatingRowColors(True)
@@ -1344,6 +1400,20 @@ class InventoryDetailsDialog(QDialog):
         # Valeurs des écarts
         values_group = QGroupBox("Valeurs des Écarts")
         values_layout = QFormLayout(values_group)
+        self.total_system_qty_label = QLabel("0.00")
+        self.total_system_qty_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        values_layout.addRow("Quantité système totale:", self.total_system_qty_label)
+
+        self.total_counted_qty_label = QLabel("0.00")
+        self.total_counted_qty_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        values_layout.addRow("Quantité comptée totale:", self.total_counted_qty_label)
+
+        # Totaux valorisés des quantités comptées
+        self.total_counted_purchase_value_label = QLabel(f"0.00 {self.currency_symbol}")
+        self.total_counted_purchase_value_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        values_layout.addRow("Total Achat (compté):", self.total_counted_purchase_value_label)
+
+        # Note: Total Vente (compté) removed per user request; only purchase total is used (from DB)
 
         self.total_purchase_variance_label = QLabel(f"0.00 {self.currency_symbol}")
         self.total_purchase_variance_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
@@ -1416,6 +1486,25 @@ class InventoryDetailsDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Erreur", f"Erreur lors du chargement des données:\n{str(e)}")
 
+    def on_associated_date_changed(self, qdate: QDate):
+        """Persist the selected associated date to the StockInventaire.scheduled_date and reload data."""
+        try:
+            with self.db_manager.get_session() as session:
+                inv = session.query(StockInventaire).filter(StockInventaire.id == self.inventory_id).first()
+                if inv:
+                    from datetime import datetime
+                    d = qdate.toPyDate()
+                    inv.scheduled_date = datetime.combine(d, datetime.min.time())
+                    session.commit()
+        except Exception as e:
+            print(f"Erreur lors de la sauvegarde de la date associée: {e}")
+        finally:
+            # Toujours recharger les données pour refléter la nouvelle date
+            try:
+                self.load_inventory_data()
+            except Exception:
+                pass
+
     def display_general_info(self, inventory):
         """Afficher les informations générales"""
         self.reference_label.setText(inventory.reference or "N/A")
@@ -1450,10 +1539,46 @@ class InventoryDetailsDialog(QDialog):
             percentage = (inventory.counted_items or 0) / inventory.total_items * 100
             progress += f" ({percentage:.1f}%)"
         self.progress_label.setText(progress)
+        # Mettre à jour la date associée (si le champ existe)
+        if hasattr(self, 'associated_date'):
+            try:
+                if inventory.scheduled_date:
+                    d = inventory.scheduled_date
+                    pydate = d.date() if hasattr(d, 'date') else d
+                    self.associated_date.setDate(QDate(pydate.year, pydate.month, pydate.day))
+                else:
+                    self.associated_date.setDate(QDate.currentDate())
+            except Exception:
+                self.associated_date.setDate(QDate.currentDate())
 
     def load_products_data(self, session, inventory):
         """Charger les données des produits"""
         products = self.controller.get_inventory_products(session, self.inventory_id)
+
+        # Calculer les ventes sur la date associée (filtre par jour)
+        try:
+            product_ids = [p.get('product_id') for p in session.query(StockInventaireItem).filter(StockInventaireItem.inventory_id == self.inventory_id).all()]
+        except Exception:
+            product_ids = [p.get('product_id') for p in products if p.get('product_id')]
+
+        sales_map = {}
+        try:
+            assoc_date = None
+            if hasattr(self, 'associated_date') and self.associated_date.date():
+                assoc_date = self.associated_date.date().toPyDate()
+            elif inventory.scheduled_date:
+                assoc_date = inventory.scheduled_date.date() if hasattr(inventory.scheduled_date, 'date') else inventory.scheduled_date
+
+            sales_map = self.controller.get_sales_on_date(session, getattr(inventory, 'warehouse_id', None), product_ids, assoc_date)
+        except Exception:
+            sales_map = {}
+
+        # Injecter les ventes calculées dans les données produits pour réutilisation
+        for p in products:
+            pid = p.get('product_id')
+            vente = float(sales_map.get(pid, 0) or 0)
+            p['vente'] = vente
+            p['ecart_plus_vente'] = vente - float(p.get('variance', 0) or 0)
 
         self.products_table.setRowCount(len(products))
         self.all_products_data = products  # Garder une référence pour le filtrage
@@ -1478,6 +1603,20 @@ class InventoryDetailsDialog(QDialog):
                 variance_item.setBackground(QColor("#fff3cd"))
             self.products_table.setItem(row, 3, variance_item)
 
+            # Vente (quantité vendue sur la date associée)
+            vente = float(sales_map.get(product.get('product_id'), 0) or 0)
+            vente_item = QTableWidgetItem(f"{vente:.2f}")
+            vente_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            vente_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.products_table.setItem(row, 4, vente_item)
+
+            # Ecart+Vente = vente - variance (règle signée)
+            ecart_plus_vente = vente - float(variance or 0)
+            epv_item = QTableWidgetItem(f"{ecart_plus_vente:.2f}")
+            epv_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            epv_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.products_table.setItem(row, 5, epv_item)
+
             # Écart en pourcentage
             variance_pct = 0
             if system_stock != 0:
@@ -1485,15 +1624,15 @@ class InventoryDetailsDialog(QDialog):
             variance_pct_item = QTableWidgetItem(f"{variance_pct:.2f}%")
             if abs(variance_pct) > 5:  # Écart > 5%
                 variance_pct_item.setBackground(QColor("#f8d7da"))
-            self.products_table.setItem(row, 4, variance_pct_item)
+            self.products_table.setItem(row, 6, variance_pct_item)
 
             # Valeur écart achat
             purchase_variance = product.get('variance_value_purchase', 0)
-            self.products_table.setItem(row, 5, QTableWidgetItem(_format_money(purchase_variance, self.currency_symbol)))
+            self.products_table.setItem(row, 7, QTableWidgetItem(_format_money(purchase_variance, self.currency_symbol)))
 
             # Valeur écart vente
             sale_variance = product.get('variance_value_sale', 0)
-            self.products_table.setItem(row, 6, QTableWidgetItem(_format_money(sale_variance, self.currency_symbol)))
+            self.products_table.setItem(row, 8, QTableWidgetItem(_format_money(sale_variance, self.currency_symbol)))
 
             # Statut
             if counted_stock == 0 and system_stock == 0:
@@ -1508,7 +1647,7 @@ class InventoryDetailsDialog(QDialog):
 
             status_item = QTableWidgetItem(status)
             status_item.setBackground(status_color)
-            self.products_table.setItem(row, 7, status_item)
+            self.products_table.setItem(row, 9, status_item)
 
         self.products_table.resizeColumnsToContents()
 
@@ -1525,10 +1664,37 @@ class InventoryDetailsDialog(QDialog):
         total_purchase_variance = sum(p.get('variance_value_purchase', 0) for p in products)
         total_sale_variance = sum(p.get('variance_value_sale', 0) for p in products)
 
-        # Mettre à jour les labels
+        # Mettre à jour les labels (formatés)
         self.total_products_label.setText(str(total_products))
         self.counted_products_label.setText(str(counted_products))
         self.products_with_variance_label.setText(str(products_with_variance))
+        # Totaux quantités formatés
+        total_system_qty = sum(float(p.get('system_stock', 0) or 0) for p in products)
+        total_counted_qty = sum(float(p.get('counted_stock', 0) or 0) for p in products)
+        self.total_system_qty_label.setText(_fmt_qty(total_system_qty))
+        self.total_counted_qty_label.setText(_fmt_qty(total_counted_qty))
+
+        # Totaux valorisés des quantités comptées (capturés au moment de l'inventaire)
+        total_counted_purchase_value = 0.0
+        try:
+            # Prefer source-of-truth from DB: stock_inventaire_item (uses unit_cost recorded at inventory creation)
+            if getattr(self, 'inventory_id', None):
+                with self.controller.db_manager.get_session() as s:
+                    q = text("SELECT SUM(COALESCE(counted_stock,0) * COALESCE(unit_cost,0)) FROM stock_inventaire_item WHERE inventory_id = :inv_id")
+                    row = s.execute(q, {'inv_id': self.inventory_id}).fetchone()
+                    total_counted_purchase_value = float(row[0] or 0)
+            else:
+                # Fallback to computing from in-memory products
+                for p in products:
+                    counted = float(p.get('counted_stock', 0) or 0)
+                    unit_cost = float(p.get('unit_cost', 0) or 0)
+                    total_counted_purchase_value += counted * unit_cost
+        except Exception:
+            # On error, fallback to in-memory calculation
+            total_counted_purchase_value = sum(float(p.get('counted_stock', 0) or 0) * float(p.get('unit_cost', 0) or 0) for p in products)
+
+        self.total_counted_purchase_value_label.setText(_format_money(total_counted_purchase_value, self.currency_symbol))
+
         self.total_purchase_variance_label.setText(_format_money(total_purchase_variance, self.currency_symbol))
         self.total_sale_variance_label.setText(_format_money(total_sale_variance, self.currency_symbol))
 
@@ -1585,17 +1751,31 @@ class InventoryDetailsDialog(QDialog):
                 variance_item.setBackground(QColor("#fff3cd"))
             self.products_table.setItem(row, 3, variance_item)
 
+            # Vente (peut être ajoutée aux données si load_products_data l'a calculée)
+            vente = float(product.get('vente', 0) or 0)
+            vente_item = QTableWidgetItem(f"{vente:.2f}")
+            vente_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            vente_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.products_table.setItem(row, 4, vente_item)
+
+            # Ecart+Vente
+            ecart_plus_vente = float(product.get('ecart_plus_vente', vente - float(variance or 0)))
+            epv_item = QTableWidgetItem(f"{ecart_plus_vente:.2f}")
+            epv_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+            epv_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+            self.products_table.setItem(row, 5, epv_item)
+
             variance_pct = (variance / system_stock * 100) if system_stock != 0 else 0
             variance_pct_item = QTableWidgetItem(f"{variance_pct:.2f}%")
             if abs(variance_pct) > 5:
                 variance_pct_item.setBackground(QColor("#f8d7da"))
-            self.products_table.setItem(row, 4, variance_pct_item)
+            self.products_table.setItem(row, 6, variance_pct_item)
 
             purchase_variance = product.get('variance_value_purchase', 0)
-            self.products_table.setItem(row, 5, QTableWidgetItem(_format_money(purchase_variance, self.currency_symbol)))
+            self.products_table.setItem(row, 7, QTableWidgetItem(_format_money(purchase_variance, self.currency_symbol)))
 
             sale_variance = product.get('variance_value_sale', 0)
-            self.products_table.setItem(row, 6, QTableWidgetItem(_format_money(sale_variance, self.currency_symbol)))
+            self.products_table.setItem(row, 8, QTableWidgetItem(_format_money(sale_variance, self.currency_symbol)))
 
             if counted_stock == 0 and system_stock == 0:
                 status, status_color = "Non inventorié", QColor("#6c757d")
@@ -1606,7 +1786,7 @@ class InventoryDetailsDialog(QDialog):
 
             status_item = QTableWidgetItem(status)
             status_item.setBackground(status_color)
-            self.products_table.setItem(row, 7, status_item)
+            self.products_table.setItem(row, 9, status_item)
 
         self.products_table.resizeColumnsToContents()
 
@@ -1799,9 +1979,15 @@ class InventoryDetailsDialog(QDialog):
         total_sale_variance = sum(p.get('variance_value_sale', 0) for p in products)
         total_discrepancies = sum(1 for p in products if p.get('variance', 0) != 0)
 
+        # Totaux valorisés comptés au moment de l'inventaire
+        total_counted_purchase_value = sum(float(p.get('counted_stock', 0) or 0) * float(p.get('unit_cost', 0) or 0) for p in products)
+        total_counted_sale_value = sum(float(p.get('counted_stock', 0) or 0) * float(p.get('selling_price', p.get('price_unit', 0) or 0) or 0) for p in products)
+
         stats_data = [
             ["Total produits:", len(products)],
             ["Écarts détectés:", total_discrepancies],
+            ["Total Achat (compté):", _format_money(total_counted_purchase_value, enterprise.get('currency', 'FC'))],
+            ["Total Vente (compté):", _format_money(total_counted_sale_value, enterprise.get('currency', 'FC'))],
             ["Écart total achat:", _format_money(total_purchase_variance, enterprise.get('currency', 'FC'))],
             ["Écart total vente:", _format_money(total_sale_variance, enterprise.get('currency', 'FC'))]
         ]
@@ -1820,19 +2006,23 @@ class InventoryDetailsDialog(QDialog):
 
         # Tableau des produits
         if products:
-            table_data = [["Produit", "Stock Système", "Stock Compté", "Écart", "Écart Achat", "Écart Vente"]]
+            table_data = [["Produit", "Stock Système", "Stock Compté", "Écart", "Vente", "Ecart+Vente", "Écart Achat", "Écart Vente"]]
 
             for product in products:
+                vente = float(product.get('vente', 0) or 0)
+                ecart_plus_vente = float(product.get('ecart_plus_vente', vente - float(product.get('variance', 0) or 0)))
                 table_data.append([
                     product.get('product_name', ''),
                     f"{product.get('system_stock', 0):.2f}",
                     f"{product.get('counted_stock', 0):.2f}",
                     f"{product.get('variance', 0):.2f}",
+                    f"{vente:.2f}",
+                    f"{ecart_plus_vente:.2f}",
                     _format_money(product.get('variance_value_purchase', 0), enterprise.get('currency', 'FC')),
                     _format_money(product.get('variance_value_sale', 0), enterprise.get('currency', 'FC'))
                 ])
 
-            col_widths = [4*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3*cm, 3*cm]
+            col_widths = [4*cm, 2.5*cm, 2.5*cm, 2.5*cm, 2.5*cm, 3*cm, 3*cm, 3*cm]
             product_table = Table(table_data, colWidths=col_widths, repeatRows=1)
 
             product_table.setStyle(TableStyle([

@@ -196,6 +196,7 @@ class StockInventaire(Base):
     counted_items = Column(Integer, default=0)  # Nombre d'articles comptés
     total_discrepancies = Column(Integer, default=0)  # Nombre d'écarts
     total_variance_value = Column(Numeric(15, 2), default=0.0)  # Valeur totale des écarts
+    total_counted_purchase_value = Column(Numeric(15, 2), default=0.0)  # Valeur totale des quantités comptées (achat)
     
     # Options
     include_zero_stock = Column(Boolean, default=True)  # Inclure produits à stock zéro

@@ -9,8 +9,8 @@ from datetime import datetime, date
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func, text
 
-from ayanna_erp.database.database_manager import DatabaseManager
-from ayanna_erp.modules.stock.models import StockInventaire, StockInventaireItem, StockMovement, StockProduitEntrepot
+from ayanna_erp.database.database_manager import DatabaseManager, POSPoint, Module
+from ayanna_erp.modules.stock.models import StockInventaire, StockInventaireItem, StockMovement, StockProduitEntrepot, StockWarehouse
 
 
 class InventaireController:
@@ -310,6 +310,101 @@ class InventaireController:
         except Exception as e:
             print(f"Erreur lors de la lecture des produits d'inventaire: {e}")
             return []
+
+    def get_sales_on_date(self, session: Session, warehouse_id: Optional[int], product_ids: List[int], date_obj: Optional[date]) -> Dict[int, float]:
+        """Retourne un mapping product_id -> quantité vendue sur la date fournie.
+
+        Args:
+            session: SQLAlchemy session (pré-ouvert)
+            warehouse_id: entrepôt (optionnel) — not used currently but kept for future filtering
+            product_ids: liste d'ids produits à agréger
+            date_obj: date (datetime.date) à considérer (ventes du jour)
+
+        Returns:
+            dict {product_id: sold_qty}
+        """
+        try:
+            if not product_ids:
+                return {}
+
+            # Définir bornes jour
+            if date_obj is None:
+                from datetime import datetime
+                d1 = datetime.combine(datetime.today(), datetime.min.time())
+                d2 = datetime.combine(datetime.today(), datetime.max.time())
+            else:
+                from datetime import datetime
+                d1 = datetime.combine(date_obj, datetime.min.time())
+                d2 = datetime.combine(date_obj, datetime.max.time())
+
+            # Construire clause IN pour products
+            placeholders = ','.join([f":id{i}" for i in range(len(product_ids))])
+            params = {f"id{i}": pid for i, pid in enumerate(product_ids)}
+            params.update({'d1': d1, 'd2': d2})
+
+            # Si un entrepôt est fourni, essayer de déduire les pos_id associés
+            pos_filter_clause = ''
+            if warehouse_id:
+                try:
+                    # Récupérer le nom de l'entrepôt
+                    wh = session.query(StockWarehouse).filter(StockWarehouse.id == warehouse_id).first()
+                    pos_ids = []
+                    if wh:
+                        # Chercher les POS dont le module contient un fragment du nom d'entrepôt
+                        from sqlalchemy.orm import joinedload
+                        poss = session.query(POSPoint).options(joinedload(POSPoint.module)).filter(POSPoint.enterprise_id == wh.entreprise_id).all()
+                        wn = (wh.name or '').lower()
+                        for p in poss:
+                            mod_name = (p.module.name if getattr(p, 'module', None) and getattr(p.module, 'name', None) else '')
+                            if mod_name and (mod_name.lower() in wn or wn in mod_name.lower()):
+                                pos_ids.append(p.id)
+
+                    if pos_ids:
+                        pos_placeholders = ','.join([f":pos{i}" for i in range(len(pos_ids))])
+                        pos_filter_clause = f" AND p.pos_id IN ({pos_placeholders})"
+                        for i, pid in enumerate(pos_ids):
+                            params[f"pos{i}"] = pid
+                except Exception:
+                    pass
+
+            sold_map = {}
+
+            # Ventes boutique
+            q_shop = text(f"""
+                SELECT spp.product_id as product_id, COALESCE(SUM(spp.quantity),0) as sold_qty
+                FROM shop_paniers_products spp
+                LEFT JOIN shop_paniers p ON spp.panier_id = p.id
+                WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
+                AND spp.product_id IN ({placeholders}) {pos_filter_clause}
+                GROUP BY spp.product_id
+            """
+            )
+            rows = session.execute(q_shop, params).fetchall()
+            for r in rows:
+                pid = int(r.product_id)
+                sold_map[pid] = float(r.sold_qty or 0)
+
+            # Ventes restaurant
+            q_restau = text(f"""
+                SELECT rpp.product_id as product_id, COALESCE(SUM(rpp.quantity),0) as sold_qty
+                FROM restau_produit_panier rpp
+                LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
+                WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
+                AND rpp.product_id IN ({placeholders}) {pos_filter_clause.replace('p.pos_id', 'rp.pos_id')}
+                GROUP BY rpp.product_id
+            """
+            )
+            rows2 = session.execute(q_restau, params).fetchall()
+            for r in rows2:
+                pid = int(r.product_id)
+                sold_map[pid] = float(sold_map.get(pid, 0) + float(r.sold_qty or 0))
+
+            return sold_map
+        except Exception as e:
+            print(f"Erreur lors de l'agrégation des ventes: {e}")
+            return {}
 
 
     def save_inventory_counts(self, session: Session, inventory_id: int, counting_data: List[Dict[str, Any]]) -> bool:
