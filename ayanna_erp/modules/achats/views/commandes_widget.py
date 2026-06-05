@@ -25,7 +25,7 @@ from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, Co
 
 class LoadDataWorker(QObject):
     """Worker pour charger les données en arrière-plan dans un thread séparé"""
-    finished = pyqtSignal(list, str, int)  # commandes, search_text, etat_filter
+    finished = pyqtSignal(list, str, object, int)  # commandes, search_text, etat_filter, total
     error = pyqtSignal(str)
     
     def __init__(self, achat_controller, etat_filter=None, search_text=""):
@@ -33,6 +33,8 @@ class LoadDataWorker(QObject):
         self.achat_controller = achat_controller
         self.etat_filter = etat_filter
         self.search_text = search_text
+        self.limit = 25
+        self.offset = 0
         
     def run(self):
         """Charger les données (optimisé et sécurisé)"""
@@ -42,18 +44,19 @@ class LoadDataWorker(QObject):
             session = self.achat_controller.db_manager.get_session()
 
             # 🔹 Appel optimisé (filtrage SQL inclus)
-            commandes = self.achat_controller.get_commandes(
+            commandes, total = self.achat_controller.get_commandes_paginated(
                 session=session,
                 etat=self.etat_filter,
                 search_text=self.search_text,
-                limit=25  # Limite pour éviter surcharge, pagination à implémenter si besoin
+                limit=self.limit,
+                offset=self.offset
             )
 
             # 🔥 DÉTACHER les objets AVANT fermeture session
             for cmd in commandes:
                 session.expunge(cmd)
             # 🔹 Émission résultat
-            self.finished.emit(commandes, self.search_text, self.etat_filter)
+            self.finished.emit(commandes, self.search_text, self.etat_filter, total)
 
         except Exception as e:
             # 🔥 Toujours capturer proprement les erreurs
@@ -442,6 +445,15 @@ class CommandesWidget(QWidget):
         except Exception:
             self.currency = "FC"
         self.current_commandes = []
+        # Pagination state
+        self.current_page = 1
+        self.page_size = 25
+        self.total_commandes = 0
+        self.page_sizes = [10, 25, 50, 100]
+        # Debounce timer for search
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(350)
         
         # Thread pour le chargement des données
         self.data_thread = None
@@ -488,7 +500,9 @@ class CommandesWidget(QWidget):
         f_layout.addWidget(QLabel("Recherche:"))
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Numéro, fournisseur...")
-        self.search_edit.textChanged.connect(self.refresh_data)
+        # Debounced search to reduce DB queries
+        self.search_edit.textChanged.connect(self._on_search_text_changed)
+        self._search_timer.timeout.connect(self.refresh_data)
         f_layout.addWidget(self.search_edit)
 
         refresh_btn = QPushButton("🔄")
@@ -500,6 +514,29 @@ class CommandesWidget(QWidget):
         header_h.addWidget(filters)
 
         left_v.addLayout(header_h)
+
+        # Pagination controls placed under header
+        pag_layout = QHBoxLayout()
+        pag_layout.addWidget(QLabel("Affichage:"))
+        self.page_size_combo = QComboBox()
+        for s in self.page_sizes:
+            self.page_size_combo.addItem(str(s))
+        self.page_size_combo.setCurrentText(str(self.page_size))
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pag_layout.addWidget(self.page_size_combo)
+
+        self.prev_btn = QPushButton("◀ Précédent")
+        self.prev_btn.clicked.connect(self.go_prev_page)
+        pag_layout.addWidget(self.prev_btn)
+
+        self.next_btn = QPushButton("Suivant ▶")
+        self.next_btn.clicked.connect(self.go_next_page)
+        pag_layout.addWidget(self.next_btn)
+
+        pag_layout.addStretch()
+        self.page_info_label = QLabel("")
+        pag_layout.addWidget(self.page_info_label)
+        left_v.addLayout(pag_layout)
 
         self.table = QTableWidget()
         # Colonnes simplifiées: ID, Date, Montant, Payé, Statut Paiement, État, Utilisateur
@@ -560,7 +597,12 @@ class CommandesWidget(QWidget):
         self.lignes_table.setHorizontalHeaderLabels(["Produit", "Qté", "PU Achat", "PU Vente", "Remise", "Total Achat", "Total Vente"])
         # Configuration des colonnes
         lignes_header = self.lignes_table.horizontalHeader()
-        lignes_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)  # Produit
+        # Rendre la colonne Produit interactive et lui donner une largeur par défaut élargie
+        lignes_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
+        try:
+            self.lignes_table.setColumnWidth(0, 100)
+        except Exception:
+            pass
         for i in range(1, 7):
             lignes_header.setSectionResizeMode(i, QHeaderView.ResizeMode.ResizeToContents)
         lignes_v.addWidget(self.lignes_table)
@@ -633,6 +675,14 @@ class CommandesWidget(QWidget):
         self.data_worker.moveToThread(self.data_thread)
         
         # Connecter les signaux
+        # Configurer pagination sur le worker
+        try:
+            self.data_worker.limit = int(self.page_size)
+            self.data_worker.offset = (max(1, int(self.current_page)) - 1) * int(self.page_size)
+        except Exception:
+            self.data_worker.limit = 25
+            self.data_worker.offset = 0
+
         self.data_thread.started.connect(self.data_worker.run)
         self.data_worker.finished.connect(self._on_data_loaded)
         self.data_worker.error.connect(self._on_data_error)
@@ -645,10 +695,15 @@ class CommandesWidget(QWidget):
         """Appel public pour rafraîchir les données (dans un thread)"""
         self._schedule_refresh()
     
-    def _on_data_loaded(self, commandes, search_text, etat_filter):
-        """Callback appelé quand les données sont chargées"""
+    def _on_data_loaded(self, commandes, search_text, etat_filter, total):
+        """Callback appelé quand les données sont chargées (avec total)."""
         self.current_commandes = commandes
+        try:
+            self.total_commandes = int(total)
+        except Exception:
+            self.total_commandes = len(commandes)
         self.populate_table()
+        self.update_pagination_info()
     
     def _on_data_error(self, error_msg):
         """Callback appelé en cas d'erreur de chargement"""
@@ -657,6 +712,44 @@ class CommandesWidget(QWidget):
     def _do_refresh_data(self):
         """Effectuer le refresh réel en arrière-plan"""
         self._schedule_refresh()
+
+    def _on_search_text_changed(self, text: str):
+        """Restart debounce timer when search text changes."""
+        # Reset to first page when searching
+        self.current_page = 1
+        try:
+            self._search_timer.stop()
+            self._search_timer.start()
+        except Exception:
+            self.refresh_data()
+
+    def on_page_size_changed(self, text: str):
+        try:
+            self.page_size = int(text)
+        except Exception:
+            self.page_size = 25
+        self.current_page = 1
+        self.refresh_data()
+
+    def go_prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.refresh_data()
+
+    def go_next_page(self):
+        max_page = max(1, (self.total_commandes + self.page_size - 1) // self.page_size)
+        if self.current_page < max_page:
+            self.current_page += 1
+            self.refresh_data()
+
+    def update_pagination_info(self):
+        if self.page_size <= 0:
+            self.page_info_label.setText("")
+            return
+        max_page = max(1, (self.total_commandes + self.page_size - 1) // self.page_size)
+        start = (self.current_page - 1) * self.page_size + 1 if self.total_commandes > 0 else 0
+        end = min(self.total_commandes, self.current_page * self.page_size)
+        self.page_info_label.setText(f"{start}-{end} / {self.total_commandes} (Page {self.current_page}/{max_page})")
 
     def populate_table(self):
         self.table.setRowCount(len(self.current_commandes))
@@ -825,7 +918,19 @@ class CommandesWidget(QWidget):
                 total_achat += total_ligne_achat
                 total_vente += total_ligne_vente
                 
-                self.lignes_table.setItem(r, 0, QTableWidgetItem(prod_name))
+                # Afficher le nom complet du produit avec word-wrap et tooltip
+                try:
+                    prod_label = QLabel(prod_name)
+                    prod_label.setWordWrap(True)
+                    prod_label.setToolTip(prod_name)
+                    self.lignes_table.setCellWidget(r, 0, prod_label)
+                    # Ajuster la hauteur de la ligne pour prendre en compte le wrapping
+                    try:
+                        self.lignes_table.resizeRowToContents(r)
+                    except Exception:
+                        pass
+                except Exception:
+                    self.lignes_table.setItem(r, 0, QTableWidgetItem(prod_name))
                 self.lignes_table.setItem(r, 1, QTableWidgetItem(str(ligne.quantite)))
                 self.lignes_table.setItem(r, 2, QTableWidgetItem(self.entreprise_ctrl.format_amount(prix_achat)))
                 self.lignes_table.setItem(r, 3, QTableWidgetItem(self.entreprise_ctrl.format_amount(prix_vente)))

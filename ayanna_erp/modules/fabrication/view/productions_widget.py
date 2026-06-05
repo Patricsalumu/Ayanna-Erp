@@ -1,9 +1,13 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QListWidget, QMessageBox, QDialog, QFormLayout, QLineEdit, QSpinBox
+from PyQt6.QtWidgets import QWidget, QVBoxLayout, QPushButton, QHBoxLayout, QListWidget, QMessageBox, QDialog, QFormLayout, QLineEdit, QSpinBox, QListWidgetItem
 from ayanna_erp.modules.fabrication.controllers.fabrication_controller import FabricationController
 from ayanna_erp.database.database_manager import DatabaseManager
-from ayanna_erp.modules.fabrication.models import Production
+from ayanna_erp.modules.fabrication.models import Production, ProductionItem, FabricationRuleItem
+from ayanna_erp.modules.core.models import CoreProduct
 from decimal import Decimal
 from sqlalchemy import text
+from sqlalchemy.orm import joinedload
+from PyQt6.QtCore import Qt
+from ayanna_erp.modules.fabrication.views.production_detail import ProductionDetailDialog
 
 class ProductionsWidget(QWidget):
     def __init__(self, pos_id=None, current_user=None):
@@ -33,9 +37,40 @@ class ProductionsWidget(QWidget):
         self.prod_list.clear()
         session = self.db.get_session()
         try:
-            res = session.execute(text("SELECT id, production_code, status, product_id, planned_quantity FROM productions ORDER BY id DESC")).fetchall()
-            for r in res:
-                self.prod_list.addItem(f"#{r[0]} {r[1]} - Produit {r[3]} - Qte {r[4]} - {r[2]}")
+            # load productions with related product and rule
+            prods = session.query(Production).options(joinedload(Production.product), joinedload(Production.rule)).order_by(Production.id.desc()).all()
+            for p in prods:
+                # compute estimated quantity from consumed MP if items present
+                estimated = Decimal('0')
+                try:
+                    estimates = []
+                    for pi in (p.items or []):
+                        # find matching rule item
+                        rule_items = [ri for ri in (p.rule.items or []) if int(ri.raw_material_id) == int(pi.raw_material_id)] if p.rule else []
+                        if not rule_items:
+                            continue
+                        ri = rule_items[0]
+                        req = Decimal(str(ri.quantity_required or 0))
+                        out_q = Decimal(str(p.rule.output_quantity or 1)) if p.rule else Decimal('1')
+                        if req and pi.consumed_quantity:
+                            est = (Decimal(str(pi.consumed_quantity)) * out_q) / req
+                            estimates.append(est)
+                    estimated = min(estimates) if estimates else Decimal('0')
+                except Exception:
+                    estimated = Decimal('0')
+
+                prod_name = p.product.name if p.product else str(p.product_id)
+                unit = p.product.unit if p.product and getattr(p.product, 'unit', None) else ''
+                planned = f"{float(p.planned_quantity)} {unit}" if p.planned_quantity else f"0 {unit}"
+                estimated_display = f"{float(estimated)} {unit}" if estimated else f"0 {unit}"
+                # display status mapping: show 'encours' instead of 'draft'
+                status = p.status
+                if status == 'draft':
+                    status = 'encours'
+                item_text = f"{p.production_code or ''} - Produit {prod_name} - Qte prev: {planned} - Qte estime: {estimated_display} - {status}"
+                item = QListWidgetItem(item_text)
+                item.setData(Qt.ItemDataRole.UserRole, int(p.id))
+                self.prod_list.addItem(item)
         finally:
             session.close()
 
@@ -70,21 +105,14 @@ class ProductionsWidget(QWidget):
         if not sel:
             QMessageBox.warning(self, "Sélection", "Sélectionnez une production")
             return
-        # extract id from item text
+        # extract id from item data
         try:
-            tid = int(sel.text().split()[0].lstrip('#'))
+            tid = sel.data(Qt.ItemDataRole.UserRole)
         except Exception:
             QMessageBox.critical(self, "Erreur", "Impossible de lire l'ID")
             return
-        session = self.db.get_session()
-        try:
-            ok = self.fc.validate_production(session, production_id=tid, validated_by=(self.current_user.get('id') if isinstance(self.current_user, dict) else None))
-            if ok:
-                QMessageBox.information(self, "Succès", "Production validée")
-                self.load_productions()
-            else:
-                QMessageBox.critical(self, "Erreur", "Validation a retourné False")
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", str(e))
-        finally:
-            session.close()
+        # Open production detail dialog to allow user to set produced/consumptions and end time
+        dlg = ProductionDetailDialog(production_id=tid, pos_id=self.pos_id, current_user=self.current_user, parent=self)
+        if dlg.exec():
+            # after possible validation, refresh list
+            self.load_productions()

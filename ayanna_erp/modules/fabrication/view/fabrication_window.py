@@ -1,9 +1,11 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QTabWidget
-from .nomenclature_widget import NomenclatureWidget
-from .productions_widget import ProductionsWidget
-from .dashboard_widget import DashboardWidget
+from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QTabWidget
+from ..views.nomenclature_widget import NomenclatureWidget
+from ..views.productions_widget import ProductionsWidget
+from ..views.dashboard_widget import DashboardWidget
+from ..views.articles_widget import ArticlesWidget
 
-class FabricationWindow(QDialog):
+
+class FabricationWindow(QMainWindow):
     def __init__(self, current_user, pos_id=None):
         super().__init__()
         self.current_user = current_user
@@ -13,9 +15,16 @@ class FabricationWindow(QDialog):
         self.setup_ui()
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
+        central = QWidget()
+        layout = QVBoxLayout(central)
         tabs = QTabWidget()
+        # Dashboard en premier onglet
+        tabs.addTab(DashboardWidget(self.pos_id, self.current_user), "Tableau de bord")
+        tabs.addTab(ArticlesWidget(self.pos_id, self.current_user), "Articles")
         tabs.addTab(NomenclatureWidget(self.pos_id, self.current_user), "Nomenclatures")
         tabs.addTab(ProductionsWidget(self.pos_id, self.current_user), "Productions")
-        tabs.addTab(DashboardWidget(self.pos_id, self.current_user), "Tableau de bord")
+        # Appliquer un thème de couleur pour le module
+        tabs.setStyleSheet("QTabBar::tab { height: 28px; padding: 6px 12px; } QTabWidget::pane { border-top: 2px solid #2C3E50; }")
+        central.setStyleSheet("background-color: #F7FBFF;")
         layout.addWidget(tabs)
+        self.setCentralWidget(central)

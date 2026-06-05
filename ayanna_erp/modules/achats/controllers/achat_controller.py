@@ -279,6 +279,53 @@ class AchatController:
             )
 
         return query.order_by(AchatCommande.date_commande.desc()).limit(limit).all()
+
+    def get_commandes_paginated(
+        self,
+        session: Session,
+        etat: EtatCommande = None,
+        fournisseur_id: int = None,
+        search_text: str = None,
+        limit: int = 25,
+        offset: int = 0
+    ):
+        """Retourne (commandes, total) en appliquant limit/offset et recherche incluant produits.
+
+        La recherche examine le numéro de commande, le nom du fournisseur, et le nom des produits
+        présents dans les lignes de commande pour retrouver les commandes concernées.
+        """
+        query = session.query(AchatCommande).options(
+            joinedload(AchatCommande.fournisseur),
+            selectinload(AchatCommande.depenses)
+        )
+
+        if etat:
+            query = query.filter(AchatCommande.etat == etat)
+        if fournisseur_id:
+            query = query.filter(AchatCommande.fournisseur_id == fournisseur_id)
+
+        if search_text:
+            search = f"%{search_text}%"
+            # Joindre les lignes et produits pour recherche sur nom produit
+            # Utiliser outerjoin pour ne pas exclure commandes sans lignes
+            query = query.outerjoin(AchatCommande.lignes).outerjoin(AchatCommandeLigne.product).join(AchatCommande.fournisseur)
+            query = query.filter(
+                or_(
+                    AchatCommande.numero.ilike(search),
+                    CoreFournisseur.nom.ilike(search),
+                    getattr(CoreProduct, 'name', CoreProduct).ilike(search)
+                )
+            )
+
+        # Calculer total distinct des commandes correspondant au filtre
+        try:
+            total = query.distinct(AchatCommande.id).count()
+        except Exception:
+            total = 0
+
+        # Appliquer order, offset et limit
+        commandes = query.order_by(AchatCommande.date_commande.desc()).offset(offset).limit(limit).all()
+        return commandes, total
     
     def get_commande_by_id(self, session: Session, commande_id: int) -> Optional[AchatCommande]:
         """Récupère une commande par son ID"""
@@ -561,20 +608,16 @@ class AchatController:
                 session.add(journal_paiement)
                 session.flush()
 
-                # Débit : Fournisseur débiteur 409 (avance versée au fournisseur)
-                # Utilise compte_fournisseur_debiteur_id (409) si configuré,
-                # sinon repli sur compte_fournisseur_id (401 créditeur) — jamais sur le compte de charge
-                compte_debit_paiement_id = (
-                    getattr(config, 'compte_fournisseur_debiteur_id', None)
-                    or config.compte_fournisseur_id
-                )
+                # Débit : Fournisseur créditeur (utiliser le compte fournisseur configuré)
+                # Utiliser toujours le compte créditeur fournisseur (compte_fournisseur_id)
+                compte_debit_paiement_id = config.compte_fournisseur_id
                 ecriture_debit_paiement = ComptaEcritures(
                     journal_id=journal_paiement.id,
                     compte_comptable_id=compte_debit_paiement_id,
                     debit=depense.montant,
                     credit=Decimal('0'),
                     ordre=1,
-                    libelle=f"Avance fournisseur (409) - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
+                    libelle=f"Règlement fournisseur - {commande.fournisseur.nom if commande.fournisseur else 'Fournisseur Divers'}"
                 )
                 session.add(ecriture_debit_paiement)
 

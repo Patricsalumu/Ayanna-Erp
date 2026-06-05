@@ -10,6 +10,7 @@ from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.fabrication.models import Production, FabricationRule
 from ayanna_erp.modules.core.models import CoreProduct
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
+from ayanna_erp.modules.comptabilite.controller.comptabilite_controller import ComptabiliteController
 from datetime import datetime
 from decimal import Decimal
 import io
@@ -205,6 +206,202 @@ def export_production_pdf(production_id: int, file_path: str, paper: str = 'A4')
         except Exception:
             pass
 
+def export_products_catalog_pdf(
+    product_ids: list,
+    file_path: str,
+    paper: str = 'A4',
+    include_code: bool = True,
+    include_price: bool = True,
+    include_account: bool = True,
+    include_cover: bool = True,
+    paginate: bool = True,
+) -> bool:
+    """Export a single PDF catalog listing multiple products.
+    Options allow including/excluding code, price, account columns, adding a cover page and pagination.
+    """
+    db = DatabaseManager()
+    session = db.get_session()
+    try:
+        if not product_ids:
+            raise Exception('Aucun produit sélectionné')
+
+        products = session.query(CoreProduct).filter(CoreProduct.id.in_(product_ids)).order_by(CoreProduct.name).all()
+        ent_ctrl = EntrepriseController()
+        ent_info = ent_ctrl.get_company_info_for_pdf() or {}
+        layout_cfg = _get_layout_config(ent_info)
+
+        date_str = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
+
+        # 80mm (receipt-like)
+        if paper == '80mm':
+            width = 80 * mm
+            height = max(200 * mm, (len(products) * 8 + 80) * mm)
+            c = canvas.Canvas(file_path, pagesize=(width, height))
+            y = height - 6 * mm
+            # header
+            if include_cover:
+                if ent_info.get('logo'):
+                    try:
+                        img = ImageReader(io.BytesIO(ent_info.get('logo')))
+                        c.drawImage(img, 6 * mm, y - 18 * mm, width=20 * mm, height=18 * mm)
+                        x_offset = 28 * mm
+                    except Exception:
+                        x_offset = 6 * mm
+                else:
+                    x_offset = 6 * mm
+                c.setFont('Helvetica-Bold', 10)
+                c.drawString(x_offset, y, ent_info.get('name', ''))
+                y -= 8 * mm
+                c.setFont('Helvetica', 9)
+                c.drawString(6 * mm, y, f"Date: {date_str}")
+                y -= 8 * mm
+                c.drawString(6 * mm, y, "--- Catalogue produits ---")
+                y -= 8 * mm
+            else:
+                c.setFont('Helvetica', 9)
+                c.drawString(6 * mm, y, f"Date: {date_str}")
+                y -= 8 * mm
+
+            c_obj = ComptabiliteController()
+            for p in products:
+                parts = []
+                if include_code:
+                    ref = getattr(p, 'code', '') or str(p.id)
+                    parts.append(ref)
+                # name + unit
+                unit = getattr(p, 'unit', '') or ''
+                name_part = p.name[:30]
+                if unit:
+                    name_part = f"{name_part} ({unit})"
+                parts.append(name_part)
+                if include_price:
+                    try:
+                        price_text = ent_ctrl.format_amount(getattr(p, 'price_unit', 0))
+                    except Exception:
+                        price_text = str(getattr(p, 'price_unit', ''))
+                    parts.append(price_text)
+                if include_account:
+                    acc = None
+                    try:
+                        acc = c_obj.get_compte_by_id(getattr(p, 'stock_account_id', None))
+                    except Exception:
+                        acc = None
+                    if acc:
+                        parts.append(f"{acc.numero} - {acc.nom}")
+                    else:
+                        parts.append(str(getattr(p, 'stock_account_id', '') or ''))
+                line = ' - '.join([str(x) for x in parts if x])
+                c.drawString(6 * mm, y, line)
+                y -= 6 * mm
+                if y < 20 * mm:
+                    c.showPage()
+                    y = height - 10 * mm
+            if paginate:
+                # simple footer page numbers
+                pass
+            c.save()
+            return True
+
+        # A4 catalog
+        left_margin = layout_cfg['left_margin_mm'] * mm
+        right_margin = layout_cfg['right_margin_mm'] * mm
+        top_margin = layout_cfg['top_margin_mm'] * mm
+        bottom_margin = layout_cfg['bottom_margin_mm'] * mm
+        doc = SimpleDocTemplate(file_path, pagesize=A4, leftMargin=left_margin, rightMargin=right_margin, topMargin=top_margin, bottomMargin=bottom_margin)
+        styles = getSampleStyleSheet()
+        styles['Normal'].fontName = layout_cfg['normal_font']
+        styles['Normal'].fontSize = layout_cfg['normal_size']
+        styles.add(ParagraphStyle(name='CatalogTitle', fontName=layout_cfg['heading_font'], fontSize=layout_cfg['heading_size'] + 2, alignment=TA_CENTER))
+
+        elems = []
+        if include_cover:
+            elems.append(_build_header_table(ent_info, styles, layout_cfg))
+            elems.append(Spacer(1, 12))
+            elems.append(Paragraph(ent_info.get('name', ''), styles['Title']))
+            elems.append(Spacer(1, 6))
+            elems.append(Paragraph(f"Catalogue produits", styles['CatalogTitle']))
+            elems.append(Spacer(1, 6))
+            elems.append(Paragraph(f"Date: {date_str}", styles['Normal']))
+            elems.append(PageBreak())
+        else:
+            elems.append(_build_header_table(ent_info, styles, layout_cfg))
+            elems.append(Spacer(1, 8))
+            elems.append(Paragraph(f"Catalogue produits - {date_str}", styles['CatalogTitle']))
+            elems.append(Spacer(1, 6))
+
+        # build table header depending on options
+        headers = []
+        col_widths = []
+        if include_code:
+            headers.append('Réf/ID')
+            col_widths.append(30 * mm)
+        headers.append('Nom')
+        col_widths.append(90 * mm)
+        headers.append('Type')
+        col_widths.append(40 * mm)
+        if include_price:
+            headers.append('Prix')
+            col_widths.append(30 * mm)
+        if include_account:
+            headers.append('Compte stock')
+            col_widths.append(30 * mm)
+
+        data = [headers]
+        c_obj = ComptabiliteController()
+        for p in products:
+            row = []
+            if include_code:
+                row.append(getattr(p, 'code', '') or str(p.id))
+            unit = getattr(p, 'unit', '') or ''
+            name_cell = p.name or ''
+            if unit:
+                name_cell = f"{name_cell} ({unit})"
+            row.append(name_cell)
+            row.append(getattr(p, 'product_type', '') or '')
+            if include_price:
+                try:
+                    row.append(ent_ctrl.format_amount(getattr(p, 'price_unit', 0)))
+                except Exception:
+                    row.append(str(getattr(p, 'price_unit', '') or ''))
+            if include_account:
+                try:
+                    acc = c_obj.get_compte_by_id(getattr(p, 'stock_account_id', None))
+                    if acc:
+                        row.append(f"{acc.numero} - {acc.nom}")
+                    else:
+                        row.append(str(getattr(p, 'stock_account_id', '') or ''))
+                except Exception:
+                    row.append(str(getattr(p, 'stock_account_id', '') or ''))
+            data.append(row)
+
+        table = Table(data, colWidths=col_widths)
+        table.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.black),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor('#eeeeee')),
+            ("VALIGN", (0, 0), (-1, -1), 'MIDDLE')
+        ]))
+        elems.append(table)
+
+        def _add_page_number(canvas_obj, doc_obj):
+            if not paginate:
+                return
+            canvas_obj.saveState()
+            canvas_obj.setFont('Helvetica', 8)
+            page_text = f"Page {doc_obj.page}"
+            canvas_obj.drawCentredString(A4[0] / 2.0, 10 * mm, page_text)
+            canvas_obj.restoreState()
+
+        doc.build(elems, onFirstPage=_add_page_number, onLaterPages=_add_page_number)
+        return True
+
+    except Exception as e:
+        print(f"Erreur export catalogue produits: {e}")
+        return False
+    finally:
+        try:
+            session.close()
+        except Exception:
+            pass
 
 def export_rule_pdf(rule_id: int, file_path: str, paper: str = 'A4') -> bool:
     db = DatabaseManager()

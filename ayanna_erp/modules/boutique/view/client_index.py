@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QDialog, QDialogButtonBox, QFormLayout, QTextEdit,
     QGridLayout, QComboBox
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 from ayanna_erp.database.database_manager import DatabaseManager
@@ -38,6 +38,11 @@ class ClientIndex(QWidget):
         self.current_user = current_user
         self.db_manager = DatabaseManager()
         self.enterprise_controller = EntrepriseController()
+        # Pagination state
+        self.current_page = 1
+        self.page_size = 25
+        self.total_clients = 0
+        self.page_sizes = [10, 25, 50, 100]
         
         self.setup_ui()
         self.load_clients()
@@ -93,8 +98,14 @@ class ClientIndex(QWidget):
         filter_layout.setSpacing(5)
         filter_layout.addWidget(QLabel("Recherche:"))
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("Nom, téléphone, email...")
-        self.search_input.textChanged.connect(self.search_clients)
+        self.search_input.setPlaceholderText("Nom, téléphone, email, adresse...")
+        # Réagir au texte en réinitialisant la page courante (debounce implémenté)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        # Timer de debounce pour éviter d'appeler la recherche trop souvent
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(350)  # millisecondes
+        self.search_timer.timeout.connect(self._debounced_search)
         filter_layout.addWidget(self.search_input)
         header_layout.addLayout(filter_layout)
         left_layout.addWidget(header_group)
@@ -116,6 +127,33 @@ class ClientIndex(QWidget):
         self.clients_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.clients_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)  # Désactiver l'édition directe
         left_layout.addWidget(self.clients_table)
+
+        # Pagination controls
+        pagination_layout = QHBoxLayout()
+        pagination_layout.setContentsMargins(0, 0, 0, 0)
+        pagination_layout.setSpacing(6)
+
+        pagination_layout.addWidget(QLabel("Affichage:"))
+        self.page_size_combo = QComboBox()
+        for s in self.page_sizes:
+            self.page_size_combo.addItem(str(s))
+        self.page_size_combo.setCurrentText(str(self.page_size))
+        self.page_size_combo.currentTextChanged.connect(self.on_page_size_changed)
+        pagination_layout.addWidget(self.page_size_combo)
+
+        self.prev_btn = QPushButton("◀ Précédent")
+        self.prev_btn.clicked.connect(self.go_prev_page)
+        pagination_layout.addWidget(self.prev_btn)
+
+        self.next_btn = QPushButton("Suivant ▶")
+        self.next_btn.clicked.connect(self.go_next_page)
+        pagination_layout.addWidget(self.next_btn)
+
+        self.page_info_label = QLabel("")
+        pagination_layout.addStretch()
+        pagination_layout.addWidget(self.page_info_label)
+
+        left_layout.addLayout(pagination_layout)
 
         # === PARTIE DROITE : DÉTAILS CLIENT ===
         self.detail_widget = QGroupBox("Détails du client")
@@ -456,9 +494,12 @@ class ClientIndex(QWidget):
         """Charger et afficher les clients"""
         try:
             with self.db_manager.get_session() as session:
-                clients = self.boutique_controller.get_clients(session)
+                offset = (self.current_page - 1) * self.page_size
+                clients, total = self.boutique_controller.get_clients(session, limit=self.page_size, offset=offset)
+                self.total_clients = total
                 self.populate_clients_table(clients)
                 self.update_statistics(clients)
+                self.update_pagination_info()
                 
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du chargement des clients: {str(e)}")
@@ -469,12 +510,65 @@ class ClientIndex(QWidget):
         
         try:
             with self.db_manager.get_session() as session:
-                clients = self.boutique_controller.get_clients(session, search_term=search_term)
+                offset = (self.current_page - 1) * self.page_size
+                clients, total = self.boutique_controller.get_clients(session, search_term=search_term, limit=self.page_size, offset=offset)
+                self.total_clients = total
                 self.populate_clients_table(clients)
                 self.update_statistics(clients)  # Mettre à jour les statistiques après recherche
+                self.update_pagination_info()
                 
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors de la recherche: {str(e)}")
+
+    def on_search_text_changed(self, text: str):
+        """Reset page when search text changes and start debounce timer."""
+        self.current_page = 1
+        # Restart debounce timer
+        try:
+            self.search_timer.stop()
+            self.search_timer.start()
+        except Exception:
+            # Fallback immédiat si timer non disponible
+            self.search_clients()
+
+    def _debounced_search(self):
+        """Effectue la recherche après le délai de debounce."""
+        self.search_clients()
+
+    def on_page_size_changed(self, text: str):
+        try:
+            self.page_size = int(text)
+        except Exception:
+            self.page_size = 25
+        self.current_page = 1
+        self.load_clients()
+
+    def go_prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            # Trigger search if there's a search term, otherwise load all
+            if self.search_input.text().strip():
+                self.search_clients()
+            else:
+                self.load_clients()
+
+    def go_next_page(self):
+        max_page = max(1, (self.total_clients + self.page_size - 1) // self.page_size)
+        if self.current_page < max_page:
+            self.current_page += 1
+            if self.search_input.text().strip():
+                self.search_clients()
+            else:
+                self.load_clients()
+
+    def update_pagination_info(self):
+        if self.page_size <= 0:
+            self.page_info_label.setText("")
+            return
+        max_page = max(1, (self.total_clients + self.page_size - 1) // self.page_size)
+        start = (self.current_page - 1) * self.page_size + 1 if self.total_clients > 0 else 0
+        end = min(self.total_clients, self.current_page * self.page_size)
+        self.page_info_label.setText(f"{start}-{end} / {self.total_clients} (Page {self.current_page}/{max_page})")
     
     def populate_clients_table(self, clients: List[ShopClient]):
         """Peupler le tableau des clients"""

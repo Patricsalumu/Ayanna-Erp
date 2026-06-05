@@ -49,6 +49,10 @@ class CommandesIndexWidget(QWidget):
         # Initialiser le contrôleur entreprise pour les devises
         self.entreprise_controller = EntrepriseController()
         
+        # recherche/filtrage : protection contre exécutions simultanées
+        self._search_running = False
+        self._pending_search = False
+
         self.init_ui()
         self.load_commandes()
 
@@ -158,17 +162,28 @@ class CommandesIndexWidget(QWidget):
             self.date_fin.setEnabled(False)
         filters_layout.addWidget(self.date_fin, 0, 3)
         
-        # Recherche
+        # Recherche (se lance uniquement à l'appui sur Enter ou via le bouton)
         filters_layout.addWidget(QLabel("Recherche :"), 1, 0)
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Chercher par client, produit, numéro commande...")
-        # Ajouter un délai pour éviter les appels trop fréquents
-        self.search_timer = QTimer()
-        self.search_timer.setSingleShot(True)
-        self.search_timer.timeout.connect(self.filter_commandes)
-        self.search_input.textChanged.connect(lambda: self.search_timer.start(300))  # 300ms de délai
-        filters_layout.addWidget(self.search_input, 1, 1, 1, 2)
-        
+        # Exécuter la recherche immédiatement si l'utilisateur appuie sur Enter
+        self.search_input.returnPressed.connect(self.filter_commandes)
+
+        # Petite barre avec bouton de recherche à droite
+        search_box = QHBoxLayout()
+        search_box.setContentsMargins(0, 0, 0, 0)
+        search_box.addWidget(self.search_input)
+        search_btn = QPushButton("🔍")
+        try:
+            search_btn.setFixedWidth(36)
+        except Exception:
+            pass
+        search_btn.clicked.connect(self.filter_commandes)
+        search_box.addWidget(search_btn)
+        search_container = QWidget()
+        search_container.setLayout(search_box)
+        filters_layout.addWidget(search_container, 1, 1, 1, 2)
+
         # Filtre par statut paiement
         filters_layout.addWidget(QLabel("Paiement :"), 1, 3)
         self.payment_filter = QComboBox()
@@ -195,7 +210,7 @@ class CommandesIndexWidget(QWidget):
         self.livre_filter.addItems(["Tous", "Oui", "Non"])
         self.livre_filter.currentTextChanged.connect(self.filter_commandes)
         filters_layout.addWidget(self.livre_filter, 2, 3)
-        
+
         # Boutons d'action
         actions_layout = QHBoxLayout()
         
@@ -221,8 +236,10 @@ class CommandesIndexWidget(QWidget):
         actions_layout.addStretch()
         
         filters_layout.addLayout(actions_layout, 2, 0, 1, 5)
-        
+
         layout.addWidget(filters_group)
+        
+    
         
     def create_commandes_table(self):
         """Créer le tableau des commandes"""
@@ -809,6 +826,13 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
         
     def filter_commandes(self):
         """Filtrer les commandes selon les critères actuels"""
+        # Empêcher l'exécution concurrente du filtrage. Si une recherche est
+        # déjà en cours, marquer une recherche en attente et quitter.
+        if getattr(self, '_search_running', False):
+            self._pending_search = True
+            return
+
+        self._search_running = True
         try:
             # Récupérer les filtres actuels
             date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
@@ -832,6 +856,13 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
         except Exception as e:
             QMessageBox.warning(self, "Erreur", f"Erreur lors du filtrage des commandes: {e}")
             print(f"❌ Erreur filter_commandes: {e}")
+        finally:
+            self._search_running = False
+            # Si une autre recherche a été demandée pendant l'exécution,
+            # reprogrammer une recherche courte après 100ms pour traiter la dernière saisie.
+            if getattr(self, '_pending_search', False):
+                self._pending_search = False
+                QTimer.singleShot(100, self.filter_commandes)
         
     def on_commande_selected(self):
         """Gérer la sélection d'une commande dans le tableau"""
@@ -979,6 +1010,21 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
             self.detail_statut.setStyleSheet("color: #f44336; font-weight: bold;")
             self.pay_button.setEnabled(True)
             self.pay_button.setText("💳 Payer")
+        
+        # Si la commande provient du module restaurant et que son statut est 'en cours',
+        # désactiver le bouton de paiement (paiement géré côté restaurant)
+        try:
+            module = commande.get('module', '')
+            status_raw = commande.get('status', '')
+            status_lower = str(status_raw or '').lower().replace('-', '_').replace(' ', '_')
+            if module == 'restaurant' and status_lower in ('en_cours', 'encours', 'pending', 'en_cours', 'en_cours'):
+                self.pay_button.setEnabled(False)
+                try:
+                    self.pay_button.setToolTip('Paiement désactivé : commande restaurant en cours')
+                except Exception:
+                    pass
+        except Exception:
+            pass
         
         # Produits/Services
         produits_text = commande.get('produits_detail', 'Aucun détail disponible')
@@ -1251,6 +1297,10 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
         
         self.pay_button.setEnabled(False)
         self.pay_button.setText("💳 Payer")
+        try:
+            self.pay_button.setToolTip('')
+        except Exception:
+            pass
         self.print_button.setEnabled(False)
         
         self.selected_commande_id = None
@@ -1533,22 +1583,23 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
                 notes_preview = f" ({notes})"
             else:
                 notes_preview = ""
-                # Sécuriser l'accès aux paiements (liste attendue)
-                payments_list_preview = invoice_data.get('payments') or []
-                payment_method_preview = ''
-                if payments_list_preview and isinstance(payments_list_preview, list):
-                    try:
-                        payment_method_preview = payments_list_preview[0].get('payment_method', '')
-                    except Exception:
-                        payment_method_preview = ''
 
-                preview_text = f"""
+            # Sécuriser l'accès aux paiements (liste attendue)
+            payments_list_preview = invoice_data.get('payments') or []
+            payment_method_preview = ''
+            if payments_list_preview and isinstance(payments_list_preview, list):
+                try:
+                    payment_method_preview = payments_list_preview[0].get('payment_method', '')
+                except Exception:
+                    payment_method_preview = ''
+
+            preview_text = f"""
 N° Commande: {invoice_data.get('reference', '')}
 Client: {invoice_data.get('client_nom', '')}
 Total: {invoice_data.get('total_ttc', 0):.0f} {self.get_currency_symbol()}
 Paiement: {payment_method_preview}
 Notes: {notes_preview}
-                """.strip()
+            """.strip()
 
             preview_display = QTextEdit()
             preview_display.setPlainText(preview_text)

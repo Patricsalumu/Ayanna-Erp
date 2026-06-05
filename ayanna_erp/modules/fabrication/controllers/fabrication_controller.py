@@ -61,7 +61,7 @@ class FabricationController:
         session.commit()
         return prod
 
-    def validate_production(self, session, production_id: int, produced_quantity: float, consumed_quantities: dict, validated_by: int = None):
+    def validate_production(self, session, production_id: int, produced_quantity: float, consumed_quantities: dict, validated_by: int = None, end_time: datetime = None):
         """
         Validate a production: consume raw materials, add finished goods, create stock movements
         consumed_quantities: dict raw_material_id -> consumed_quantity (Decimal/float)
@@ -179,7 +179,8 @@ class FabricationController:
         prod.status = 'completed'
         prod.validated_by = validated_by
         prod.validated_at = datetime.utcnow()
-        prod.end_time = datetime.utcnow()
+        # use provided end_time if given (user-indicated), else fallback to now
+        prod.end_time = end_time if end_time is not None else datetime.utcnow()
 
         session.commit()
 

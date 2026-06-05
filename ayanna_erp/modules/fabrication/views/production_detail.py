@@ -1,4 +1,4 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit, QTextEdit, QDoubleSpinBox, QPushButton, QHBoxLayout, QMessageBox, QTableWidget, QTableWidgetItem, QFileDialog
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLabel, QLineEdit, QTextEdit, QDoubleSpinBox, QPushButton, QHBoxLayout, QMessageBox, QTableWidget, QTableWidgetItem, QFileDialog, QDateTimeEdit
 from PyQt6.QtCore import Qt
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.fabrication.models import Production, FabricationRuleItem, ProductionItem
@@ -6,6 +6,8 @@ from ayanna_erp.modules.fabrication.controllers.fabrication_controller import Fa
 from decimal import Decimal
 from datetime import datetime
 from ayanna_erp.modules.fabrication.print_export import export_production_pdf
+from sqlalchemy.orm import joinedload
+from ayanna_erp.modules.fabrication.models import FabricationRule
 
 
 class ProductionDetailDialog(QDialog):
@@ -24,7 +26,12 @@ class ProductionDetailDialog(QDialog):
     def load_production(self):
         session = self.db.get_session()
         try:
-            self.prod = session.query(Production).filter_by(id=self.production_id).first()
+            # eager load related product, rule and items to avoid detached-instance lazy loads
+            self.prod = session.query(Production).options(
+                joinedload(Production.product),
+                joinedload(Production.rule).joinedload(FabricationRule.items).joinedload(FabricationRuleItem.raw_material),
+                joinedload(Production.items)
+            ).filter_by(id=self.production_id).first()
             if not self.prod:
                 raise Exception("Production introuvable")
             # load rule items
@@ -64,6 +71,16 @@ class ProductionDetailDialog(QDialog):
 
         self.operator_input = QLineEdit(self.prod.operator_name or "")
         form.addRow(QLabel("Opérateur"), self.operator_input)
+
+        # End time (allow user to indicate actual end of production)
+        self.end_dt = QDateTimeEdit()
+        self.end_dt.setCalendarPopup(True)
+        try:
+            if getattr(self.prod, 'end_time', None):
+                self.end_dt.setDateTime(self.prod.end_time)
+        except Exception:
+            pass
+        form.addRow(QLabel("Fin (heure de fin production)"), self.end_dt)
 
         self.notes_input = QTextEdit(self.prod.notes or "")
         form.addRow(QLabel("Notes"), self.notes_input)
@@ -143,14 +160,24 @@ class ProductionDetailDialog(QDialog):
 
         produced_q = float(self.produced_spin.value())
 
+        # Ensure user indicates an end time before validation when not already set
+        chosen_end = None
+        if not getattr(self.prod, 'end_time', None):
+            chosen_end = self._ask_for_end_time()
+            if chosen_end is None:
+                QMessageBox.warning(self, "Annulé", "Veuillez indiquer l'heure de fin de production pour valider.")
+                return
+        else:
+            chosen_end = self.end_dt.dateTime().toPyDateTime()
+
         session = self.db.get_session()
         try:
             validated_by = None
             if isinstance(self.current_user, dict):
                 validated_by = self.current_user.get('id')
 
-            # call controller validate_production
-            prod = self.controller.validate_production(session, self.production_id, produced_q, consumed, validated_by=validated_by)
+            # call controller validate_production with the user-provided end_time
+            prod = self.controller.validate_production(session, self.production_id, produced_q, consumed, validated_by=validated_by, end_time=chosen_end)
             QMessageBox.information(self, "Succès", f"Production validée (ID {prod.id})")
             self.accept()
         except Exception as e:
@@ -160,6 +187,40 @@ class ProductionDetailDialog(QDialog):
                 session.close()
             except Exception:
                 pass
+
+    def _ask_for_end_time(self):
+        # Dialog to request the end time from user
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Indiquer heure de fin")
+        v = QVBoxLayout(dlg)
+        info = QLabel("Aucune heure de fin renseignée. Veuillez indiquer l'heure de fin réelle de la production:")
+        v.addWidget(info)
+        dt = QDateTimeEdit()
+        dt.setCalendarPopup(True)
+        dt.setDateTime(datetime.utcnow())
+        v.addWidget(dt)
+        btns = QHBoxLayout()
+        ok = QPushButton("OK")
+        cancel = QPushButton("Annuler")
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        v.addLayout(btns)
+
+        result = {'ok': False}
+
+        def on_ok():
+            result['ok'] = True
+            dlg.accept()
+
+        def on_cancel():
+            dlg.reject()
+
+        ok.clicked.connect(on_ok)
+        cancel.clicked.connect(on_cancel)
+
+        if dlg.exec() and result['ok']:
+            return dt.dateTime().toPyDateTime()
+        return None
 
     def on_print_a4(self):
         path, _ = QFileDialog.getSaveFileName(self, "Enregistrer PDF A4", f"production_{self.production_id}.pdf", "PDF Files (*.pdf)")

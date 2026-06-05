@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QHBoxLayout, QPushBut
 from PyQt6.QtCore import Qt
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.fabrication.models import Production
+from ayanna_erp.modules.core.models import CoreProduct
 from ayanna_erp.modules.fabrication.controllers.fabrication_controller import FabricationController
 from ayanna_erp.modules.fabrication.views.production_dialog import ProductionDialog
 
@@ -37,7 +38,16 @@ class ProductionsWidget(QWidget):
             for row, p in enumerate(prods):
                 self.table.setItem(row, 0, QTableWidgetItem(str(p.id)))
                 self.table.setItem(row, 1, QTableWidgetItem(p.production_code or ""))
-                prod_name = session.query(p.product.property.mapper.class_).get(p.product_id).name if p.product_id else str(p.product_id)
+                # Resolve product name safely
+                prod_name = ''
+                if p.product_id:
+                    try:
+                        prod_obj = session.get(CoreProduct, p.product_id)
+                        prod_name = prod_obj.name if prod_obj else str(p.product_id)
+                    except Exception:
+                        prod_name = str(p.product_id)
+                else:
+                    prod_name = str(p.product_id)
                 self.table.setItem(row, 2, QTableWidgetItem(prod_name))
                 self.table.setItem(row, 3, QTableWidgetItem(str(p.planned_quantity)))
                 self.table.setItem(row, 4, QTableWidgetItem(p.status or ""))

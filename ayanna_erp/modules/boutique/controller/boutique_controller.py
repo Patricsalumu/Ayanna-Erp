@@ -6,6 +6,7 @@ Gère la logique métier des produits, services, panier et paiements.
 from typing import List, Optional, Dict, Any, Tuple
 from decimal import Decimal
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from PyQt6.QtCore import QObject, pyqtSignal
 
 from ayanna_erp.database.database_manager import DatabaseManager
@@ -556,20 +557,52 @@ class BoutiqueController(QObject):
     
     # =================== GESTION DES CLIENTS ===================
     
-    def get_clients(self, session: Session, search_term: str = None) -> List[ShopClient]:
-        """Récupère les clients avec recherche optionnelle."""
+    def get_clients(self, session: Session, search_term: str = None, limit: int = None, offset: int = 0):
+        """Récupère les clients avec recherche optionnelle et pagination.
+
+        Retourne un tuple `(clients, total)` lorsque `limit` est fourni (pagination).
+        Si `limit` est None, retourne `(clients, total)` pour compatibilité.
+        """
         query = session.query(ShopClient)
-        
+
         if search_term:
             search_pattern = f"%{search_term}%"
-            query = query.filter(
-                (ShopClient.nom.ilike(search_pattern)) |
-                (ShopClient.prenom.ilike(search_pattern)) |
-                (ShopClient.email.ilike(search_pattern)) |
-                (ShopClient.telephone.ilike(search_pattern))
-            )
-        
-        return query.order_by(ShopClient.nom, ShopClient.prenom).all()
+            # Construire dynamiquement les conditions pour éviter d'évaluer des ClauseElement en bool
+            conditions = [
+                ShopClient.nom.ilike(search_pattern),
+                ShopClient.prenom.ilike(search_pattern),
+                ShopClient.email.ilike(search_pattern),
+                ShopClient.telephone.ilike(search_pattern),
+            ]
+            # Ajouter les champs optionnels si présents sur le modèle
+            if hasattr(ShopClient, 'adresse'):
+                conditions.append(ShopClient.adresse.ilike(search_pattern))
+            if hasattr(ShopClient, 'ville'):
+                conditions.append(ShopClient.ville.ilike(search_pattern))
+            if hasattr(ShopClient, 'pays'):
+                conditions.append(ShopClient.pays.ilike(search_pattern))
+            if hasattr(ShopClient, 'type_carte'):
+                conditions.append(ShopClient.type_carte.ilike(search_pattern))
+            if hasattr(ShopClient, 'carte_identite'):
+                conditions.append(ShopClient.carte_identite.ilike(search_pattern))
+            if hasattr(ShopClient, 'notes'):
+                conditions.append(ShopClient.notes.ilike(search_pattern))
+
+            query = query.filter(or_(*conditions))
+
+        # Total pour pagination
+        try:
+            total = query.count()
+        except Exception:
+            total = 0
+
+        query = query.order_by(ShopClient.nom, ShopClient.prenom)
+
+        if limit is not None:
+            query = query.offset(offset).limit(limit)
+
+        clients = query.all()
+        return clients, total
     
     def create_client(self, session: Session, nom: str, prenom: str = None,
                      email: str = None, telephone: str = None, 
