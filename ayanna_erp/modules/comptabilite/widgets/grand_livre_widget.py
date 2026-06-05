@@ -1,18 +1,7 @@
-"""
-GrandLivreWidget - Onglet Grand Livre Comptable
-Affiche tous les comptes ave        # Largeurs par défaut
-        self.table.setColumnWidth(0, 120)
-        self.table.setColumnWidth(1, 200)
-        self.table.setColumnWidth(2, 120)
-        self.table.setColumnWidth(3, 120)
-        
-        # Configuration finale des colonnes maintenant qu'elles existent
-        header = self.table.horizontalHeader()
-        from PyQt6.QtWidgets import QHeaderView
-        col_count = self.model.columnCount()
-        if col_count > 0:
-            # Appliquer Stretch sur la dernière colonne
-            header.setSectionResizeMode(col_count-1, QHeaderView.ResizeMode.Stretch)aux débit, crédit, solde. Double-clic = détail écritures.
+"""GrandLivreWidget - Onglet Grand Livre Comptable
+
+Affiche la liste des comptes avec les totaux débit, crédit et le solde.
+Double-clic sur une ligne : ouvre le détail des écritures du compte.
 """
 import unicodedata
 
@@ -205,9 +194,13 @@ class GrandLivreWidget(QWidget):
             return f"{value:,.2f} {self.devise}"
         return f"{value:,.2f}"
 
+    def truncate(self, text, max_len):
+        text = str(text or "")
+        return text if len(text) <= max_len else text[:max_len-3] + "..."
+
     def export_pdf(self):
         try:
-            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.pagesizes import A4, landscape
             from reportlab.lib.units import cm
             from reportlab.platypus import Table, TableStyle, SimpleDocTemplate, Paragraph, Spacer
             from reportlab.lib import colors
@@ -224,7 +217,7 @@ class GrandLivreWidget(QWidget):
             return
 
         data = self.controller.get_grand_livre(self.entreprise_id)
-        doc = SimpleDocTemplate(path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+        doc = SimpleDocTemplate(path, pagesize=landscape(A4), rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
         elements = []
         styles = getSampleStyleSheet()
         styleTitre = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=15, spaceAfter=10)
@@ -250,13 +243,13 @@ class GrandLivreWidget(QWidget):
                 sd = f"{row.get('solde',0):,.2f}"
             table_data.append([
                 str(row.get('numero','')),
-                str(row.get('nom','')),
+                self.truncate(row.get('nom',''), 60),
                 td,
                 tc,
                 sd,
             ])
 
-        table = Table(table_data, colWidths=[3*cm, 7*cm, 2.5*cm, 2.5*cm, 2.5*cm])
+        table = Table(table_data, colWidths=[3*cm, 10*cm, 3.0*cm, 3.0*cm, 3.0*cm])
         table.setStyle(TableStyle([
             ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#8E44AD')),
             ('TEXTCOLOR', (0,0), (-1,0), colors.white),

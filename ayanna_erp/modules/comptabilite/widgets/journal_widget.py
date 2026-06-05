@@ -783,7 +783,7 @@ class JournalWidget(QWidget):
 
     def export_pdf(self):
         try:
-            from reportlab.lib.pagesizes import A4
+            from reportlab.lib.pagesizes import A4, landscape
             from reportlab.lib.units import cm
             from reportlab.platypus import Table, TableStyle, SimpleDocTemplate, Paragraph, Spacer
             from reportlab.lib import colors
@@ -799,9 +799,9 @@ class JournalWidget(QWidget):
             return
 
         styles = getSampleStyleSheet()
-        doc = SimpleDocTemplate(path, pagesize=A4,
-                                rightMargin=1.5*cm, leftMargin=1.5*cm,
-                                topMargin=2*cm, bottomMargin=2*cm)
+        doc = SimpleDocTemplate(path, pagesize=landscape(A4),
+                    rightMargin=1.5*cm, leftMargin=1.5*cm,
+                    topMargin=2*cm, bottomMargin=2*cm)
         elements = []
 
         styleTitre = ParagraphStyle('Titre', parent=styles['Heading2'], alignment=1, fontSize=15, spaceAfter=10)
@@ -822,7 +822,7 @@ class JournalWidget(QWidget):
         elements.append(Spacer(1, 0.3*cm))
 
         # En-têtes des colonnes SYSCOHADA
-        col_widths = [2.8*cm, 2.0*cm, 6.0*cm, 1.5*cm, 2.2*cm, 2.2*cm]
+        col_widths = [3.2*cm, 2.2*cm, 10.0*cm, 2.0*cm, 3.0*cm, 3.0*cm]
         data = [["Date opération", "Référence", "Libellé", "Type", "Débit", "Crédit"]]
         # Indice des lignes "en-tête journal" pour le fond coloré
         header_rows = []
@@ -844,10 +844,10 @@ class JournalWidget(QWidget):
             # Ligne résumé de l'opération
             header_rows.append(len(data))
             data.append([
-                self.truncate(date_str, 16),
-                self.truncate(reference_str, 12),
-                self.truncate(j.libelle or '', 36),
-                self.truncate(self.journal_type_label(getattr(j, 'type_operation', '')), 10),
+                self.truncate(date_str, 20),
+                self.truncate(reference_str, 20),
+                self.truncate(j.libelle or '', 60),
+                self.truncate(self.journal_type_label(getattr(j, 'type_operation', '')), 14),
                 montant_str,
                 montant_str,
             ])
@@ -883,7 +883,7 @@ class JournalWidget(QWidget):
                     data.append([
                         '',
                         f"  {e_compte}",
-                        f"  {self.truncate(e_libelle, 34)}",
+                        f"  {self.truncate(e_libelle, 60)}",
                         '',
                         d_str,
                         c_str,

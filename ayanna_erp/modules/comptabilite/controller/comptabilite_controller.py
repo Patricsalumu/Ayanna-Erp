@@ -192,7 +192,7 @@ class ComptabiliteController:
         }
     def export_detail_compte_pdf(self, data, file_path, entreprise_id=None):
         """Export PDF des détails d'un compte avec style uniforme, logo BLOB, infos école, titre et tableau aligné à gauche."""
-        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.pagesizes import A4, landscape
         from reportlab.pdfgen import canvas
         from reportlab.lib import colors
         from reportlab.lib.units import cm
@@ -211,7 +211,7 @@ class ComptabiliteController:
             format_amount = None
             get_entreprise_info = None
 
-        doc = SimpleDocTemplate(file_path, pagesize=A4, rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
+        doc = SimpleDocTemplate(file_path, pagesize=landscape(A4), rightMargin=2*cm, leftMargin=2*cm, topMargin=2*cm, bottomMargin=2*cm)
         elements = []
 
         # Récupérer les informations de l'entreprise (pour devise et affichage)
@@ -337,7 +337,8 @@ class ComptabiliteController:
         # Créer le tableau et l'ajouter aux éléments Platypus
         app_bg = colors.HexColor("#8E44AD")  # harmonisé avec le thème
         app_fg = colors.HexColor("#FFFFFF")
-        table = Table(table_data, colWidths=[3*cm, 8*cm, 3*cm, 3*cm])
+        # Widen columns for landscape layout: Date, Libellé, Débit, Crédit
+        table = Table(table_data, colWidths=[3.5*cm, 12*cm, 3.5*cm, 3.5*cm])
         table.setStyle(TableStyle([
             ("BACKGROUND", (0,0), (-1,0), app_bg),
             ("TEXTCOLOR", (0,0), (-1,0), app_fg),
@@ -1163,11 +1164,13 @@ class ComptabiliteController:
             pass
 
         # Charges (classe 6, type 'charge')
+        # For charges we want the net: debit - credit within the period
         charges_query = (
             self.session.query(
                 CompteComptable.numero.label("compte"),
                 CompteComptable.nom.label("nom"),
-                func.sum(EcritureComptable.debit).label("total")
+                func.coalesce(func.sum(EcritureComptable.debit), 0).label("sum_debit"),
+                func.coalesce(func.sum(EcritureComptable.credit), 0).label("sum_credit")
             )
             .join(ClasseComptable, CompteComptable.classe_comptable_id == ClasseComptable.id)
             .join(EcritureComptable, EcritureComptable.compte_comptable_id == CompteComptable.id)
@@ -1179,41 +1182,20 @@ class ComptabiliteController:
             .filter(JournalComptable.date_operation <= date_fin)
             .group_by(CompteComptable.numero, CompteComptable.nom)
         )
-        charges = [
-            {"compte": row.compte, "nom": row.nom, "total": float(row.total or 0)}
-            for row in charges_query
-        ]
-
-        # Ajout charge d'annulation : total des débits des comptes de classe 7 (produits)
-        annulation_query = (
-            self.session.query(
-                func.sum(EcritureComptable.debit).label("total_annulation")
-            )
-            .join(CompteComptable, EcritureComptable.compte_comptable_id == CompteComptable.id)
-            .join(ClasseComptable, CompteComptable.classe_comptable_id == ClasseComptable.id)
-            .join(JournalComptable, EcritureComptable.journal_id == JournalComptable.id)
-            .filter(ClasseComptable.enterprise_id == entreprise_id)
-            .filter(ClasseComptable.type == "produit")
-            .filter(JournalComptable.enterprise_id == entreprise_id)
-            .filter(JournalComptable.date_operation >= date_debut)
-            .filter(JournalComptable.date_operation <= date_fin)
-        )
-        annulation_result = annulation_query.first()
-        total_annulation = float(annulation_result.total_annulation or 0)
-        if total_annulation > 0:
-            charges.append({
-                "compte": "ANNUL",
-                "nom": "Annulations produits (débits classe 7)",
-                "total": total_annulation
-            })
+        charges = []
+        for row in charges_query:
+            total = float((row.sum_debit or 0) - (row.sum_credit or 0))
+            charges.append({"compte": row.compte, "nom": row.nom, "total": total})
         # ...debug supprimé...
 
         # Produits (classe 7, type 'produit')
+        # For produits we want net: credit - debit within the period
         produits_query = (
             self.session.query(
                 CompteComptable.numero.label("compte"),
                 CompteComptable.nom.label("nom"),
-                func.sum(EcritureComptable.credit).label("total")
+                func.coalesce(func.sum(EcritureComptable.credit), 0).label("sum_credit"),
+                func.coalesce(func.sum(EcritureComptable.debit), 0).label("sum_debit")
             )
             .join(ClasseComptable, CompteComptable.classe_comptable_id == ClasseComptable.id)
             .join(EcritureComptable, EcritureComptable.compte_comptable_id == CompteComptable.id)
@@ -1225,10 +1207,10 @@ class ComptabiliteController:
             .filter(JournalComptable.date_operation <= date_fin)
             .group_by(CompteComptable.numero, CompteComptable.nom)
         )
-        produits = [
-            {"compte": row.compte, "nom": row.nom, "total": float(row.total or 0)}
-            for row in produits_query
-        ]
+        produits = []
+        for row in produits_query:
+            total = float((row.sum_credit or 0) - (row.sum_debit or 0))
+            produits.append({"compte": row.compte, "nom": row.nom, "total": total})
         # ...debug supprimé...
 
         total_charges = sum(c["total"] for c in charges)
@@ -1240,7 +1222,6 @@ class ComptabiliteController:
             "charges": charges,
             "produits": produits,
             "resultat_net": resultat_net,
-            "total_annulation": total_annulation
         }
 
     def add_compte(self, data):

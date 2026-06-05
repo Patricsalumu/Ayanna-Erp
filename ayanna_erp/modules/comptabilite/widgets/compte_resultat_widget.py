@@ -149,20 +149,8 @@ class CompteResultatWidget(QWidget):
         headers = ["Compte", "Rubrique SYSCOHADA", "Montant"]
         self.model_charges.clear()
         self.model_charges.setHorizontalHeaderLabels(headers)
-        # Afficher toutes les charges, y compris la charge d'annulation même si 0
-        annulation_label = "Annulations produits (débits classe 7)"
-        annulation_found = False
-        charges_rows = []
-        for row in data["charges"]:
-            is_annulation = row.get("compte") == "ANNUL" or row.get("nom") == annulation_label
-            if row.get("total", 0) != 0 or is_annulation:
-                charges_rows.append(row)
-                if is_annulation:
-                    annulation_found = True
-        # Si la charge d'annulation n'est pas dans la liste, l'ajouter explicitement
-        if not annulation_found:
-            total_annulation = data.get("total_annulation", 0)
-            charges_rows.append({"compte": "ANNUL", "nom": annulation_label, "total": total_annulation})
+        # Ne plus ajouter de ligne "ANNUL" automatiquement — afficher uniquement les comptes avec un total non nul
+        charges_rows = [row for row in data.get("charges", []) if row.get("total", 0) != 0]
         if search_text:
             charges_rows = [row for row in charges_rows if self._matches_search(row, search_text)]
         self._populate_result_model(self.model_charges, charges_rows, "charge")
@@ -309,18 +297,8 @@ class CompteResultatWidget(QWidget):
         elements.append(Paragraph("CHARGES", styles['Heading4']))
         charges = data.get('charges', [])
         ch_data = [["Compte", "Rubrique SYSCOHADA", "Montant"]]
-        annulation_label = "Annulations produits (débits classe 7)"
-        annulation_found = False
-        charges_rows = []
-        for r in charges:
-            is_annulation = r.get('compte') == "ANNUL" or r.get('nom') == annulation_label
-            if r.get('total', 0) != 0 or is_annulation:
-                charges_rows.append(r)
-                if is_annulation:
-                    annulation_found = True
-        if not annulation_found:
-            total_annulation = data.get('total_annulation', 0)
-            charges_rows.append({"compte": "ANNUL", "nom": annulation_label, "total": total_annulation})
+        # N'afficher que les comptes dont le total est non nul
+        charges_rows = [r for r in charges if r.get('total', 0) != 0]
         for label, entries in self._group_result_rows(charges_rows, "charge"):
             ch_data.append([label, "", ""])
             for r in entries:
