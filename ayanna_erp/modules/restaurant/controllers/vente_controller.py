@@ -11,6 +11,7 @@ import logging
 from ayanna_erp.modules.restaurant.models.restaurant import (
     RestauPanier, RestauProduitPanier, RestauPayment, RestauTable
 )
+from ayanna_erp.modules.boutique.model.models import ShopClient
 
 
 class VenteController:
@@ -318,6 +319,20 @@ class VenteController:
             if not panier:
                 return None
             session.refresh(panier)
+            
+            # ✅ Récupérer le nom du client s'il existe
+            client_name = None
+            if panier.client_id:
+                try:
+                    client = session.query(ShopClient).filter_by(id=panier.client_id).first()
+                    if client:
+                        # Construire le nom: nom + prénom (si disponible)
+                        nom = getattr(client, 'nom', None) or ''
+                        prenom = getattr(client, 'prenom', None) or ''
+                        client_name = f"{prenom} {nom}".strip() if prenom else nom
+                except Exception:
+                    pass
+            
             # Calculer les infos de paiement
             total_paid = sum([p.amount for p in panier.payments]) if panier.payments else 0.0
             total_final = float(panier.total_final or 0.0)
@@ -327,6 +342,7 @@ class VenteController:
                 id=panier.id,
                 table_id=panier.table_id,
                 client_id=panier.client_id,
+                client_name=client_name,  # ✅ AJOUTÉ: Nom du client
                 serveuse_id=panier.serveuse_id,
                 user_id=panier.user_id,
                 status=panier.status,

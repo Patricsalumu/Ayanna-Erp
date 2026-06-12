@@ -4,7 +4,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QScrollArea, QStackedWidget
 )
 from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, QPoint
-from PyQt6.QtGui import QColor
+from PyQt6.QtGui import QColor, QFont, QPainter
 
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
@@ -22,6 +22,7 @@ class TableButton(QPushButton):
         self.table_obj = table_obj
         self.table_id = table_obj.id
         self.parent_view = parent_view
+        self.client_name = None  # ✅ Stocker le nom du client
 
         w = int(getattr(table_obj, "width", 80) or 80)
         h = int(getattr(table_obj, "height", 80) or 80)
@@ -56,16 +57,21 @@ class TableButton(QPushButton):
                 border: 3px solid {border_color};
                 border-radius: {radius}px;
                 color: {color_text};
-                font-size: 20px;
-                font-weight: {font_weight};
+                font-size: 14px;
+                font-weight: bold;
+                padding: 4px;
             }}
             QPushButton:hover {{
                 border-color: #1e7e34;
             }}
         """)
 
-        # Texte numéro de table centré
-        self.setText(str(self.table_obj.number))
+        # ✅ Stocker les infos pour paintEvent
+        self.display_table_number = str(self.table_obj.number)
+        self.display_client_name = self.client_name if (occupied and self.client_name) else None
+        
+        # Vider le texte du bouton pour éviter l'affichage double (le texte sera peint dans paintEvent)
+        self.setText("")
 
         # === Badge montant (ex: 6 000 F) ===
         try:
@@ -110,6 +116,44 @@ class TableButton(QPushButton):
         except Exception:
             pass
 
+    def paintEvent(self, event):
+        """Custom paint pour afficher le numéro (14px gras) et nom client (11px) avec styles distincts"""
+        # Peindre le bouton normalement d'abord
+        super().paintEvent(event)
+        
+        # Dessiner le texte personnalisé par-dessus
+        if not hasattr(self, 'display_table_number'):
+            return
+        
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        
+        rect = self.rect()
+        rect.adjust(4, 4, -4, -4)
+        
+        # Numéro de table - 14px gras
+        font_num = QFont()
+        font_num.setPointSize(14)
+        font_num.setBold(True)
+        painter.setFont(font_num)
+        painter.setPen(QColor("#222222"))
+        
+        if self.display_client_name:
+            # Si nom client, afficher le numéro plus bas
+            rect_num = QRect(rect.x(), rect.y() + 8, rect.width(), rect.height() // 2)
+            painter.drawText(rect_num, Qt.AlignmentFlag.AlignCenter, self.display_table_number)
+            
+            # Nom client - 9px normal (réduit de 11px)
+            font_client = QFont()
+            font_client.setPointSize(9)
+            painter.setFont(font_client)
+            rect_client = QRect(rect.x(), rect.y() + rect.height() // 2 + 6, rect.width(), rect.height() // 2)
+            painter.drawText(rect_client, Qt.AlignmentFlag.AlignCenter, self.display_client_name[:10])
+        else:
+            # Si pas de client, afficher le numéro au centre
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, self.display_table_number)
+        
+        painter.end()
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
@@ -131,6 +175,10 @@ class VenteView(QWidget):
 
         self.table_buttons = {}
         self.current_salle_id = None
+        
+        # ✅ Variables pour le filtrage des clients
+        self.current_table_clients = {}  # Mapping table_id -> client_name
+        self.current_filter = None       # Client actuellement filtré (None = tous)
 
         self.init_ui()
 
@@ -151,7 +199,10 @@ class VenteView(QWidget):
 
         # Page 0 : plan de salle (conserve self.plan_frame pour compatibilité)
         self.plan_page = QWidget()
-        plan_layout = QVBoxLayout(self.plan_page)
+        plan_layout = QHBoxLayout(self.plan_page)  # ✅ Changé de QVBoxLayout à QHBoxLayout
+        
+        # ✅ LAYOUT GAUCHE: Plan de salle
+        left_layout = QVBoxLayout()
         self.plan_frame = QFrame()
         self.plan_frame.setMinimumHeight(500)
         self.plan_frame.setStyleSheet("""
@@ -159,7 +210,52 @@ class VenteView(QWidget):
             border-radius: 10px;
             padding: 20px;
         """)
-        plan_layout.addWidget(self.plan_frame)
+        left_layout.addWidget(self.plan_frame)
+        plan_layout.addLayout(left_layout, 4)  # 80% de l'espace
+        
+        # ✅ LAYOUT DROITE: Filtres par client
+        self.filters_layout = QVBoxLayout()
+        filters_label = QLabel("📋 Filtrer par Client:")
+        filters_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self.filters_layout.addWidget(filters_label)
+        
+        # Bouton "Tous les clients"
+        all_btn = QPushButton("Tous les clients")
+        all_btn.setCheckable(True)
+        all_btn.setChecked(True)
+        all_btn.clicked.connect(lambda: self.filter_tables_by_client(None))
+        all_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #28a745;
+                color: white;
+                border: none;
+                padding: 8px;
+                border-radius: 5px;
+                font-weight: bold;
+                margin-bottom: 5px;
+            }
+            QPushButton:hover { background-color: #1e7e34; }
+            QPushButton:checked { background-color: #1e7e34; }
+        """)
+        self.filters_layout.addWidget(all_btn)
+        
+        # Zone scrollable pour les filtres client
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setStyleSheet("border: none;")
+        scroll_widget = QWidget()
+        self.clients_filter_layout = QVBoxLayout(scroll_widget)
+        self.clients_filter_layout.setSpacing(5)
+        self.clients_filter_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        self.filters_layout.addWidget(scroll, 1)
+        
+        # Étiquette des statistiques
+        self.stats_label = QLabel("Tables occupées: 0\nClients uniques: 0")
+        self.stats_label.setStyleSheet("font-size: 11px; color: #555; padding: 5px;")
+        self.filters_layout.addWidget(self.stats_label)
+        
+        plan_layout.addLayout(self.filters_layout, 1)  # 20% de l'espace
         self.stack.addWidget(self.plan_page)
 
         # Page 1 : catalogue (rempli dynamiquement)
@@ -232,6 +328,10 @@ class VenteView(QWidget):
         self.table_buttons.clear()
 
         tables = self.salle_ctrl.list_tables_for_salle(salle_id)
+        
+        # ✅ Récupérer les clients associés aux tables occupées
+        clients_set = set()  # Pour les clients uniques
+        table_clients = {}   # Mapping table_id -> client_name
 
         for t in tables:
             btn = TableButton(t, self)
@@ -239,6 +339,13 @@ class VenteView(QWidget):
             panier = self.vente_ctrl.get_open_panier_for_table(t.id)
 
             if panier:
+                # Récupérer le nom du client
+                client_name = panier.client_name if hasattr(panier, 'client_name') else None
+                if client_name:
+                    btn.client_name = client_name
+                    table_clients[t.id] = client_name
+                    clients_set.add(client_name)
+                
                 # If a panier exists we mark the table occupied even when it has no items/amounts.
                 try:
                     total, _ = self.vente_ctrl.get_panier_total(panier.id)
@@ -265,7 +372,86 @@ class VenteView(QWidget):
 
             btn.show()
             self.table_buttons[t.id] = btn
-        btn.setStyleSheet(btn.styleSheet() + "margin: 10px;")
+        
+        # ✅ Créer les boutons de filtres pour chaque client
+        self._create_client_filter_buttons(sorted(list(clients_set)))
+        self._update_stats(len([t for t in self.table_buttons.values() if t.client_name]), len(clients_set))
+        self.current_table_clients = table_clients  # Stocker pour le filtrage
+        self.current_filter = None  # Aucun filtre actif
+
+    # ✅ NOUVELLE MÉTHODE: Créer les boutons de filtres
+    def _create_client_filter_buttons(self, clients):
+        """Créer les boutons de filtres pour les clients uniques"""
+        # Vider les anciens boutons
+        while self.clients_filter_layout.count() > 0:
+            w = self.clients_filter_layout.takeAt(0).widget()
+            if w:
+                w.deleteLater()
+        
+        # Créer un bouton pour chaque client
+        for client_name in clients:
+            btn = QPushButton(f"👤 {client_name}")
+            btn.setCheckable(True)
+            btn.setMaximumHeight(35)
+            btn.clicked.connect(lambda checked, c=client_name: self.filter_tables_by_client(c if checked else None))
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e8f5e9;
+                    color: #333;
+                    border: 2px solid #28a745;
+                    padding: 6px;
+                    border-radius: 4px;
+                    font-weight: 500;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    background-color: #c8e6c9;
+                }
+                QPushButton:checked {
+                    background-color: #28a745;
+                    color: white;
+                    font-weight: bold;
+                }
+            """)
+            self.clients_filter_layout.addWidget(btn)
+        
+        self.clients_filter_layout.addStretch()
+
+    # ✅ NOUVELLE MÉTHODE: Filtrer les tables par client
+    def filter_tables_by_client(self, client_name):
+        """Afficher/masquer les tables selon le client sélectionné"""
+        self.current_filter = client_name
+        
+        # Mettre à jour les filtres (décocher tous les boutons sauf celui cliqué)
+        if hasattr(self, 'clients_filter_layout'):
+            for i in range(self.clients_filter_layout.count()):
+                btn = self.clients_filter_layout.itemAt(i).widget()
+                if isinstance(btn, QPushButton):
+                    if client_name is None:
+                        btn.setChecked(False)
+                    else:
+                        btn.setChecked(btn.text().endswith(client_name))
+        
+        # Afficher/masquer les tables selon le filtre
+        if client_name is None:
+            # Afficher toutes les tables
+            for table_btn in self.table_buttons.values():
+                table_btn.show()
+        else:
+            # Afficher seulement les tables du client
+            for table_id, table_btn in self.table_buttons.items():
+                if hasattr(self, 'current_table_clients') and table_id in self.current_table_clients:
+                    is_matching = self.current_table_clients[table_id] == client_name
+                    table_btn.setVisible(is_matching)
+                else:
+                    table_btn.hide()
+
+    # ✅ NOUVELLE MÉTHODE: Mettre à jour les stats
+    def _update_stats(self, occupied_count, unique_clients):
+        """Mettre à jour l'étiquette des statistiques"""
+        if hasattr(self, 'stats_label'):
+            self.stats_label.setText(f"📊 Tables occupées: {occupied_count}\n👥 Clients: {unique_clients}")
+
 
     def ensure_first_salle_loaded(self):
         """Sélectionne la première salle disponible si aucune salle n'est active."""
@@ -319,6 +505,9 @@ class VenteView(QWidget):
         if panier:
             try:
                 total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                # ✅ Récupérer le nom du client pour la table sélectionnée
+                if hasattr(panier, 'client_name'):
+                    table_button.client_name = panier.client_name
             except Exception:
                 total = None
 
