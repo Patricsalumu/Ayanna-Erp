@@ -20,19 +20,17 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "2.0.4"
+    APP_VERSION = "2.0.5"
     
     # Notes de version
     VERSION_NOTES = {
-        "2.0.4": {
-            "date": "05 Juin 2026",
-            "titre": "Optimisation de la recherche, pagination, ajout vente aux inventaire, Compte resultat revu",
+        "2.0.5": {
+            "date": "12 Juin 2026",
+            "titre": "Ajout du bon de commande et filtres des clients sur les tables",
             "changements": [
-                "AMÉLIORATION: Optimisation de la recherche client, bon d'achat et commandes sur les ventes",
-                "NOUVEAU: Possibilite de voir les ventes sur le rapport d'inventaire",
-                "NOUVEAU: Export pdf des journaux comptables et grands en paysage",
-                "AMÉLIORATION: Verouillage du bouton payer, lorsque une facture est en_cours",
-                "BUGFIX: On peut a present imprimer une facture qui a une note"
+                "NOUVEAU: Ajouts d'un module de bons de commande pour la cuisine (impression 80mm)",
+                "NOUVEAU: Filtres des clients sur les tables du restaurant",
+                "AMÉLIORATION: Ajout de la note sur les factures du module restaurant et vente"
 
             ]
         },

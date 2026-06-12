@@ -54,6 +54,86 @@ except ImportError as e:
     sys.exit(1)
 
 
+def _run_migrations_silently():
+    """Exécute automatiquement les migrations de schéma sans affichage"""
+    try:
+        from pathlib import Path
+        import sqlite3
+        
+        project_root = Path(__file__).parent.absolute()
+        
+        # Créer la table restau_bon_commandes si elle n'existe pas
+        CREATE_TABLE_SQL = """
+        CREATE TABLE IF NOT EXISTS restau_bon_commandes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entreprise_id INTEGER NOT NULL,
+            numero_bon INTEGER NOT NULL,
+            restau_panier_id INTEGER NOT NULL,
+            serveuse_id INTEGER,
+            client_id INTEGER NOT NULL,
+            user_id INTEGER,
+            produits_json TEXT NOT NULL,
+            montant_total FLOAT DEFAULT 0.0,
+            statut VARCHAR(50) DEFAULT 'valide',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(restau_panier_id) REFERENCES restau_paniers(id) ON DELETE CASCADE,
+            FOREIGN KEY(entreprise_id) REFERENCES entreprises(id) ON DELETE CASCADE,
+            FOREIGN KEY(serveuse_id) REFERENCES users(id) ON DELETE SET NULL,
+            FOREIGN KEY(client_id) REFERENCES shop_clients(id) ON DELETE CASCADE,
+            FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE SET NULL,
+            UNIQUE(entreprise_id, numero_bon)
+        );
+        
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_restau_panier_id ON restau_bon_commandes(restau_panier_id);
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_entreprise_id ON restau_bon_commandes(entreprise_id);
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_statut ON restau_bon_commandes(statut);
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_client_id ON restau_bon_commandes(client_id);
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_created_at ON restau_bon_commandes(created_at);
+        CREATE INDEX IF NOT EXISTS idx_restau_bon_commandes_entreprise_statut ON restau_bon_commandes(entreprise_id, statut);
+        """
+        
+        # Trouver toutes les bases de données SQLite
+        db_files = []
+        
+        # Chemins connus
+        known_paths = [
+            project_root / 'ayanna_erp' / 'database' / 'database.db',
+            project_root / 'ayanna_erp' / 'ayanna_erp.sqbpro',
+            project_root / 'ayanna_erp' / 'ss.sqbpro',
+        ]
+        
+        for db_path in known_paths:
+            if db_path.exists():
+                db_files.append(db_path)
+        
+        # Chercher aussi récursivement
+        for root, dirs, files in os.walk(project_root):
+            if any(ignore in root for ignore in ['node_modules', 'venv', '.git', '__pycache__', 'vendor']):
+                continue
+            for file in files:
+                if file.endswith('.db') or file.endswith('.sqbpro'):
+                    full_path = Path(root) / file
+                    if full_path not in db_files:
+                        db_files.append(full_path)
+        
+        # Appliquer les migrations à chaque BDD
+        for db_path in db_files:
+            try:
+                conn = sqlite3.connect(str(db_path))
+                cursor = conn.cursor()
+                for statement in CREATE_TABLE_SQL.split(';'):
+                    statement = statement.strip()
+                    if statement:
+                        cursor.execute(statement)
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass  # Silence les erreurs pour ne pas déranger le démarrage
+    except Exception:
+        pass  # Silence toute erreur pour un démarrage fluide
+
+
 def main():
     """Point d'entrée principal de l'application Ayanna ERP"""
     
@@ -104,6 +184,11 @@ def main():
     except Exception as _e:
         print(f"Avertissement lors de la création des tables : {_e}")
     _log('after_db_table_create')
+    
+    # ✅ Exécuter les migrations de schéma automatiquement
+    _log('before_migrations')
+    _run_migrations_silently()
+    _log('after_migrations')
 
     # ── Logique de démarrage selon l'état de la BDD ───────────────────────────
     # • BDD vide (premier démarrage) :
