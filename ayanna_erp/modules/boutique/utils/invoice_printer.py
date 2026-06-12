@@ -474,39 +474,34 @@ class InvoicePrintManager:
 
         story.append(Spacer(1, 20))
 
-        # Section Notes/Commentaires
-        story.append(Paragraph("NOTES ET COMMENTAIRES", self.styles['CustomHeading']))
-
+        # Section Notes/Commentaires - afficher SEULEMENT si présentes
         notes = invoice_data.get('notes', '')
-        if not notes or notes.strip() == '':
-            notes = "Aucune note particulière pour cette commande."
-
-        notes_style = ParagraphStyle(
-            'NotesStyle',
-            parent=self.styles['CustomNormal'],
-            fontSize=10,
-            leading=12,
-            alignment=0,
-            spaceAfter=6,
-            leftIndent=10,
-            rightIndent=10
-        )
-
-        notes_paragraph = Paragraph(notes, notes_style)
-        notes_data = [[notes_paragraph]]
-        notes_table = Table(notes_data, colWidths=[16*cm])
-        notes_table.setStyle(TableStyle([
-            ('BACKGROUND', (0, 0), (-1, -1), HexColor('#FAFBFC')),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
-            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-            ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-            ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7')),
-            ('LEFTPADDING', (0, 0), (-1, -1), 12),
-            ('RIGHTPADDING', (0, 0), (-1, -1), 12),
-            ('TOPPADDING', (0, 0), (-1, -1), 12),
-            ('BOTTOMPADDING', (0, 0), (-1, -1), 12)
-        ]))
-        story.append(notes_table)
+        if notes and notes.strip() != '':
+            # Barres horizontales
+            story.append(Paragraph("―" * 70, self.styles['CustomNormal']))
+            story.append(Spacer(1, 6))
+            
+            # Titre NOTES
+            story.append(Paragraph("<b>NOTES</b>", self.styles['CustomHeading']))
+            story.append(Spacer(1, 6))
+            
+            # Contenu de la note
+            notes_style = ParagraphStyle(
+                'NotesStyle',
+                parent=self.styles['CustomNormal'],
+                fontSize=10,
+                leading=14,
+                alignment=0,
+                spaceAfter=6,
+                leftIndent=10,
+                rightIndent=10
+            )
+            notes_paragraph = Paragraph(notes, notes_style)
+            story.append(notes_paragraph)
+            
+            story.append(Spacer(1, 6))
+            # Barres horizontales
+            story.append(Paragraph("―" * 70, self.styles['CustomNormal']))
 
         # Construire le PDF
         doc.build(story, onFirstPage=self.create_header_a4, onLaterPages=self.create_header_a4)
@@ -590,6 +585,24 @@ class InvoicePrintManager:
             if cur:
                 lines += 1
             y_sim -= max(6 * mm, lines * 3.5 * mm)
+
+        # NOTES estimation
+        notes_text = invoice_data.get('notes', '')
+        if notes_text and notes_text.strip() != '':
+            y_sim -= 10 * mm  # titre + barres + espaces
+            words = notes_text.split()
+            cur = ''
+            lines = 0
+            for w in words:
+                test = f"{cur} {w}".strip()
+                if pdfmetrics.stringWidth(test, 'Helvetica', 8) <= (TICKET_WIDTH - 2 * LEFT_MARGIN):
+                    cur = test
+                else:
+                    lines += 1
+                    cur = w
+            if cur:
+                lines += 1
+            y_sim -= max(8 * mm, lines * 3 * mm)
 
         used_height = (260 * mm) - y_sim
         TICKET_HEIGHT = max(used_height + 6 * mm, 70 * mm)
@@ -825,6 +838,32 @@ class InvoicePrintManager:
 
         c.line(LEFT_MARGIN, y, TICKET_WIDTH - LEFT_MARGIN, y)
         y -= 4 * mm
+
+        # =========================
+        # NOTES - AFFICHER SI PRÉSENTES
+        # =========================
+        notes = invoice_data.get('notes', '')
+        if notes and notes.strip() != '':
+            y -= 2 * mm
+            # Barre horizontale haute
+            c.setFont(self._font_regular, 8)
+            c.drawString(LEFT_MARGIN, y, "―" * 35)
+            y -= 3 * mm
+            
+            # Titre NOTES
+            c.setFont(self._font_bold, 9)
+            c.drawString(LEFT_MARGIN, y, "NOTES")
+            y -= 4 * mm
+            
+            # Contenu de la note (wrappé)
+            c.setFont(self._font_regular, 8)
+            y = _draw_wrapped(notes, self._font_regular, 8, TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=False, leading=3 * mm)
+            
+            y -= 2 * mm
+            # Barre horizontale basse
+            c.setFont(self._font_regular, 8)
+            c.drawString(LEFT_MARGIN, y, "―" * 35)
+            y -= 4 * mm
 
         # =========================
         # NB
