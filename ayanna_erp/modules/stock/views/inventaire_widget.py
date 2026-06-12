@@ -1806,6 +1806,31 @@ class InventoryDetailsDialog(QDialog):
                 QMessageBox.warning(self, "Aucune donnée", "Aucun produit ne correspond au filtre actuel pour l'export PDF.")
                 return
 
+            # ✅ RECALCULER LES VENTES POUR L'EXPORT (en fonction de la date associée)
+            try:
+                with self.db_manager.get_session() as session:
+                    product_ids = [p.get('product_id') for p in products if p.get('product_id')]
+                    
+                    # Déterminer la date associée
+                    assoc_date = None
+                    if hasattr(self, 'associated_date') and self.associated_date.date():
+                        assoc_date = self.associated_date.date().toPyDate()
+                    elif inventory.scheduled_date:
+                        assoc_date = inventory.scheduled_date.date() if hasattr(inventory.scheduled_date, 'date') else inventory.scheduled_date
+                    
+                    # Récupérer les ventes sur cette date
+                    sales_map = self.controller.get_sales_on_date(session, getattr(inventory, 'warehouse_id', None), product_ids, assoc_date)
+                    
+                    # Injecter les ventes dans les produits
+                    for p in products:
+                        pid = p.get('product_id')
+                        vente = float(sales_map.get(pid, 0) or 0)
+                        p['vente'] = vente
+                        p['ecart_plus_vente'] = vente - float(p.get('variance', 0) or 0)
+            except Exception as e:
+                print(f"Avertissement: Impossible de recalculer les ventes pour l'export: {e}")
+                # Les ventes resteront à 0 si le recalcul échoue
+
             export_dir = os.path.join(os.getcwd(), "inventaires")
             os.makedirs(export_dir, exist_ok=True)
             reference = str(getattr(inventory, 'reference', f"inv_{self.inventory_id}") or f"inv_{self.inventory_id}")

@@ -35,8 +35,8 @@ class BonCommandePrinter:
 
         items = ticket_data.get('items', [])
         line_count = max(8, 4 + len(items))
-        # Increase height to accommodate client name and footer
-        page_height = max(100 * mm, (line_count * 8 * mm) + 80 * mm)
+        # Hauteur réduite (compact layout)
+        page_height = max(90 * mm, (line_count * 6 * mm) + 60 * mm)
 
         c = canvas.Canvas(filename, pagesize=(ticket_width, page_height))
         
@@ -45,33 +45,32 @@ class BonCommandePrinter:
         company_name = self._get_company_name()
         c.drawCentredString(ticket_width / 2, page_height - 10 * mm, company_name)
 
-        # Title
-        c.setFont('Helvetica-Bold', 10)
-        c.drawCentredString(ticket_width / 2, page_height - 15 * mm, 'BON DE COMMANDE')
-
-        # Numero (very large and bold)
-        c.setFont('Helvetica-Bold', 16)
-        c.drawCentredString(ticket_width / 2, page_height - 24 * mm, str(ticket_data.get('numero_bon', 'N/A')))
+        # Title: "BON No [numéro]" (au lieu de "BON DE COMMANDE")
+        c.setFont('Helvetica-Bold', 12)
+        numero_bon = ticket_data.get('numero_bon', 'N/A')
+        c.drawCentredString(ticket_width / 2, page_height - 16 * mm, f'BON No {numero_bon}')
 
         # Separator
-        y = page_height - 30 * mm
+        y = page_height - 21 * mm
         c.setLineWidth(0.5)
         c.line(left_margin, y, ticket_width - left_margin, y)
         y -= 4 * mm
 
-        # Server, table, panier, date - normal font (not bold)
+        # Servi par & Table sur la même ligne
         c.setFont('Helvetica', 8)
-        c.drawString(left_margin, y, f"Servi par: {ticket_data.get('serveuse', '')}")
-        y -= 4 * mm
-        c.drawString(left_margin, y, f"Table: {ticket_data.get('table', '')}")
-        y -= 4 * mm
-        c.drawString(left_margin, y, f"Panier: {ticket_data.get('panier_id', '')}")
+        serveuse = ticket_data.get('serveuse', '')[:11]  # Tronquer à 11 caractères
+        table = ticket_data.get('table', '')
+        c.drawString(left_margin, y, f"Par: {serveuse}")
+        c.drawString(left_margin + 28 * mm, y, f"Table: {table}")
         y -= 4 * mm
 
+        # Panier & Date sur la même ligne
+        panier_id = ticket_data.get('panier_id', '')
         dt = ticket_data.get('created_at')
         if isinstance(dt, datetime):
-            dt = dt.strftime('%d/%m/%Y %H:%M')
-        c.drawString(left_margin, y, f"Date: {dt}")
+            dt = dt.strftime('%d/%m %H:%M')  # Juste jour/mois et heure
+        c.drawString(left_margin, y, f"CMD: {panier_id}")
+        c.drawString(left_margin + 28 * mm, y, f"Date: {dt}")
         y -= 6 * mm
 
         c.line(left_margin, y, ticket_width - left_margin, y)
@@ -94,7 +93,7 @@ class BonCommandePrinter:
         client_name = ticket_data.get('client_name', '')
         if client_name:
             c.setFont('Helvetica-Bold', 9)
-            c.drawCentredString(ticket_width / 2, y, f"Client: {client_name}")
+            c.drawCentredString(ticket_width / 2, y, f"{client_name}")
             y -= 5 * mm
 
         # Footer - Informatisé par Ayanna ERP
