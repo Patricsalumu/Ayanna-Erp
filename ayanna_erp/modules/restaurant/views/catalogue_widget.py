@@ -11,6 +11,8 @@ from PyQt6.QtGui import QFont, QPixmap
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.modules.restaurant.controllers.printed_invoices_controller import PrintedInvoicesController
+from ayanna_erp.modules.restaurant.controllers.bon_commande_controller import BonCommandeController
+from ayanna_erp.modules.restaurant.utils.bon_commande_printer import BonCommandePrinter
 from ayanna_erp.database.database_manager import get_database_manager, User
 from sqlalchemy import text
 from ayanna_erp.utils.formatting import format_amount, get_currency
@@ -41,6 +43,8 @@ class CatalogueWidget(QWidget):
         self.controller = CatalogueController(entreprise_id=entreprise_id, pos_id=pos_id)
         self.vente_ctrl = VenteController(entreprise_id=entreprise_id)
         self.printed_invoices_ctrl = PrintedInvoicesController(entreprise_id=entreprise_id)
+        self.bon_commande_ctrl = BonCommandeController(entreprise_id=entreprise_id)
+        self.bon_commande_printer = BonCommandePrinter(enterprise_id=entreprise_id)
 
         # mapping category_id -> assigned color for visible categories (ensures consistency with filter buttons)
         self._category_color_map = {}
@@ -229,12 +233,15 @@ class CatalogueWidget(QWidget):
         self.annuler_btn = QPushButton('Annuler')
         self.payer_btn = QPushButton('Payer')
         self.imprimer_btn = QPushButton('Imprimer')
+        self.bon_btn = QPushButton('Bon commande')
         self.annuler_btn.setStyleSheet('background-color:#e53935; color:white;')
         self.payer_btn.setStyleSheet('background-color:#28a745; color:white;')
         self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white;')
+        self.bon_btn.setStyleSheet('background-color:#1976D2; color:white;')
         actions_h.addWidget(self.annuler_btn)
         actions_h.addWidget(self.payer_btn)
         actions_h.addWidget(self.imprimer_btn)
+        actions_h.addWidget(self.bon_btn)
         right_l.addLayout(actions_h)
 
         # Connect actions
@@ -249,6 +256,10 @@ class CatalogueWidget(QWidget):
             pass
         try:
             self.imprimer_btn.clicked.connect(self._on_imprimer_clicked)
+        except Exception:
+            pass
+        try:
+            self.bon_btn.clicked.connect(self._on_bon_commande_clicked)
         except Exception:
             pass
 
@@ -1567,12 +1578,111 @@ class CatalogueWidget(QWidget):
                         subprocess.run(["xdg-open", filename], check=True)
                 except Exception as e:
                     QMessageBox.information(self, 'Ticket généré', f'Ticket enregistré: {filename}')
-                    
             except Exception as e:
                 QMessageBox.critical(self, 'Erreur', f"Impossible de générer le ticket: {e}")
-
         except Exception as e:
-            QMessageBox.critical(self, 'Erreur', f"Erreur: {e}")
+            QMessageBox.critical(self, 'Erreur', f"Erreur lors de l'impression du ticket: {e}")
+
+    def _on_bon_commande_clicked(self):
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+
+        client_id = getattr(self.panier, 'client_id', None)
+        if not client_id:
+            QMessageBox.information(self, 'Info', 'Veuillez sélectionner un client avant d\'imprimer le bon de commande.')
+            return
+
+        success, result, pending_items = self.bon_commande_ctrl.create_bon_commande(
+            panier_id=self.panier.id,
+            user_id=getattr(self.current_user, 'id', None),
+            client_id=client_id,
+            serveuse_id=getattr(self.panier, 'serveuse_id', None),
+        )
+
+        if not success:
+            if result == 'CLIENT_REQUIRED':
+                QMessageBox.information(self, 'Info', 'Veuillez sélectionner un client avant d\'imprimer le bon de commande.')
+                return
+            if result == 'NO_NEW_ITEMS':
+                QMessageBox.information(self, 'Info', 'Aucun nouveau produit à envoyer en cuisine.')
+                return
+            QMessageBox.critical(self, 'Erreur', f"Impossible de créer le bon de commande: {result}")
+            return
+
+        bon = result
+        try:
+            # Résoudre table / serveuse pour le ticket
+            table_display = str(self.table_id)
+            try:
+                db = get_database_manager()
+                session = db.get_session()
+                from ayanna_erp.modules.restaurant.models.restaurant import RestauTable
+                tbl_obj = session.query(RestauTable).filter_by(id=self.table_id).first()
+                if tbl_obj:
+                    table_display = str(getattr(tbl_obj, 'number', self.table_id))
+                session.close()
+            except Exception:
+                pass
+
+            serveuse_name = ''
+            try:
+                if getattr(self.panier, 'serveuse_id', None):
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.database.database_manager import User as DBUser
+                    u = session.query(DBUser).filter_by(id=self.panier.serveuse_id).first()
+                    if u:
+                        serveuse_name = getattr(u, 'name', None) or getattr(u, 'email', None) or ''
+                    session.close()
+            except Exception:
+                pass
+
+            # Résoudre le nom du client
+            client_name = ''
+            try:
+                if getattr(self.panier, 'client_id', None):
+                    db = get_database_manager()
+                    session = db.get_session()
+                    from ayanna_erp.modules.boutique.model.models import ShopClient
+                    c = session.query(ShopClient).filter_by(id=self.panier.client_id).first()
+                    if c:
+                        nom = getattr(c, 'nom', '') or ''
+                        prenom = getattr(c, 'prenom', '') or ''
+                        client_name = f"{nom} {prenom}".strip()
+                    session.close()
+            except Exception:
+                pass
+
+            ticket_data = {
+                'numero_bon': getattr(bon, 'numero_bon', 'N/A'),
+                'serveuse': serveuse_name,
+                'table': table_display,
+                'panier_id': getattr(bon, 'restau_panier_id', ''),
+                'created_at': getattr(bon, 'created_at', None),
+                'client_name': client_name,
+                'items': pending_items or [],
+            }
+
+            tmpf = None
+            try:
+                import tempfile
+                tmpf = tempfile.NamedTemporaryFile(prefix='bon_commande_', suffix='.pdf', delete=False)
+                tmpf.close()
+                filename = self.bon_commande_printer.print_ticket(ticket_data, tmpf.name)
+
+                system = platform.system()
+                if system == 'Windows':
+                    os.startfile(filename)
+                elif system == 'Darwin':
+                    subprocess.run(['open', filename], check=True)
+                elif system == 'Linux':
+                    subprocess.run(['xdg-open', filename], check=True)
+                QMessageBox.information(self, 'Bon de commande', f'Bon de commande généré: {filename}')
+            except Exception as e:
+                QMessageBox.critical(self, 'Erreur', f"Impossible d\'ouvrir le bon de commande: {e}")
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Erreur impression bon de commande: {e}")
 
 
     def _on_remise_changed(self):

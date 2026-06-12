@@ -63,6 +63,7 @@ class RestauPanier(Base):
     payments = relationship('RestauPayment', back_populates='panier', cascade='all, delete-orphan')
     # Historique d'impression: ne pas supprimer les traces si le panier est supprime.
     printed_invoices = relationship('RestauPrintedInvoice', back_populates='panier')
+    bon_commandes = relationship('RestauBonCommande', back_populates='panier', cascade='all, delete-orphan')
     table = relationship('RestauTable')
 
 
@@ -123,6 +124,25 @@ class RestauPrintedInvoice(Base):
     panier = relationship('RestauPanier', back_populates='printed_invoices')
 
 
+class RestauBonCommande(Base):
+    __tablename__ = 'restau_bon_commandes'
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    entreprise_id = Column(Integer, nullable=False, index=True)
+    numero_bon = Column(Integer, nullable=False)
+    restau_panier_id = Column(Integer, ForeignKey('restau_paniers.id'), nullable=False, index=True)
+    serveuse_id = Column(Integer, nullable=True)
+    client_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=True)
+    produits_json = Column(Text, nullable=False)
+    montant_total = Column(Float, default=0.0)
+    statut = Column(String(50), default='valide')
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+    panier = relationship('RestauPanier', back_populates='bon_commandes')
+
+
 # Helper to initialize tables programmatically if needed
 def initialize_restaurant_tables():
     from ayanna_erp.database.database_manager import get_database_manager
@@ -130,7 +150,7 @@ def initialize_restaurant_tables():
     tables = [
         RestauSalle.__table__, RestauTable.__table__, RestauPanier.__table__,
         RestauProduitPanier.__table__, RestauPayment.__table__, RestauExpense.__table__,
-        RestauPrintedInvoice.__table__
+        RestauPrintedInvoice.__table__, RestauBonCommande.__table__
     ]
     for t in tables:
         t.create(bind=db.engine, checkfirst=True)

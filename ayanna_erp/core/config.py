@@ -20,23 +20,20 @@ class Config:
     
     # Version de l'application
     APP_NAME = "Ayanna ERP"
-    APP_VERSION = "2.0.3"
+    APP_VERSION = "2.0.4"
     
     # Notes de version
     VERSION_NOTES = {
-        "2.0.3": {
-            "date": "25 Mai 2026",
-            "titre": "Restructuration module Salle de Fête & amélioration checkout Hôtel",
+        "2.0.4": {
+            "date": "05 Juin 2026",
+            "titre": "Optimisation de la recherche, pagination, ajout vente aux inventaire, Compte resultat revu",
             "changements": [
-                "AMÉLIORATION: Restructuration complète du module Salle de Fête (filtres, exports, calendrier)",
-                "NOUVEAU: Filtre de réservations par date de création (created_at) avec plages précises",
-                "NOUVEAU: Export PDF liste des réservations en A4 paysage avec créateur et téléphone",
-                "NOUVEAU: Calendrier mensuel PDF paysage avec badges colorés (orange à venir, gris passé)",
-                "AMÉLIORATION: Impression réservation A4 compacte sur une page (client + téléphone sur une ligne)",
-                "AMÉLIORATION: Section Notes masquée automatiquement si vide dans l'impression réservation",
-                "BUGFIX: Correction reconnaissance des anciennes bases de données (colonne modules manquante)",
-                "BUGFIX: Migration automatique de la colonne `modules` dans `core_users` au démarrage",
-                "AMÉLIORATION: Module Hôtel — heure de checkout configurable"
+                "AMÉLIORATION: Optimisation de la recherche client, bon d'achat et commandes sur les ventes",
+                "NOUVEAU: Possibilite de voir les ventes sur le rapport d'inventaire",
+                "NOUVEAU: Export pdf des journaux comptables et grands en paysage",
+                "AMÉLIORATION: Verouillage du bouton payer, lorsque une facture est en_cours",
+                "BUGFIX: On peut a present imprimer une facture qui a une note"
+
             ]
         },
         "2.0.2": {

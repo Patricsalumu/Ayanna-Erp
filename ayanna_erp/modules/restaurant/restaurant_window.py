@@ -19,6 +19,7 @@ from ayanna_erp.modules.restaurant.views.salle_view import SalleView
 from ayanna_erp.modules.restaurant.views.vente_view import VenteView
 from ayanna_erp.modules.restaurant.views.commandes_view import CommandesView
 from ayanna_erp.modules.restaurant.views.printed_invoices_view import PrintedInvoicesView
+from ayanna_erp.modules.restaurant.views.boncommande_widget import BonCommandeWidget
 from ayanna_erp.modules.salle_fete.view.entreSortie_index import EntreeSortieIndex
 from ayanna_erp.modules.boutique.view.client_index import ClientIndex
 from ayanna_erp.modules.boutique.view.commandes_index import CommandesIndexWidget
@@ -92,6 +93,8 @@ class RestaurantWindow(QMainWindow):
         # Onglet Gestion des tables
         # self.setup_tables_tab()
         
+        # Onglet Bons de Commande
+        self.setup_bon_commande_tab()
         
         # Onglet Clients
         self.setup_clients_tab()
@@ -165,6 +168,11 @@ class RestaurantWindow(QMainWindow):
         """Configuration de l'onglet Factures imprimees (super admin)."""
         printed_view = PrintedInvoicesView(entreprise_id=1, current_user=self.current_user, parent=self)
         self.tab_widget.addTab(printed_view, "🧾 Factures imprimees")
+
+    def setup_bon_commande_tab(self):
+        """Configuration de l'onglet Bons de Commande."""
+        bon_commande_view = BonCommandeWidget(entreprise_id=1, current_user=self.current_user, parent=self)
+        self.tab_widget.addTab(bon_commande_view, "🍳 Bons de Commande")
 
     def _get_current_user_role(self):
         user = self.current_user
