@@ -66,17 +66,21 @@ class CommandesIndexWidget(QWidget):
             role = getattr(self.current_user, 'role', '')
         return role in ('super_admin', 'admin')
 
-    def format_money(self, amount):
-        """Formatage uniforme des montants avec espace milliers et suffixe de devise en minuscules."""
+    def _format_display_amount(self, amount):
+        """Formatte les montants avec deux décimales et séparateurs français."""
         try:
-            from ayanna_erp.utils.formatting import format_amount as _fmt
-            symbol = (self.entreprise_controller.get_currency_symbol() or '').lower()
-            return f"{_fmt(amount)} {symbol}"
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
+    def format_money(self, amount):
+        """Formatage uniforme des montants avec deux décimales et suffixe de devise."""
+        try:
+            symbol = (self.entreprise_controller.get_currency_symbol() or '').strip()
+            return f"{self._format_display_amount(amount)} {symbol}".strip()
         except Exception:
-            try:
-                return f"{int(round(float(amount))):,}".replace(',', ' ') + f" {self.get_currency_symbol().lower()}"
-            except Exception:
-                return str(amount)
+            return str(amount)
         
     def get_currency_symbol(self):
         """Récupère le symbole de devise depuis l'entreprise"""

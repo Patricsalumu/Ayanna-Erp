@@ -1,3 +1,7 @@
+import os
+import platform
+import subprocess
+import tempfile
 from datetime import datetime
 
 from PyQt6.QtCore import Qt, QDate
@@ -8,7 +12,8 @@ from PyQt6.QtWidgets import (
 )
 
 from ayanna_erp.modules.restaurant.controllers.bon_commande_controller import BonCommandeController
-from ayanna_erp.utils.formatting import format_amount, get_currency
+from ayanna_erp.modules.restaurant.utils.bon_commande_printer import BonCommandePrinter
+from ayanna_erp.utils.formatting import get_currency
 
 
 class BonCommandeWidget(QWidget):
@@ -17,6 +22,7 @@ class BonCommandeWidget(QWidget):
         self.entreprise_id = entreprise_id
         self.current_user = current_user
         self.controller = BonCommandeController(entreprise_id=entreprise_id)
+        self.bon_commande_printer = BonCommandePrinter(enterprise_id=entreprise_id)
         self.init_ui()
         self.load_data()
 
@@ -76,6 +82,14 @@ class BonCommandeWidget(QWidget):
         self.totals_label.setStyleSheet('font-weight: 600;')
         main.addWidget(self.totals_label)
 
+    def _format_display_amount(self, amount):
+        """Format amounts with two decimals for the bon commande view."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
     def _make_item(self, text, align=None):
         item = QTableWidgetItem(str(text))
         if align is not None:
@@ -108,21 +122,72 @@ class BonCommandeWidget(QWidget):
                 self.table.setItem(row, 3, self._make_item(str(rec.table_id or '-'), Qt.AlignmentFlag.AlignCenter))
                 self.table.setItem(row, 4, self._make_item(str(rec.client_name or '-'), Qt.AlignmentFlag.AlignCenter))
                 self.table.setItem(row, 5, self._make_item(str(rec.serveuse_name or '-'), Qt.AlignmentFlag.AlignCenter))
-                self.table.setItem(row, 6, self._make_item(f"{format_amount(float(rec.montant_total or 0.0))} {get_currency(self.entreprise_id)}", Qt.AlignmentFlag.AlignRight))
+                self.table.setItem(row, 6, self._make_item(f"{self._format_display_amount(float(rec.montant_total or 0.0))} {get_currency(self.entreprise_id)}", Qt.AlignmentFlag.AlignRight))
                 self.table.setItem(row, 7, self._make_item(str(rec.statut or '-'), Qt.AlignmentFlag.AlignCenter))
                 self.table.setItem(row, 8, self._make_item(str(rec.products_text or '-')))
 
-                action_btn = QPushButton('Annuler')
-                action_btn.setEnabled(str(rec.statut or '').lower() == 'valide')
-                action_btn.clicked.connect(lambda checked, bon_id=rec.id: self._on_cancel_bon(bon_id))
-                self.table.setCellWidget(row, 9, action_btn)
+                action_container = QWidget()
+                action_layout = QHBoxLayout(action_container)
+                action_layout.setContentsMargins(0, 0, 0, 0)
+                action_layout.setSpacing(4)
+
+                reprint_btn = QPushButton('Réimpr. (copie)')
+                reprint_btn.clicked.connect(lambda checked, bon=rec: self._on_reprint_bon(bon))
+                action_layout.addWidget(reprint_btn)
+
+                cancel_btn = QPushButton('Annuler')
+                cancel_btn.setEnabled(str(rec.statut or '').lower() == 'valide')
+                cancel_btn.clicked.connect(lambda checked, bon_id=rec.id: self._on_cancel_bon(bon_id))
+                action_layout.addWidget(cancel_btn)
+
+                self.table.setCellWidget(row, 9, action_container)
 
                 total_amount += float(rec.montant_total or 0.0)
 
             self.info_label.setText(f'{len(rows)} bon(s) de commande trouvés')
-            self.totals_label.setText(f'Total bons: {len(rows)} • Montant total: {format_amount(total_amount)} {get_currency(self.entreprise_id)}')
+            self.totals_label.setText(f'Total bons: {len(rows)} • Montant total: {self._format_display_amount(total_amount)} {get_currency(self.entreprise_id)}')
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f'Impossible de charger les bons de commande: {e}')
+
+    def _on_reprint_bon(self, rec):
+        try:
+            if not getattr(rec, 'id', None):
+                QMessageBox.information(self, 'Info', 'Aucun bon sélectionné')
+                return
+
+            ticket_data = {
+                'numero_bon': getattr(rec, 'numero_bon', 'N/A'),
+                'serveuse': getattr(rec, 'serveuse_name', ''),
+                'table': str(getattr(rec, 'table_id', '') or '-'),
+                'panier_id': getattr(rec, 'restau_panier_id', ''),
+                'created_at': getattr(rec, 'created_at', None),
+                'client_name': getattr(rec, 'client_name', ''),
+                'items': getattr(rec, 'products', []) or [],
+                'copy': True,
+            }
+
+            tmpf = None
+            try:
+                tmpf = tempfile.NamedTemporaryFile(prefix='bon_commande_copy_', suffix='.pdf', delete=False)
+                tmpf.close()
+                filename = self.bon_commande_printer.print_ticket(ticket_data, tmpf.name)
+
+                if platform.system() == 'Windows':
+                    os.startfile(filename)
+                elif platform.system() == 'Darwin':
+                    subprocess.run(['open', filename], check=True)
+                else:
+                    subprocess.run(['xdg-open', filename], check=True)
+
+                QMessageBox.information(self, 'Réimpression', 'Copie du bon de commande générée')
+            finally:
+                if tmpf is not None:
+                    try:
+                        os.unlink(tmpf.name)
+                    except Exception:
+                        pass
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible de réimprimer le bon: {e}")
 
     def _on_cancel_bon(self, bon_id):
         ok = QMessageBox.question(

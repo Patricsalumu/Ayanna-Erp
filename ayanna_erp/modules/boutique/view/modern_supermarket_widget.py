@@ -88,10 +88,16 @@ class ModernSupermarketWidget(QWidget):
         """Récupère le symbole de devise depuis l'entreprise"""
         return self.enterprise_controller.get_currency_symbol()
 
+    def _format_display_amount(self, amount):
+        """Formatte les montants avec deux décimales et séparateurs français."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
     def format_money(self, amount):
-        # Format en "1 000 000"
-        formatted = f"{amount:,.0f}".replace(",", " ")
-        return f"{formatted} {self.get_currency_symbol()}"
+        return f"{self._format_display_amount(amount)} {self.get_currency_symbol()}"
     
     def init_ui(self):
         """Initialise l'interface utilisateur moderne"""
@@ -436,7 +442,6 @@ class ModernSupermarketWidget(QWidget):
         return row
 
     def add_service_to_cart_by_id(self, service_or_id, source='shop', service_name=None):
-        print(f"DEBUGG : ADD SERVICE TO CART ID : {service_or_id} - SERVICE NAME {service_name}")
         """Récupère le service en session (shop ou event), résout/crée si nécessaire et ajoute au panier.
 
         Accepts either an integer id, a string id, or an object with attributes (id/name/nom/price).
@@ -457,8 +462,6 @@ class ModernSupermarketWidget(QWidget):
                 # chercher directement  dans EventService
                 
                 ev = session.query(EventService).filter_by(id=incoming_id).first()
-
-                print(f"DEBUGG ADD SERVICE TO CART BY ID APRES REQUETE {ev}")
                 if ev is None:
                     # Debug temporaire: afficher l'id et la source reçus
                     # debug logs removed
@@ -1557,7 +1560,6 @@ class ModernSupermarketWidget(QWidget):
                     self.cart_updated.emit()
                 except Exception:
                     pass
-                print(f"🗑️ Article supprimé du panier: {removed.get('name', '')}")
         except Exception as e:
             print(f"Erreur suppression ligne panier: {e}")
 
@@ -1781,7 +1783,6 @@ class ModernSupermarketWidget(QWidget):
         self.update_cart_display()
         self.update_totals()
         self.cart_updated.emit()
-        print("🗑️ Panier vidé")
     
     def validate_and_pay(self):
         """Valide la commande et procède au paiement"""
@@ -1855,7 +1856,6 @@ class ModernSupermarketWidget(QWidget):
                 self.clear_cart()
 
                 # Feedback
-                print(message)
                 self.sale_completed.emit(panier_id)
             else:
                 QMessageBox.critical(self, "Erreur de vente", message)
@@ -1915,7 +1915,7 @@ class ModernSupermarketWidget(QWidget):
             'net_a_payer': total_amount,  # Alias pour compatibilité
             'change': change,  # Monnaie rendue
             'reste_a_payer': reste_a_payer,  # Montant restant dû
-            'notes': panier_notes if panier_notes else f"Vente effectuée par {getattr(self.current_user, 'name', 'Utilisateur')} - POS #{self.pos_id}",
+            'notes': panier_notes,
             'payments': [{
                 'payment_date': sale_data['sale_date'],
                 'amount': amount_received,
@@ -2364,10 +2364,17 @@ class PaymentDialog(QDialog):
             return self.parent().get_currency_symbol()
         except Exception:
             return "FC"  # Fallback
+
+    def _format_display_amount(self, amount):
+        """Formatte les montants avec deux décimales et séparateurs français."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
+
     def format_money(self, amount):
-        # Format en "1 000 000"
-        formatted = f"{amount:,.0f}".replace(",", " ")
-        return f"{formatted} {self.get_currency_symbol()}"
+        return f"{self._format_display_amount(amount)} {self.get_currency_symbol()}"
     
     def init_ui(self):
         """Initialise l'interface du dialogue de paiement"""

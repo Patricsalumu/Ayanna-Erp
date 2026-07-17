@@ -413,7 +413,6 @@ class VenteController:
                     evt_row = evt_result.fetchone()
                     if evt_row and evt_row[0]:
                         compte_item_id = evt_row[0]
-                    print(f'Debugg Compte produit service {compte_item_id} pour service {item['id']}')
 
                 # Vérification finale : s'il n'y a toujours pas de compte, erreur
                 if not compte_item_id:
@@ -651,7 +650,6 @@ class VenteController:
 
             warehouse_row = warehouse_result.fetchone()
             if not warehouse_row:
-                print(f"⚠️ Entrepôt POS_2 non trouvé pour le produit {product_id}")
                 return
 
             warehouse_id = warehouse_row[0]
@@ -718,8 +716,6 @@ class VenteController:
                             'created_at': datetime.now()
                             
                         })
-
-            print(f"📦 Stock mis à jour - Produit {product_id}: {current_stock} → {new_stock}")
 
         except Exception as e:
             print(f"❌ Erreur mise à jour stock: {e}")
@@ -1028,7 +1024,6 @@ class VenteController:
                 pos_warehouse = POSWarehouseHelper.get_pos_warehouse(self.pos_id)
                 if pos_warehouse:
                     warehouse_id = pos_warehouse.id
-                    print(f"📍 Entrepôt trouvé via POSWarehouseHelper: {pos_warehouse.name} (id={warehouse_id})")
             except Exception as e:
                 print(f"⚠️ Erreur POSWarehouseHelper: {e}")
             
@@ -1042,7 +1037,6 @@ class VenteController:
                 warehouse_row = warehouse_result.fetchone()
                 if warehouse_row:
                     warehouse_id = warehouse_row[0]
-                    print(f"📍 Entrepôt fallback POS_2 trouvé (id={warehouse_id})")
             
             # Si toujours pas trouvé, chercher n'importe quel entrepôt de type Point de Vente
             if not warehouse_id:
@@ -1054,7 +1048,6 @@ class VenteController:
                 warehouse_row = warehouse_result.fetchone()
                 if warehouse_row:
                     warehouse_id = warehouse_row[0]
-                    print(f"📍 Entrepôt Point de Vente trouvé: {warehouse_row[1]} (id={warehouse_id})")
 
             if not warehouse_id:
                 print(f"⚠️ Aucun entrepôt trouvé pour l'annulation du produit {product_id}")
@@ -1121,8 +1114,5 @@ class VenteController:
                             'created_at': datetime.now()
 
                         })
-
-            print(f"📦 Stock remis - Produit {product_id}: {current_stock} → {new_stock}")
-
         except Exception as e:
             print(f"❌ Erreur remise stock annulation: {e}")

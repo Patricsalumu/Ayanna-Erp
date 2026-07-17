@@ -48,7 +48,10 @@ class BonCommandePrinter:
         # Title: "BON No [numéro]" (au lieu de "BON DE COMMANDE")
         c.setFont('Helvetica-Bold', 12)
         numero_bon = ticket_data.get('numero_bon', 'N/A')
-        c.drawCentredString(ticket_width / 2, page_height - 16 * mm, f'BON No {numero_bon}')
+        title_text = f'BON No {numero_bon}'
+        if ticket_data.get('copy'):
+            title_text = f'{title_text} - COPIE'
+        c.drawCentredString(ticket_width / 2, page_height - 16 * mm, title_text)
 
         # Separator
         y = page_height - 21 * mm
@@ -87,18 +90,20 @@ class BonCommandePrinter:
 
         y -= 3 * mm
         c.line(left_margin, y, ticket_width - left_margin, y)
-        y -= 5 * mm
+        y -= 3 * mm
 
         # Client name - bold at bottom
         client_name = ticket_data.get('client_name', '')
         if client_name:
             c.setFont('Helvetica-Bold', 9)
+            y -= 1 * mm
             c.drawCentredString(ticket_width / 2, y, f"{client_name}")
-            y -= 5 * mm
+
 
         # Footer - Informatisé par Ayanna ERP
         c.setFont('Helvetica', 7)
-        c.drawCentredString(ticket_width / 2, 5 * mm, 'Informatisé par Ayanna ERP')
+        y -= 3 * mm
+        c.drawCentredString(ticket_width / 2, y, 'Informatisé par Ayanna ERP')
 
         c.save()
         return filename

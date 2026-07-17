@@ -10,7 +10,7 @@ from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleCont
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
 from ayanna_erp.modules.restaurant.views.catalogue_widget import CatalogueWidget
 from ayanna_erp.database.database_manager import get_database_manager, Entreprise
-from ayanna_erp.utils.formatting import format_amount, get_currency
+from ayanna_erp.utils.formatting import get_currency
 
 
 # ----------------------------------------------------------------------
@@ -84,7 +84,7 @@ class TableButton(QPushButton):
                         montant_text = ''
                     elif isinstance(occupied, (int, float)):
                         currency = get_currency(getattr(self.parent_view, 'entreprise_id', None))
-                        montant_text = f"{format_amount(occupied)} {currency}"
+                        montant_text = f"{self.parent_view._format_display_amount(occupied)} {currency}"
                     else:
                         # assume string already formatted
                         montant_text = str(occupied)
@@ -181,6 +181,14 @@ class VenteView(QWidget):
         self.current_filter = None       # Client actuellement filtré (None = tous)
 
         self.init_ui()
+
+    def _format_display_amount(self, amount):
+        """Formatte les montants avec deux décimales et séparateurs français."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
     def init_ui(self):
         layout = QVBoxLayout(self)

@@ -15,7 +15,7 @@ from ayanna_erp.modules.restaurant.controllers.bon_commande_controller import Bo
 from ayanna_erp.modules.restaurant.utils.bon_commande_printer import BonCommandePrinter
 from ayanna_erp.database.database_manager import get_database_manager, User
 from sqlalchemy import text
-from ayanna_erp.utils.formatting import format_amount, get_currency
+from ayanna_erp.utils.formatting import get_currency
 import os
 import platform
 import subprocess
@@ -64,6 +64,14 @@ class CatalogueWidget(QWidget):
         self.init_ui()
         self.ensure_panier()
         self.load_products()
+
+    def _format_display_amount(self, amount):
+        """Format amounts for the restaurant catalogue with two decimals."""
+        try:
+            value = float(amount)
+        except (TypeError, ValueError):
+            return str(amount)
+        return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
     def init_ui(self):
         main = QVBoxLayout(self)
@@ -559,7 +567,7 @@ class CatalogueWidget(QWidget):
         except Exception:
             avail_text = ''
 
-        card.setToolTip(f"{name}\nPrix: {format_amount(price)} {get_currency(self.entreprise_id)}{avail_text}")
+        card.setToolTip(f"{name}\nPrix: {self._format_display_amount(price)} {get_currency(self.entreprise_id)}{avail_text}")
 
         # ---- bande de couleur de la catégorie (en bas de la carte) ----
         try:
@@ -785,9 +793,9 @@ class CatalogueWidget(QWidget):
             qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
             self.cart_table.setItem(i, 2, qty_item)
             # price per unit
-            price_item = QTableWidgetItem(format_amount(getattr(it, 'price', 0.0)))
+            price_item = QTableWidgetItem(self._format_display_amount(getattr(it, 'price', 0.0)))
             self.cart_table.setItem(i, 3, price_item)
-            total_item = QTableWidgetItem(format_amount(getattr(it, 'total', 0.0)))
+            total_item = QTableWidgetItem(self._format_display_amount(getattr(it, 'total', 0.0)))
             self.cart_table.setItem(i, 4, total_item)
 
         # restore selection if possible
@@ -1149,9 +1157,9 @@ class CatalogueWidget(QWidget):
             form.addRow(QLabel('Salle:'), QLabel(salle_name or '---'))
             form.addRow(QLabel('Client:'), QLabel(client_name))
             form.addRow(QLabel('Serveuse:'), QLabel(serveuse_name))
-            form.addRow(QLabel('Sous-total:'), QLabel(f"{format_amount(subtotal)} {get_currency(self.entreprise_id)}"))
-            form.addRow(QLabel('Remise:'), QLabel(f"{format_amount(remise)} {get_currency(self.entreprise_id)}"))
-            form.addRow(QLabel('<b>Total à payer:</b>'), QLabel(f"<b>{format_amount(total_final)} {get_currency(self.entreprise_id)}</b>"))
+            form.addRow(QLabel('Sous-total:'), QLabel(f"{self._format_display_amount(subtotal)} {get_currency(self.entreprise_id)}"))
+            form.addRow(QLabel('Remise:'), QLabel(f"{self._format_display_amount(remise)} {get_currency(self.entreprise_id)}"))
+            form.addRow(QLabel('<b>Total à payer:</b>'), QLabel(f"<b>{self._format_display_amount(total_final)} {get_currency(self.entreprise_id)}</b>"))
             dlg_l.addWidget(summary_frame)
 
             # Amount received input (créé en premier pour être accessible par les boutons de paiement)
@@ -1274,10 +1282,10 @@ class CatalogueWidget(QWidget):
                     v = float(amt_input.value()) if val is None else float(val)
                     if v >= total_final:
                         monnaie = v - total_final
-                        change_lbl.setText(f"Monnaie: {format_amount(monnaie)} {get_currency(self.entreprise_id)}")
+                        change_lbl.setText(f"Monnaie: {self._format_display_amount(monnaie)} {get_currency(self.entreprise_id)}")
                     else:
                         reste = total_final - v
-                        change_lbl.setText(f"Reste: {format_amount(reste)} {get_currency(self.entreprise_id)}")
+                        change_lbl.setText(f"Reste: {self._format_display_amount(reste)} {get_currency(self.entreprise_id)}")
                 except Exception:
                     change_lbl.setText('')
 
@@ -1298,19 +1306,19 @@ class CatalogueWidget(QWidget):
                         # Crédit: montant reçu = 0, enregistrer le total comme crédit
                         pay_amount = 0.0
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
-                        QMessageBox.information(dlg, 'Succès', f'Paiement à crédit enregistré. Reste dû: {format_amount(total_final)} {get_currency(self.entreprise_id)}')
+                        QMessageBox.information(dlg, 'Succès', f'Paiement à crédit enregistré. Reste dû: {self._format_display_amount(total_final)} {get_currency(self.entreprise_id)}')
                     elif amt >= total_final:
                         # record payment for the total due and compute monnaie to give back
                         pay_amount = float(total_final)
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
                         monnaie = amt - total_final
-                        QMessageBox.information(dlg, 'Succès', f'Paiement de {format_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Monnaie: {format_amount(monnaie)} {get_currency(self.entreprise_id)}')
+                        QMessageBox.information(dlg, 'Succès', f'Paiement de {self._format_display_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Monnaie: {self._format_display_amount(monnaie)} {get_currency(self.entreprise_id)}')
                     else:
                         # partial payment
                         pay_amount = float(amt)
                         self.vente_ctrl.add_payment(self.panier.id, pay_amount, method, user_id=getattr(self.current_user, 'id', None))
                         reste = total_final - pay_amount
-                        QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {format_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Reste: {format_amount(reste)} {get_currency(self.entreprise_id)}')
+                        QMessageBox.information(dlg, 'Succès', f'Paiement partiel de {self._format_display_amount(pay_amount)} {get_currency(self.entreprise_id)} enregistré ({method}). Reste: {self._format_display_amount(reste)} {get_currency(self.entreprise_id)}')
                     # --- Nouvel ajout: fermer le panier même en cas de paiement partiel ---
                     # payment status is handled by VenteController.add_payment (payment_method)
                     # after payment, if panier has no products -> delete it and return to plan view
@@ -1736,7 +1744,7 @@ class CatalogueWidget(QWidget):
             subtotal = float(getattr(p, 'subtotal', 0.0) or 0.0)
             remise = float(getattr(p, 'remise_amount', 0.0) or 0.0)
             total_final = float(getattr(p, 'total_final', subtotal - remise))
-            self.total_label.setText(f"Total: {format_amount(total_final)} {get_currency(self.entreprise_id)}")
+            self.total_label.setText(f"Total: {self._format_display_amount(total_final)} {get_currency(self.entreprise_id)}")
         except Exception:
             pass
 
