@@ -16,6 +16,7 @@ class ProductBatch(Base):
     quantity = Column(Numeric(15,3), default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by = Column(Integer)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     product = relationship('CoreProduct')
     warehouse = relationship('StockWarehouse')
@@ -32,6 +33,7 @@ class FabricationRule(Base):
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by = Column(Integer)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     product = relationship('CoreProduct')
     items = relationship('FabricationRuleItem', back_populates='rule', cascade='all, delete-orphan')
@@ -46,6 +48,7 @@ class FabricationRuleItem(Base):
     quantity_required = Column(Numeric(15,3), default=0.0)
     wastage_percent = Column(Numeric(5,2), default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     rule = relationship('FabricationRule', back_populates='items')
     raw_material = relationship('CoreProduct')
@@ -75,6 +78,7 @@ class Production(Base):
     validated_by = Column(Integer)
     validated_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     rule = relationship('FabricationRule')
     product = relationship('CoreProduct')
@@ -93,6 +97,7 @@ class ProductionItem(Base):
     consumed_quantity = Column(Numeric(15,3), default=0.0)
     variance_quantity = Column(Numeric(15,3), default=0.0)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     production = relationship('Production', back_populates='items')
     raw_material = relationship('CoreProduct')
@@ -108,6 +113,7 @@ class ProductionLoss(Base):
     loss_type = Column(String(50))  # normal_loss, abnormal_loss, damaged, wastage, expired
     reason = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     production = relationship('Production', back_populates='losses')
     product = relationship('CoreProduct')

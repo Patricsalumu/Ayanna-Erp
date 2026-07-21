@@ -34,6 +34,7 @@ class EventClient(Base):
     notes = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservations = relationship("EventReservation", back_populates="client")
@@ -54,6 +55,7 @@ class EventService(Base):
     compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservation_services = relationship("EventReservationService", back_populates="service")
@@ -78,6 +80,7 @@ class EventProduct(Base):
     compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservation_products = relationship("EventReservationProduct", back_populates="product")
@@ -117,6 +120,7 @@ class EventReservation(Base):
     # Métadonnées
     created_by = Column(Integer)  # Utilisateur qui a créé
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     closed_at = Column(DateTime)  # Date de clôture
     
     # Relations
@@ -156,6 +160,8 @@ class EventReservationService(Base):
     unit_price = Column(Float, default=0.0)  # Prix unitaire au moment de la réservation
     line_total = Column(Float, default=0.0)  # Total de la ligne
     line_cost = Column(Float, default=0.0)  # Coût de la ligne
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservation = relationship("EventReservation", back_populates="services")
@@ -174,6 +180,8 @@ class EventReservationProduct(Base):
     unit_price = Column(Float, default=0.0)  # Prix unitaire au moment de la réservation
     line_total = Column(Float, default=0.0)  # Total de la ligne
     line_cost = Column(Float, default=0.0)  # Coût de la ligne
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservation = relationship("EventReservation", back_populates="products")
@@ -194,6 +202,8 @@ class EventPayment(Base):
     user_id = Column(Integer, nullable=False)  # ID de l'utilisateur qui a reçu le paiement
     notes = Column(Text)
     journal_id = Column(Integer)  # Journal comptable
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     reservation = relationship("EventReservation", back_populates="payments")
@@ -213,6 +223,8 @@ class EventStockMovement(Base):
     reason = Column(String(200))  # Raison du mouvement
     movement_date = Column(DateTime, default=func.current_timestamp())
     created_by = Column(Integer)  # Utilisateur qui a créé le mouvement
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     product = relationship("EventProduct", back_populates="stock_movements")
@@ -236,6 +248,7 @@ class EventExpense(Base):
     account_id = Column(Integer)  # Compte comptable
     created_by = Column(Integer)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 

@@ -112,6 +112,7 @@ class StockMouvement(Base):
     
     # Métadonnées
     created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     updated_by = Column(Integer)
     
     def __repr__(self):

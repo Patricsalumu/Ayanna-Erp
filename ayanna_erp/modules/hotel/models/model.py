@@ -2,7 +2,7 @@
 ORM models for the Hotel module – Ayanna ERP
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, func
 from sqlalchemy.orm import relationship
 from ayanna_erp.database.base import Base
 
@@ -17,6 +17,7 @@ class HotelCategory(Base):
     price_per_night = Column(Float, nullable=False, default=0.0)
     created_at   = Column(DateTime, default=datetime.now)
     deleted      = Column(Integer, default=0)   # 0 = actif, 1 = supprimé
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     rooms        = relationship('HotelRoom',        back_populates='category')
     reservations = relationship('HotelReservation', back_populates='category')
@@ -34,6 +35,7 @@ class HotelRoom(Base):
     status             = Column(String(50), default='disponible')
     created_at         = Column(DateTime, default=datetime.now)
     deleted            = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     category     = relationship('HotelCategory',    back_populates='rooms')
     reservations = relationship('HotelReservation', back_populates='room')
@@ -64,6 +66,7 @@ class HotelReservation(Base):
     notes               = Column(Text, nullable=True)
     created_at          = Column(DateTime, default=datetime.now)
     user_id             = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     client   = relationship('ShopClient')
     category = relationship('HotelCategory', back_populates='reservations')
@@ -85,5 +88,6 @@ class HotelPayment(Base):
     reference      = Column(String(200), nullable=True)   # référence transaction mobile/banque
     created_at     = Column(DateTime, default=datetime.now)
     user_id        = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     reservation = relationship('HotelReservation', back_populates='payments')

@@ -21,6 +21,8 @@ class Licence(Base):
     signature = Column(String(255), nullable=False)
     active = Column(Boolean, default=True)
     entreprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     def is_valid(self):
         from datetime import datetime

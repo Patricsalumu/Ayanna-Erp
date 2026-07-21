@@ -102,6 +102,10 @@ class AchatCommandeLigne(Base):
     bon_commande_id = Column(Integer, ForeignKey('achat_commandes.id'), nullable=False)
     produit_id = Column(Integer, ForeignKey('core_products.id'), nullable=False)
     
+    # Dates
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    
     # Détails ligne
     quantite = Column(DECIMAL(12, 2), nullable=False)
     prix_unitaire = Column(DECIMAL(12, 2), nullable=False)
@@ -136,6 +140,10 @@ class AchatDepense(Base):
     description = Column(String(100), nullable=True)
     date_paiement = Column(DateTime, default=func.now())
     reference = Column(String(100), nullable=True)
+    
+    # Dates
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     commande = relationship("AchatCommande", back_populates="depenses")

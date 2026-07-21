@@ -82,7 +82,7 @@ class _SyncWorker(QThread):
                 })
             else:  # 'sync'
                 # S'assurer que le token est valide avant de synchroniser
-                self._sm.login()
+                self._sm.login(self._email, self._password)
                 result = self._sm.synchronize()
                 p = result['push']
                 r = result['pull']
@@ -888,7 +888,13 @@ class SyncConfigDialog(QDialog):
         self._set_busy(True)
 
         sm = _get_sync_manager()
-        self._worker = _SyncWorker(sm, mode='sync', parent=self)
+        self._worker = _SyncWorker(
+            sm,
+            mode='sync',
+            email=self.email_input.text().strip() or None,
+            password=self.pwd_input.text() or None,
+            parent=self,
+        )
         self._worker.finished.connect(self._on_sync_done)
         self._worker.start()
 

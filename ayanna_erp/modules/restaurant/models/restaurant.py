@@ -17,6 +17,7 @@ class RestauSalle(Base):
     entreprise_id = Column(Integer, nullable=False)
     name = Column(String(200), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     tables = relationship('RestauTable', back_populates='salle', cascade='all, delete-orphan')
 
@@ -33,6 +34,7 @@ class RestauTable(Base):
     height = Column(Integer, default=80)
     shape = Column(String(50), default='rectangle')
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     salle = relationship('RestauSalle', back_populates='tables')
 
@@ -76,6 +78,8 @@ class RestauProduitPanier(Base):
     quantity = Column(Integer, default=1)
     price = Column(Float, default=0.0)
     total = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     panier = relationship('RestauPanier', back_populates='produits')
 
@@ -89,6 +93,7 @@ class RestauPayment(Base):
     payment_method = Column(String(100))
     user_id = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     panier = relationship('RestauPanier', back_populates='payments')
 
@@ -102,6 +107,7 @@ class RestauExpense(Base):
     amount = Column(Float, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     user_id = Column(Integer, nullable=True)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class RestauPrintedInvoice(Base):
@@ -120,6 +126,7 @@ class RestauPrintedInvoice(Base):
     printed_by_user_id = Column(Integer, nullable=True, index=True)  # Utilisateur qui a imprimé
     printed_at = Column(DateTime, default=datetime.utcnow, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     panier = relationship('RestauPanier', back_populates='printed_invoices')
 

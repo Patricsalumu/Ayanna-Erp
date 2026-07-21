@@ -19,12 +19,13 @@ centrale / Afrique de l'Ouest).
 
 import json
 import os
+import uuid
 from pathlib import Path
 import requests
 from datetime import datetime, timezone, timedelta
 from contextlib import contextmanager
 
-from sqlalchemy import Column, Integer, String, Text, text
+from sqlalchemy import Column, DateTime, Integer, String, Text, func, text, UniqueConstraint
 from sqlalchemy.orm import sessionmaker
 
 from ayanna_erp.database.base import Base
@@ -91,6 +92,101 @@ _DATETIME_FIELDS = frozenset({
     'date_operation', 'date_mouvement', 'date_debut', 'date_fin',
     'check_in', 'check_out',
 })
+
+_TABLE_NAME_MAP = {
+    'shop_paniers_products': 'shop_panier_products',
+    'shop_paniers_services': 'shop_panier_services',
+    'stock_inventaire_item': 'stock_inventaire_items',
+    'licence': 'licences',
+}
+
+_FOREIGN_KEY_TARGET_TABLES = {
+    'enterprise_id': 'core_enterprises',
+    'entreprise_id': 'core_enterprises',
+    'user_id': 'core_users',
+    'utilisateur_id': 'core_users',
+    'pos_id': 'core_pos_points',
+    'client_id': 'shop_clients',
+    'fournisseur_id': 'stock_fournisseurs',
+    'entrepot_id': 'stock_warehouses',
+    'warehouse_id': 'stock_warehouses',
+    'product_id': 'stock_products',
+    'service_id': 'shop_services',
+    'category_id': 'stock_categories',
+    'room_id': 'restaurant_rooms',
+    'salle_id': 'restaurant_salles',
+    'table_id': 'restaurant_tables',
+    'panier_id': 'shop_paniers',
+    'reservation_id': 'restaurant_reservations',
+    'inventaire_id': 'stock_inventaires',
+    'livraison_id': 'stock_livraisons',
+    'compte_comptable_id': 'compta_comptes',
+    'payment_mode_id': 'shop_payment_modes',
+    'journal_id': 'compta_journaux',
+    'compte_id': 'compta_comptes',
+    'compte_produit_id': 'compta_comptes',
+    'compte_charge_id': 'compta_comptes',
+    'parent_id': 'core_entities',
+    'module_id': 'modules',
+    'classe_comptable_id': 'compta_classes',
+    'compte_caisse_id': 'compta_comptes',
+    'compte_banque_id': 'compta_comptes',
+    'compte_stock_id': 'compta_comptes',
+    'compte_variation_stock_id': 'compta_comptes',
+    'compte_variation_id': 'compta_comptes',
+    'compte_client_id': 'compta_comptes',
+    'compte_fournisseur_id': 'compta_comptes',
+    'compte_fournisseur_debiteur_id': 'compta_comptes',
+    'compte_vente_id': 'compta_comptes',
+    'compte_achat_id': 'compta_comptes',
+    'compte_tva_id': 'compta_comptes',
+    'compte_remise_id': 'compta_comptes',
+}
+
+_SYNC_FIELD_MAP = {
+    'shop_clients': {
+        'nom': 'nom', 'prenom': 'prenom', 'telephone': 'telephone', 'email': 'email',
+        'adresse': 'adresse', 'ville': 'ville', 'code_postal': 'code_postal',
+        'date_naissance': 'date_naissance', 'type_client': 'type_client',
+        'credit_limit': 'credit_limit', 'balance': 'balance', 'notes': 'note',
+        'pays': 'pays', 'carte_identite': 'carte_identite', 'type_carte': 'type_carte',
+        'is_active': 'is_active', 'created_at': 'created_at', 'updated_at': 'updated_at',
+    },
+    'shop_services': {
+        'name': 'nom', 'description': 'description', 'cost': 'prix', 'price': 'prix',
+        'is_active': 'actif', 'created_at': 'created_at', 'updated_at': 'updated_at',
+    },
+    'shop_paniers': {
+        'numero_commande': 'reference', 'status': 'statut', 'subtotal': 'montant_total',
+        'remise_amount': 'remise', 'total_final': 'montant_total', 'notes': 'note',
+        'created_at': 'created_at', 'updated_at': 'updated_at', 'validated_at': 'updated_at',
+    },
+    'shop_panier_products': {
+        'quantity': 'quantite', 'price_unit': 'prix_unitaire', 'total_price': 'total',
+    },
+    'shop_panier_services': {
+        'quantity': 'quantite', 'price_unit': 'prix_unitaire', 'total_price': 'total',
+    },
+    'shop_payments': {
+        'amount': 'montant', 'payment_date': 'date_paiement', 'reference': 'reference',
+        'notes': 'note', 'created_at': 'created_at', 'updated_at': 'updated_at',
+    },
+    'shop_expenses': {
+        'description': 'libelle', 'amount': 'montant', 'expense_date': 'date_depense',
+        'notes': 'note', 'created_at': 'created_at', 'updated_at': 'updated_at',
+    },
+    'stock_warehouses': {
+        'entreprise_id': 'entreprise_id', 'code': 'code', 'name': 'name', 'type': 'type',
+        'description': 'description', 'address': 'address', 'contact_person': 'contact_person',
+        'contact_phone': 'contact_phone', 'contact_email': 'contact_email', 'is_default': 'is_default',
+        'is_active': 'is_active', 'capacity_limit': 'capacity_limit', 'created_at': 'created_at',
+    },
+    'stock_produits_entrepot': {
+        'quantity': 'quantity', 'reserved_quantity': 'reserved_quantity', 'unit_cost': 'unit_cost',
+        'total_cost': 'total_cost', 'min_stock_level': 'min_stock_level', 'last_movement_date': 'last_movement_date',
+        'location': 'location', 'created_at': 'created_at', 'updated_at': 'updated_at',
+    },
+}
 
 
 def _utc_now() -> datetime:
@@ -164,6 +260,8 @@ class CoreSync(Base):
     created_at  = Column(Text,        nullable=False)   # UTC+1 ISO 8601
     created_by  = Column(Text,        nullable=True)    # Nom utilisateur
     synced_at   = Column(Text,        nullable=True)    # Date sync UTC+1
+    updated_at  = Column(Text,        nullable=True)
+    updated_at  = Column(Text,        nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +281,10 @@ class CoreSyncSettings(Base):
     last_sync          = Column(Text, nullable=True)   # UTC+1 ISO 8601
     last_sync_status   = Column(String(20), nullable=True)
     last_sync_message  = Column(Text, nullable=True)
+    updated_at         = Column(Text, nullable=True)
+    updated_at         = Column(Text, nullable=True)
+    updated_at         = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +314,8 @@ class CoreConfigSync(Base):
     last_sync_by     = Column(Text, nullable=True)   # nom/email utilisateur
     last_sync_status = Column(String(20), nullable=True)   # success|partial|error
     last_sync_message= Column(Text, nullable=True)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +343,25 @@ class CoreSyncHistory(Base):
     triggered_by    = Column(Text,        nullable=True)    # utilisateur
     error_message   = Column(Text,        nullable=True)
     created_at      = Column(Text,        nullable=False)   # UTC+1 ISO 8601
+    updated_at      = Column(Text,        nullable=True)
+    updated_at      = Column(Text,        nullable=True)
+
+
+class CoreSyncIdMap(Base):
+    """Mappe les identifiants locaux et serveurs pour la synchronisation."""
+    __tablename__ = 'core_sync_id_map'
+    __table_args__ = (
+        UniqueConstraint('table_name', 'local_id', name='uq_core_sync_id_map_local'),
+        UniqueConstraint('table_name', 'server_id', name='uq_core_sync_id_map_server'),
+    )
+
+    id         = Column(Integer, primary_key=True, autoincrement=True)
+    table_name = Column(String(100), nullable=False)
+    local_id   = Column(Text, nullable=False)
+    server_id  = Column(Text, nullable=False)
+    created_at = Column(Text, nullable=False)
+    updated_at = Column(Text, nullable=True)
+    updated_at = Column(Text, nullable=True)
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +395,7 @@ class SyncManager:
                 CoreSyncSettings.__table__,
                 CoreConfigSync.__table__,
                 CoreSyncHistory.__table__,
+                CoreSyncIdMap.__table__,
             ],
             checkfirst=True,
         )
@@ -433,6 +557,172 @@ class SyncManager:
                     cfg.last_sync_by = synced_by
                 if token:
                     cfg.api_token = _encrypt(token)
+
+    # -----------------------------------------------------------------------
+    # Helpers de compatibilite payload
+    # -----------------------------------------------------------------------
+
+    def _server_table_name(self, table_name: str) -> str:
+        return _TABLE_NAME_MAP.get(table_name, table_name)
+
+    def _local_table_name(self, table_name: str) -> str:
+        reverse_map = {v: k for k, v in _TABLE_NAME_MAP.items()}
+        return reverse_map.get(table_name, table_name)
+
+    def _normalize_payload_for_server(self, table_name: str, payload: dict) -> dict:
+        """Convertit un payload local vers le format attendu par l'API serveur."""
+        if not isinstance(payload, dict):
+            return payload or {}
+
+        mapped = {}
+        field_map = _SYNC_FIELD_MAP.get(table_name, {})
+        for key, value in payload.items():
+            if key in {'_sync_id', '__client_record_id', '_client_record_id'}:
+                continue
+            if key == 'id':
+                mapped['id'] = str(value)
+                continue
+            target = field_map.get(key, key)
+            if target in {None, '__skip__'}:
+                continue
+            mapped[target] = value
+
+        # Remplacement des clés étrangères locales par leurs UUID serveur si disponible.
+        for fk_key in _FOREIGN_KEY_TARGET_TABLES:
+            if fk_key in mapped and mapped[fk_key] is not None:
+                target_table = _FOREIGN_KEY_TARGET_TABLES[fk_key]
+                mapped_server_id = self._get_id_mapping(target_table, local_id=mapped[fk_key])
+                if mapped_server_id is not None:
+                    mapped[fk_key] = str(mapped_server_id)
+
+        # Ne pas envoyer les champs internes inutiles au serveur.
+        mapped.pop('_sync_id', None)
+        mapped.pop('__client_record_id', None)
+        mapped.pop('_client_record_id', None)
+        return mapped
+
+    def _normalize_payload_for_local(self, table_name: str, payload: dict) -> dict:
+        """Convertit un payload serveur vers le format attendu par SQLite local."""
+        if not isinstance(payload, dict):
+            return payload or {}
+
+        field_map = _SYNC_FIELD_MAP.get(table_name, {})
+        reverse_map = {v: k for k, v in field_map.items()}
+        mapped = {}
+        for key, value in payload.items():
+            if key in {'_sync_id', '__client_record_id', '_client_record_id'}:
+                continue
+            target = reverse_map.get(key, key)
+            mapped[target] = value
+        # Convert server-side foreign key UUIDs into local IDs when we already know the mapping.
+        for fk_key, target_table in _FOREIGN_KEY_TARGET_TABLES.items():
+            if fk_key in mapped and mapped[fk_key] is not None:
+                fk_val = mapped[fk_key]
+                if isinstance(fk_val, str) and self._is_uuid_string(fk_val):
+                    local_fk = self._get_id_mapping(target_table, server_id=fk_val)
+                    if local_fk is not None:
+                        mapped[fk_key] = local_fk
+
+        return mapped
+
+    def _is_uuid_string(self, value) -> bool:
+        return isinstance(value, str) and len(value) == 36 and value.count('-') == 4
+
+    def _get_id_mapping(self, table_name: str, local_id: str | int | None = None, server_id: str | None = None):
+        """Recupere ou cree une correspondance local <-> server pour un enregistrement."""
+        with self._session_scope() as session:
+            if server_id is not None:
+                row = (
+                    session.query(CoreSyncIdMap)
+                    .filter_by(table_name=table_name, server_id=str(server_id))
+                    .first()
+                )
+                if row:
+                    return row.local_id
+            if local_id is not None:
+                row = (
+                    session.query(CoreSyncIdMap)
+                    .filter_by(table_name=table_name, local_id=str(local_id))
+                    .first()
+                )
+                if row:
+                    return row.server_id
+        return None
+
+    def _remember_id_mapping(self, table_name: str, local_id, server_id):
+        """Sauvegarde une correspondance d'identifiants pour les prochains syncs."""
+        if not table_name or local_id is None or server_id is None:
+            return
+        with self._session_scope() as session:
+            row = (
+                session.query(CoreSyncIdMap)
+                .filter_by(table_name=table_name, local_id=str(local_id))
+                .first()
+            )
+            if row is None:
+                row = CoreSyncIdMap(
+                    table_name=table_name,
+                    local_id=str(local_id),
+                    server_id=str(server_id),
+                    created_at=_local_now_iso(),
+                )
+                session.add(row)
+                return
+            row.server_id = str(server_id)
+
+    def _prepare_operation_for_server(self, op: dict) -> dict:
+        """Prepare un payload local pour l'API, avec mapping de champs et d'id."""
+        data = dict(op.get('data') or {})
+        local_id = data.get('id')
+        mapped_data = self._normalize_payload_for_server(op.get('table'), data)
+        mapped_data['__client_record_id'] = str(local_id)
+
+        existing_server_id = self._get_id_mapping(op.get('table'), local_id=local_id)
+        if existing_server_id:
+            mapped_data['id'] = str(existing_server_id)
+        elif local_id is not None:
+            # Generer un UUID server stable par ligne si l'id local est connu.
+            mapped_data['id'] = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{op.get('table')}:{local_id}"))
+            self._remember_id_mapping(op.get('table'), local_id, mapped_data['id'])
+        # Assurer que les clés étrangères locales pointent vers des UUID serveur.
+        # Pour chaque fk connu, si une correspondance local->server existe, l'utiliser.
+        # Sinon, generer un UUID deterministe pour la cible et sauvegarder le mapping.
+        for fk_key, target_table in _FOREIGN_KEY_TARGET_TABLES.items():
+            if fk_key in mapped_data and mapped_data[fk_key] is not None:
+                local_fk = mapped_data[fk_key]
+                # Si la valeur est déjà un UUID serveur, la conserver telle quelle.
+                if self._is_uuid_string(local_fk):
+                    continue
+                # essayer de recuperer mapping existant
+                mapped_server_fk = self._get_id_mapping(target_table, local_id=local_fk)
+                if mapped_server_fk is not None:
+                    mapped_data[fk_key] = str(mapped_server_fk)
+                else:
+                    # generer UUID deterministe pour la reference et enregistrer
+                    try:
+                        gen_uuid = str(uuid.uuid5(uuid.NAMESPACE_URL, f"{target_table}:{local_fk}"))
+                        mapped_data[fk_key] = gen_uuid
+                        self._remember_id_mapping(target_table, local_fk, gen_uuid)
+                    except Exception:
+                        # si generation echoue, laisser la valeur telle quelle
+                        pass
+        server_table = self._server_table_name(op.get('table'))
+
+        # Injecter des valeurs par defaut pour les tables serveur qui exigent des champs non nuls
+        if server_table == 'licences':
+            # Serveur attend 'cle' et d'autres champs — generer une cle par defaut si manquante
+            if not mapped_data.get('cle'):
+                mapped_data['cle'] = f"DEFAULT-{str(uuid.uuid4())[:16].upper()}"
+            if 'type' not in mapped_data:
+                mapped_data['type'] = 'trial'
+            if 'active' not in mapped_data:
+                mapped_data['active'] = True
+
+        return {
+            **op,
+            'table': server_table,
+            'data': mapped_data,
+        }
 
     # -----------------------------------------------------------------------
     # Authentification
@@ -630,12 +920,14 @@ class SyncManager:
                 # → forcer la conversion pour eviter un 422
                 if 'id' in data:
                     data['id'] = str(data['id'])
-                # Do not push password hashes to server (avoid server double-hashing)
+                # For core_users: avoid double-hashing on UPDATEs by removing password.
+                # For INSERT operations, keep password so server can hash and store it.
                 if e.table_name == 'core_users' and 'password' in data:
-                    try:
-                        del data['password']
-                    except Exception:
-                        pass
+                    if e.operation == 'UPDATE':
+                        try:
+                            del data['password']
+                        except Exception:
+                            pass
                 result.append({
                     '_sync_id':  e.id,           # usage interne uniquement
                     'table':     e.table_name,
@@ -675,6 +967,15 @@ class SyncManager:
             )
 
         pending = self.get_pending_operations()
+        # Exclure certaines tables du PUSH — gerer localement
+        skipped_tables = {'licences'}
+        skipped_count = sum(1 for op in pending if op.get('table') in skipped_tables)
+        if skipped_count:
+            print(f"[SyncManager] PUSH: {skipped_count} operations ignored (tables: {', '.join(skipped_tables)}) — geres localement.")
+        pending_to_send = [op for op in pending if op.get('table') not in skipped_tables]
+        if not pending_to_send:
+            print("[SyncManager] PUSH : aucune operation a envoyer apres filtrage.")
+            return {'sent': 0, 'success': 0, 'errors': []}
         if not pending:
             print("[SyncManager] PUSH : aucune operation en attente.")
             return {'sent': 0, 'success': 0, 'errors': []}
@@ -686,11 +987,74 @@ class SyncManager:
             tables_affected[t] = tables_affected.get(t, 0) + 1
 
         # Construire le payload sans le champ interne _sync_id
-        operations = [
-            {k: v for k, v in op.items() if k != '_sync_id'}
-            for op in pending
+        items = []  # tuples (prepared_no_syncid, sync_id, original_op)
+        server_id_to_sync_id: dict[str, int] = {}
+        for op in pending_to_send:
+            prepared = self._prepare_operation_for_server(op)
+            prepared_no_sync = {k: v for k, v in prepared.items() if k != '_sync_id'}
+            items.append((prepared_no_sync, op['_sync_id'], op))
+            server_id = prepared.get('data', {}).get('id')
+            if server_id:
+                server_id_to_sync_id[str(server_id)] = op['_sync_id']
+
+        # Prioriser l'envoi des tables de reference pour satisfaire les FK
+        priority_tables = [
+            'core_enterprises', 'modules', 'compta_classes', 'core_pos_points', 'core_pos',
+            'core_payment_modes'
         ]
-        sync_ids = [op['_sync_id'] for op in pending]
+        prioritized = []
+        rest = []
+        seen = set()
+        for table in priority_tables:
+            for prepared, sync_id, orig in list(items):
+                if prepared.get('table') == table:
+                    prioritized.append((prepared, sync_id, orig))
+                    seen.add(id(prepared))
+        for prepared, sync_id, orig in items:
+            if id(prepared) in seen:
+                continue
+            rest.append((prepared, sync_id, orig))
+
+        ordered_items = prioritized + rest
+        operations = [it[0] for it in ordered_items]
+        sync_ids = [it[1] for it in ordered_items]
+
+        # Filtrer les operations dont les FK ne peuvent pas etre resolues
+        ids_in_batch = set()
+        for op in operations:
+            sid = op.get('data', {}).get('id')
+            if sid:
+                ids_in_batch.add(str(sid))
+
+        final_operations = []
+        final_sync_ids = []
+        skipped_due_fk = []
+        for op, sync_id in zip(operations, sync_ids):
+            data = op.get('data', {}) or {}
+            ok = True
+            for fk_key, target_table in _FOREIGN_KEY_TARGET_TABLES.items():
+                if fk_key in data and data[fk_key] is not None:
+                    fk_val = str(data[fk_key])
+                    # OK si la cible est cree dans ce lot
+                    if fk_val in ids_in_batch:
+                        continue
+                    # OK si on a deja une mapping server_id -> local (le server possede probablement la ligne)
+                    mapped_local = self._get_id_mapping(target_table, server_id=fk_val)
+                    if mapped_local is not None:
+                        continue
+                    ok = False
+                    break
+            if ok:
+                final_operations.append(op)
+                final_sync_ids.append(sync_id)
+            else:
+                skipped_due_fk.append((op.get('table'), op.get('data', {}).get('id')))
+
+        if skipped_due_fk:
+            print(f"[SyncManager] Skipping {len(skipped_due_fk)} operations due to unresolved FK references: {skipped_due_fk[:10]}")
+
+        operations = final_operations
+        sync_ids = final_sync_ids
 
         headers = {
             'Authorization': f"Bearer {settings.api_token}",
@@ -713,26 +1077,43 @@ class SyncManager:
             rid = str(err.get('id', ''))
             if rid:
                 error_by_id[rid] = err.get('error', 'Erreur inconnue')
+        sync_id_by_server_id = {
+            str(op.get('data', {}).get('id', '')): sync_id
+            for op, sync_id in zip(operations, sync_ids)
+            if op.get('data', {}).get('id')
+        }
 
         now_iso = _local_now_iso()
 
         with self._session_scope() as session:
-            for op, sync_id in zip(pending, sync_ids):
+            for op, sync_id, prepared in zip(pending_to_send, sync_ids, operations):
                 entry = session.query(CoreSync).filter_by(id=sync_id).first()
                 if entry is None:
                     continue
-                rid = str(op['data'].get('id', ''))
-                if rid in error_by_id:
-                    entry.sync_error = error_by_id[rid]
+                server_id = str(prepared.get('data', {}).get('id', ''))
+                if server_id in error_by_id:
+                    entry.sync_error = error_by_id[server_id]
                     # synced reste 0 → sera retente au prochain cycle
                 else:
                     entry.synced    = 1
                     entry.synced_at = now_iso
                     entry.sync_error = None
+                    local_id = op.get('data', {}).get('id')
+                    if local_id is not None and server_id:
+                        try:
+                            self._remember_id_mapping(op.get('table'), local_id, server_id)
+                        except Exception:
+                            pass
+
+        errors_list = result.get('errors', [])
+
+        if errors_list:
+            print('[SyncManager] PUSH erreurs detaillees:')
+            for err in errors_list[:20]:
+                print(f"  - table={err.get('table')} id={err.get('id')} op={err.get('operation')} err={err.get('error')}")
 
         sent = len(pending)
         success = result.get('success', sent - len(error_by_id))
-        errors_list = result.get('errors', [])
         print(
             f"[SyncManager] PUSH : {sent} envoyes, "
             f"{success} reussis, {len(errors_list)} erreurs."
@@ -829,6 +1210,7 @@ class SyncManager:
                 if not records:
                     continue
                 tables_updated.append(table_name)
+                local_table_name = self._local_table_name(table_name)
 
                 for record in records:
                     if not isinstance(record, dict):
@@ -838,6 +1220,7 @@ class SyncManager:
 
                     # Conversion UTC -> UTC+1 sur les champs datetime
                     record = self._convert_timestamps(record)
+                    record = self._normalize_payload_for_local(local_table_name, record)
 
                     # Injecter des valeurs par defaut pour certaines colonnes locales
                     # qui sont NOT NULL mais peuvent etre absentes du payload serveur.
@@ -855,8 +1238,8 @@ class SyncManager:
                             'date_modification': lambda r: r.get('updated_at') or _local_now().strftime('%Y-%m-%d %H:%M:%S'),
                         },
                     }
-                    if table_name in defaults_map:
-                        for col, fn in defaults_map[table_name].items():
+                    if local_table_name in defaults_map:
+                        for col, fn in defaults_map[local_table_name].items():
                             try:
                                 if col not in record or record.get(col) is None:
                                     record[col] = fn(record)
@@ -866,7 +1249,7 @@ class SyncManager:
 
                     # Respecter strictement le mot de passe envoye par le serveur.
                     # Ne pas generer/reutiliser de mot de passe local si absent.
-                    if table_name == 'core_users':
+                    if local_table_name == 'core_users':
                         pw = record.get('password', None)
                         if pw in (None, ''):
                             print(f"[SyncManager] Warning: core_users/{record.get('email') or record.get('id')} has no password in server payload — will not inject defaults.")
@@ -875,12 +1258,12 @@ class SyncManager:
                         # Suppression douce locale
                         try:
                             conn.execute(
-                                text(f"DELETE FROM {table_name} WHERE id = :id"),
+                                text(f"DELETE FROM {local_table_name} WHERE id = :id"),
                                 {'id': record['id']},
                             )
                         except Exception as e:
                             print(
-                                f"[SyncManager] PULL DELETE {table_name}/"
+                                f"[SyncManager] PULL DELETE {local_table_name}/"
                                 f"{record.get('id')}: {e}"
                             )
                     else:
@@ -895,11 +1278,17 @@ class SyncManager:
                         # core_enterprises). Sinon supprimer 'id' pour laisser
                         # l'INTEGER autoincrement local creer une nouvelle ligne.
                         orig_id = record.get('id')
-                        if isinstance(orig_id, str) and '-' in orig_id:
+                        mapped_local_id = None
+                        if orig_id is not None:
+                            mapped_local_id = self._get_id_mapping(table_name, server_id=str(orig_id))
+                        if mapped_local_id is not None:
+                            record['id'] = mapped_local_id
+                            print(f"[SyncManager] Mapped server id -> local id {mapped_local_id} for {table_name}/{orig_id}")
+                        elif isinstance(orig_id, str) and '-' in orig_id:
                             id_type = _get_id_col_type(table_name)
                             if 'INT' in id_type:
                                 try:
-                                    if table_name == 'core_users' and record.get('email'):
+                                    if local_table_name == 'core_users' and record.get('email'):
                                         res = conn.execute(
                                             text("SELECT id FROM core_users WHERE email = :email"),
                                             {'email': record.get('email')}
@@ -910,7 +1299,7 @@ class SyncManager:
                                         else:
                                             record.pop('id', None)
                                             print(f"[SyncManager] Dropped UUID id for core_users/{record.get('email')} to allow local autoincrement")
-                                    elif table_name == 'core_enterprises':
+                                    elif local_table_name == 'core_enterprises':
                                         key = record.get('email') or record.get('name')
                                         if key:
                                             res = conn.execute(
@@ -932,13 +1321,13 @@ class SyncManager:
                                     # En cas d'erreur lors du mapping, tomber en safe-mode
                                     record.pop('id', None)
                             # Map licences' enterprise_id: if missing or null, assign the first local enterprise id
-                            if table_name in ('licences', 'licence'):
+                            if local_table_name in ('licences', 'licence'):
                                 try:
                                     ent = conn.execute(text("SELECT id FROM core_enterprises ORDER BY id LIMIT 1")).fetchone()
                                     if ent and not record.get('enterprise_id') and not record.get('entreprise_id'):
                                         # Use server field enterprise_id but map to local 'entreprise_id'
                                         record['entreprise_id'] = ent[0]
-                                        print(f"[SyncManager] Assigned local entreprise_id {ent[0]} for {table_name}/{record.get('id')}")
+                                        print(f"[SyncManager] Assigned local entreprise_id {ent[0]} for {local_table_name}/{record.get('id')}")
                                 except Exception:
                                     pass
 
@@ -949,7 +1338,7 @@ class SyncManager:
 
                         # Recompute columns now that record may have changed
                         # Map server-side column names to local column names when needed
-                        if table_name in ('licences', 'licence') and 'enterprise_id' in record and 'entreprise_id' not in record:
+                        if local_table_name in ('licences', 'licence') and 'enterprise_id' in record and 'entreprise_id' not in record:
                             try:
                                 record['entreprise_id'] = record.pop('enterprise_id')
                             except Exception:
@@ -981,7 +1370,15 @@ class SyncManager:
                                     f"ON CONFLICT(id) DO UPDATE SET {updates}"
                                 )
                         try:
-                            conn.execute(text(sql), vals)
+                            result = conn.execute(text(sql), vals)
+                            if record.get('id') is not None and orig_id is not None:
+                                if table_name and str(orig_id) not in {str(x) for x in []}:
+                                    pass
+                            if record_id is not None and orig_id is not None:
+                                try:
+                                    self._remember_id_mapping(local_table_name, record_id, str(orig_id))
+                                except Exception:
+                                    pass
                         except Exception as e:
                             err_text = str(e)
                             print(
@@ -1014,7 +1411,7 @@ class SyncManager:
                                     try:
                                         conn.execute(text(sql), vals)
                                     except Exception as e2:
-                                        print(f"[SyncManager] Retried upsert failed for {table_name}/{record.get('id')}: {e2}")
+                                        print(f"[SyncManager] Retried upsert failed for {local_table_name}/{record.get('id')}: {e2}")
                                 except Exception:
                                     pass
                             # 2) Handle NOT NULL constraint failures by injecting defaults and retrying once
@@ -1029,13 +1426,13 @@ class SyncManager:
                                             record[missing_col] = record.get('updated_at') or record.get('created_at') or _local_now().strftime('%Y-%m-%d %H:%M:%S')
                                         elif missing_col == 'password':
                                             # Do not inject default password; server must provide the hash.
-                                            print(f"[SyncManager] NOT NULL failure on password for {table_name}/{record.get('id')} — server must provide password hash. Skipping retry.")
+                                            print(f"[SyncManager] NOT NULL failure on password for {local_table_name}/{record.get('id')} — server must provide password hash. Skipping retry.")
                                             # Skip retry for this record
                                             continue
                                         else:
                                             # fallback to empty string
                                             record[missing_col] = ''
-                                        print(f"[SyncManager] Injected default {missing_col} for {table_name}/{record.get('id')} after NOT NULL failure")
+                                        print(f"[SyncManager] Injected default {missing_col} for {local_table_name}/{record.get('id')} after NOT NULL failure")
 
                                         # Rebuild cols/vals/sql then retry once
                                         # Rebuild cols/vals/sql after injecting default
@@ -1057,7 +1454,7 @@ class SyncManager:
                                         try:
                                             conn.execute(text(retry_sql), vals)
                                         except Exception as e3:
-                                            print(f"[SyncManager] Retry after NOT NULL injection failed for {table_name}/{record.get('id')}: {e3}")
+                                            print(f"[SyncManager] Retry after NOT NULL injection failed for {local_table_name}/{record.get('id')}: {e3}")
                                 except Exception:
                                     pass
             conn.commit()

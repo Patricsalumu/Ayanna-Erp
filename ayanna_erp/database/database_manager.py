@@ -17,7 +17,7 @@ import importlib
 import threading
 from datetime import datetime
 import re
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text, event
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text, event, func
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
@@ -781,38 +781,87 @@ class DatabaseManager:
 
     def _migrate_updated_at_columns(self):
         """
-        Ajoute la colonne updated_at aux tables de base si elle est absente.
-        Le serveur Laravel retourne toujours updated_at (timestamps()) ;
-        sans cette colonne le PULL echoue avec OperationalError.
-        Tables concernees : core_enterprises, core_users, modules,
-                            core_pos_points, core_payment_modes.
+        Ajoute les colonnes created_at / updated_at aux tables locales si elles sont absentes.
+        Le serveur Laravel retourne toujours ces timestamps ; sans elles le PULL échoue
+        avec OperationalError sur les tables de synchronisation.
         """
-        tables = [
-            'core_enterprises',
-            'core_users',
-            'modules',
-            'core_pos_points',
-            'core_payment_modes',
-        ]
+        tables = {
+            'core_enterprises': ['created_at', 'updated_at'],
+            'core_users': ['created_at', 'updated_at'],
+            'modules': ['created_at', 'updated_at'],
+            'core_pos_points': ['created_at', 'updated_at'],
+            'core_payment_modes': ['created_at', 'updated_at'],
+            'licences': ['created_at', 'updated_at'],
+            'core_fournisseurs': ['created_at', 'updated_at'],
+            'shop_clients': ['created_at', 'updated_at'],
+            'shop_services': ['created_at', 'updated_at'],
+            'shop_paniers': ['created_at', 'updated_at'],
+            'shop_paniers_products': ['created_at', 'updated_at'],
+            'shop_paniers_services': ['created_at', 'updated_at'],
+            'shop_payments': ['created_at', 'updated_at'],
+            'shop_expenses': ['created_at', 'updated_at'],
+            'shop_comptes_config': ['created_at', 'updated_at'],
+            'stock_warehouses': ['created_at', 'updated_at'],
+            'stock_config': ['created_at', 'updated_at'],
+            'stock_produits_entrepot': ['created_at', 'updated_at'],
+            'stock_mouvements': ['created_at', 'updated_at'],
+            'stock_livraisons': ['created_at', 'updated_at'],
+            'stock_livraison_items': ['created_at', 'updated_at'],
+            'stock_inventaire': ['created_at', 'updated_at'],
+            'stock_inventaire_item': ['created_at', 'updated_at'],
+            'achat_commandes': ['created_at', 'updated_at'],
+            'achat_commande_lignes': ['created_at', 'updated_at'],
+            'achat_depenses': ['created_at', 'updated_at'],
+            'compta_classes': ['created_at', 'updated_at'],
+            'compta_comptes': ['created_at', 'updated_at'],
+            'compta_journaux': ['created_at', 'updated_at'],
+            'compta_ecritures': ['created_at', 'updated_at'],
+            'compta_config': ['created_at', 'updated_at'],
+            'restau_salles': ['created_at', 'updated_at'],
+            'restau_tables': ['created_at', 'updated_at'],
+            'restau_paniers': ['created_at', 'updated_at'],
+            'restau_produit_panier': ['created_at', 'updated_at'],
+            'restau_payments': ['created_at', 'updated_at'],
+            'restau_expenses': ['created_at', 'updated_at'],
+            'restau_printed_invoices': ['created_at', 'updated_at'],
+            'restau_bon_commandes': ['created_at', 'updated_at'],
+            'hotel_categories': ['created_at', 'updated_at'],
+            'hotel_rooms': ['created_at', 'updated_at'],
+            'hotel_reservations': ['created_at', 'updated_at'],
+            'hotel_payments': ['created_at', 'updated_at'],
+            'event_clients': ['created_at', 'updated_at'],
+            'event_services': ['created_at', 'updated_at'],
+            'event_products': ['created_at', 'updated_at'],
+            'event_reservations': ['created_at', 'updated_at'],
+            'event_reservation_services': ['created_at', 'updated_at'],
+            'event_reservation_products': ['created_at', 'updated_at'],
+            'event_payments': ['created_at', 'updated_at'],
+            'event_stock_movements': ['created_at', 'updated_at'],
+            'event_expenses': ['created_at', 'updated_at'],
+            'product_batches': ['created_at', 'updated_at'],
+            'fabrication_rules': ['created_at', 'updated_at'],
+            'fabrication_rule_items': ['created_at', 'updated_at'],
+            'productions': ['created_at', 'updated_at'],
+            'production_items': ['created_at', 'updated_at'],
+            'production_losses': ['created_at', 'updated_at'],
+        }
         with self.engine.connect() as conn:
-            for tbl in tables:
-                # Verifier si la table existe
+            for tbl, cols in tables.items():
                 exists = conn.execute(
                     text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
                     {'t': tbl}
                 ).fetchone()
                 if not exists:
                     continue
-                # Verifier si updated_at existe deja
-                cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
-                if 'updated_at' not in cols:
+                existing_cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
+                for col in cols:
+                    if col in existing_cols:
+                        continue
                     try:
-                        conn.execute(text(
-                            f"ALTER TABLE {tbl} ADD COLUMN updated_at DATETIME"
-                        ))
-                        print(f"✅ Migration : colonne updated_at ajoutee a {tbl}")
+                        conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} DATETIME"))
+                        print(f"✅ Migration : colonne {col} ajoutée à {tbl}")
                     except Exception as e:
-                        print(f"⚠️ updated_at / {tbl} : {e}")
+                        print(f"⚠️ {col} / {tbl} : {e}")
             conn.commit()
 
     def _migrate_compta_timestamps(self):
@@ -1365,6 +1414,7 @@ class Entreprise(Base):
     currency = Column(String(10), default='USD')
     taux_de_change = Column(Numeric(12, 4), nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     users = relationship("User", back_populates="enterprise")
@@ -1383,6 +1433,7 @@ class User(Base):
     # Modules accessibles pour l'utilisateur (JSON list stored as TEXT)
     modules = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     enterprise = relationship("Entreprise", back_populates="users")
@@ -1455,6 +1506,7 @@ class Module(Base):
     name = Column(String(100), nullable=False, unique=True)
     description = Column(Text)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     pos_points = relationship("POSPoint", back_populates="module")
@@ -1468,6 +1520,7 @@ class POSPoint(Base):
     module_id = Column(Integer, ForeignKey('modules.id'), nullable=False)
     name = Column(String(255), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     enterprise = relationship("Entreprise", back_populates="pos_points")
@@ -1499,6 +1552,7 @@ class PaymentMode(Base):
     is_active       = Column(Integer, default=1)   # 0 = désactivé
     sort_order      = Column(Integer, default=0)
     created_at      = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 

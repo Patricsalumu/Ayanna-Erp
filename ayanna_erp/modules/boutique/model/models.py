@@ -39,6 +39,7 @@ class ShopClient(Base):
     type_carte = Column(String(50), nullable=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     paniers = relationship("ShopPanier", back_populates="client")
@@ -59,6 +60,7 @@ class ShopService(Base):
     compte_charge_id = Column(Integer)   # Compte charge pour les achats
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     panier_services = relationship("ShopPanierService", back_populates="service")
@@ -112,6 +114,8 @@ class ShopPanierProduct(Base):
     quantity = Column(Numeric(15, 2), nullable=False)
     price_unit = Column(Numeric(15, 2), nullable=False)  # Prix au moment de l'ajout
     total_price = Column(Numeric(15, 2), nullable=False)  # quantity * price_unit
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     panier = relationship("ShopPanier", back_populates="products")
@@ -128,6 +132,8 @@ class ShopPanierService(Base):
     quantity = Column(Numeric(15, 2), default=1.0)
     price_unit = Column(Numeric(15, 2), nullable=False)  # Prix au moment de l'ajout
     total_price = Column(Numeric(15, 2), nullable=False)  # quantity * price_unit
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     panier = relationship("ShopPanier", back_populates="services")
@@ -145,6 +151,8 @@ class ShopPayment(Base):
     payment_date = Column(DateTime, default=func.current_timestamp())
     reference = Column(String(100))  # Référence du paiement (numéro chèque, etc.)
     notes = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     panier = relationship("ShopPanier", back_populates="payments")
@@ -164,6 +172,7 @@ class ShopExpense(Base):
     reference = Column(String(100))  # Facture, bon de commande, etc.
     notes = Column(Text)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 class ShopComptesConfig(Base):
@@ -179,6 +188,7 @@ class ShopComptesConfig(Base):
     description = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
 
 

@@ -34,6 +34,7 @@ class StockWarehouse(Base):
     is_active = Column(Boolean, default=True)  # Actif/Inactif
     capacity_limit = Column(Numeric(15, 2))  # Limite de capacité (optionnel)
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     products = relationship("StockProduitEntrepot", back_populates="warehouse")
@@ -111,6 +112,7 @@ class StockMovement(Base):
     # Dates
     movement_date = Column(DateTime, default=func.current_timestamp())  # Date du mouvement
     created_at = Column(DateTime, default=func.current_timestamp())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     warehouse = relationship("StockWarehouse", foreign_keys=[warehouse_id], back_populates="movements")
@@ -148,6 +150,8 @@ class StockLivraison(Base):
     date_livraison   = Column(DateTime)
     date_reception   = Column(DateTime)
     notes            = Column(Text)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     # Relations
     entrepot_depart  = relationship("StockWarehouse", foreign_keys=[entrepot_depart_id])
@@ -169,6 +173,8 @@ class StockLivraisonItem(Base):
     quantite     = Column(Numeric(15, 3), nullable=False)
     cout_unitaire = Column(Numeric(15, 2), default=0.0)   # prix d'achat au moment du bon
     total_ligne   = Column(Numeric(15, 2), default=0.0)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
 
     # Relations
     livraison = relationship("StockLivraison", back_populates="lignes")

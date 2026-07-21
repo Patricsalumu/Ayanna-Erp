@@ -4,7 +4,7 @@ Modèle des produits centralisés de l'entreprise
 Remplace shop_products avec une logique centralisée par entreprise
 """
 
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text
+from sqlalchemy import Column, DateTime, Integer, String, ForeignKey, Boolean, Numeric, Text, func
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from ayanna_erp.database.base import Base
@@ -42,6 +42,7 @@ class CoreProduct(Base):
     # État
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     entreprise = relationship("Entreprise")
@@ -68,6 +69,7 @@ class CoreProductCategory(Base):
     parent_id = Column(Integer, ForeignKey('core_product_categories.id'))  # Catégorie parente
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     entreprise = relationship("Entreprise")
@@ -95,6 +97,7 @@ class POSProductAccess(Base):
     display_order = Column(Integer, default=0)    # Ordre d'affichage sur le POS
     
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     pos = relationship("POSPoint")

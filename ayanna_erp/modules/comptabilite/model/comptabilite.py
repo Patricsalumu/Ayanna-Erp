@@ -22,6 +22,8 @@ class ComptaClasses(Base):
     actif = Column(Boolean, default=True)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Contrainte d'unicité composite : un code de classe unique par entreprise
     __table_args__ = (
@@ -49,6 +51,8 @@ class ComptaComptes(Base):
     classe_comptable_id = Column(Integer, ForeignKey('compta_classes.id'), nullable=False)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     classe_comptable = relationship("ComptaClasses", back_populates="comptes")
@@ -76,6 +80,8 @@ class ComptaJournaux(Base):
     date_validation = Column(DateTime, nullable=True)        # Horodatage de la validation
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Relations
     enterprise = relationship("Entreprise")
@@ -98,6 +104,8 @@ class ComptaEcritures(Base):
     ordre = Column(Integer, nullable=False)  # 1 pour débit, 2 pour crédit
     libelle = Column(String(255))  # Libellé spécifique à cette écriture
     date_creation = Column(DateTime, default=func.now(), nullable=False)
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
+    created_at = Column(DateTime, default=func.now())
     
     # Relations
     journal = relationship("ComptaJournaux", back_populates="ecritures")
@@ -127,6 +135,8 @@ class ComptaConfig(Base):
     compte_remise_id = Column(Integer, ForeignKey('compta_comptes.id'), nullable=True)   # Compte remises accordées (classe 7)
     date_creation = Column(DateTime, default=func.now(), nullable=False)
     date_modification = Column(DateTime, default=func.now(), onupdate=func.now(), nullable=False)
+    created_at = Column(DateTime, default=func.now())
+    updated_at = Column(DateTime, default=func.now(), onupdate=func.now())
     
     # Contrainte d'unicité : un seul config par point de vente
     __table_args__ = (
