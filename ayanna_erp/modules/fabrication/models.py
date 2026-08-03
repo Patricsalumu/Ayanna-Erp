@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, func
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from ayanna_erp.database.base import Base

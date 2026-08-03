@@ -2,7 +2,7 @@
 ORM models for the Restaurant module
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum, func
 from sqlalchemy.orm import relationship
 from ayanna_erp.database.base import Base
 

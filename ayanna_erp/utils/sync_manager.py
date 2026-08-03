@@ -1114,6 +1114,11 @@ class SyncManager:
 
         sent = len(pending)
         success = result.get('success', sent - len(error_by_id))
+        pushed_server_ids = [
+            str(op.get('data', {}).get('id'))
+            for op in operations
+            if op.get('data', {}).get('id') and str(op.get('data', {}).get('id')) not in error_by_id
+        ]
         print(
             f"[SyncManager] PUSH : {sent} envoyes, "
             f"{success} reussis, {len(errors_list)} erreurs."
@@ -1128,13 +1133,23 @@ class SyncManager:
             push_success=success,
             push_errors=len(errors_list),
         )
-        return {'sent': sent, 'success': success, 'errors': errors_list}
+        return {
+            'sent': sent,
+            'success': success,
+            'errors': errors_list,
+            'pushed_server_ids': pushed_server_ids,
+        }
 
     # -----------------------------------------------------------------------
     # PULL
     # -----------------------------------------------------------------------
 
-    def pull(self, triggered_by: str = None, override_last_sync: str = None) -> dict:
+    def pull(
+        self,
+        triggered_by: str = None,
+        override_last_sync: str = None,
+        exclude_server_ids: list[str] | set[str] | None = None,
+    ) -> dict:
         """
         Recupere du serveur tous les enregistrements modifies depuis last_sync
         et les applique dans la base locale (upsert ou suppression douce).
@@ -1142,7 +1157,9 @@ class SyncManager:
         - Les dates serveur (UTC) sont converties en UTC+1 avant insertion locale.
         - server_time est converti en UTC+1 et sauvegarde comme nouveau last_sync.
         - override_last_sync : si fourni, utilise ce timestamp au lieu de settings.last_sync
-          (utile pour eviter l'echo des enregistrements venant d'etre pousse).
+          (utile pour limiter la plage de la premiere sync).
+        - exclude_server_ids : si fourni, ignore les enregistrements provenant de
+          la synchronisation qui vient d'etre pushee afin d'eviter un echo.
 
         Returns:
             {'server_time': str, 'tables': list, 'total_records': int}
@@ -1183,6 +1200,28 @@ class SyncManager:
 
         server_time_raw = payload.get('server_time', _utc_now().isoformat())
         data            = payload.get('data', {})
+
+        if exclude_server_ids:
+            exclude_set = {str(x) for x in exclude_server_ids if x is not None}
+            if exclude_set and isinstance(data, dict):
+                for table_name in list(data.keys()):
+                    records = data.get(table_name) or []
+                    if not isinstance(records, list):
+                        continue
+                    filtered = [
+                        record for record in records
+                        if str(record.get('id')) not in exclude_set
+                    ]
+                    if len(filtered) != len(records):
+                        skipped = len(records) - len(filtered)
+                        print(
+                            f"[SyncManager] PULL : skipped {skipped} pushed record(s) "
+                            f"from {table_name} to avoid echo."
+                        )
+                    if filtered:
+                        data[table_name] = filtered
+                    else:
+                        del data[table_name]
 
         total_records   = 0
         tables_updated  = []
@@ -1544,18 +1583,22 @@ class SyncManager:
             final_message = f'PUSH echoue : {e}'
 
         # 2. PULL
-        # On utilise toujours pre_push_time comme borne inférieure du pull :
-        #   - évite que le serveur renvoie en echo les enregistrements qu'on vient
-        #     de lui pousser (ils ont updated_at >= début du push)
-        #   - les changements serveur arrivés AVANT pre_push_time sont couverts
-        #     par le last_sync précédent ; ceux arrivés APRÈS seront inclus dans
-        #     ce pull car server_time (capturé avant la requête côté serveur) sera
-        #     légèrement en avance sur pre_push_time.
-        # Exception : première sync (pas de last_sync) — on prend aussi pre_push_time
-        # pour ne pas rapatrier toute la base du serveur en boucle.
-        pull_override = pre_push_time
+        # Use the previous last_sync for normal syncs so we do not miss server
+        # changes that happened before the current push started.
+        # Only on the first sync with no prior last_sync do we use pre_push_time
+        # to limit the initial pull window.
+        settings = self.get_settings()
+        first_sync = not (settings and getattr(settings, 'last_sync', None))
+        pull_override = pre_push_time if first_sync else None
+        pushed_ids = push_result.get('pushed_server_ids') or []
+        if pushed_ids:
+            print(f"[SyncManager] PULL : excluding {len(pushed_ids)} just-pushed server ids to avoid echo.")
         try:
-            pull_result = self.pull(triggered_by=synced_by, override_last_sync=pull_override)
+            pull_result = self.pull(
+                triggered_by=synced_by,
+                override_last_sync=pull_override,
+                exclude_server_ids=pushed_ids,
+            )
         except Exception as e:
             print(f'[SyncManager] PULL echoue : {e}')
             self._save_status('error', f'PULL echoue : {e}')

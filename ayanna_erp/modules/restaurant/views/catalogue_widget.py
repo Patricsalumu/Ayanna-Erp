@@ -856,6 +856,10 @@ class CatalogueWidget(QWidget):
     def decrement_selected_qty(self):
         if self.selected_cart_row is None:
             return
+        # If current user is not super_admin, require super_admin authorization
+        if not self._current_user_is_super_admin():
+            if not self._require_super_admin_password():
+                return
         row = self.selected_cart_row
         lp_id = int(self.cart_table.item(row, 0).text())
         current = int(self.qty_spin.value())
@@ -869,6 +873,10 @@ class CatalogueWidget(QWidget):
     def delete_selected_line(self):
         if self.selected_cart_row is None:
             return
+        # If current user is not super_admin, require super_admin authorization
+        if not self._current_user_is_super_admin():
+            if not self._require_super_admin_password():
+                return
         row = self.selected_cart_row
         lp_id = int(self.cart_table.item(row, 0).text())
         try:
@@ -882,15 +890,63 @@ class CatalogueWidget(QWidget):
         """Apply the qty value from the spinbox to the selected cart line when editing is finished."""
         if self.selected_cart_row is None:
             return
+        # If reducing quantity (edit results in smaller qty) require super_admin for simple users
         try:
             lp_id = int(self.cart_table.item(self.selected_cart_row, 0).text())
+            oldq = int(self.cart_table.item(self.selected_cart_row, 2).text())
             newq = int(self.qty_spin.value())
+            if newq < oldq and not self._current_user_is_super_admin():
+                if not self._require_super_admin_password():
+                    # restore spin to old value
+                    try:
+                        self.qty_spin.setValue(oldq)
+                    except Exception:
+                        pass
+                    return
             # remember selected_line_id so refresh preserves focus
             self.selected_line_id = lp_id
             self.controller.update_product_quantity(self.panier.id, lp_id, newq)
             self.refresh_cart()
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'appliquer la quantité: {e}")
+
+    def _current_user_is_super_admin(self):
+        """Return True if current_user has role super_admin."""
+        try:
+            if not getattr(self, 'current_user', None):
+                return False
+            role = getattr(self.current_user, 'role', None) or getattr(self.current_user, 'role', None)
+            return str(role) == 'super_admin'
+        except Exception:
+            return False
+
+    def _require_super_admin_password(self) -> bool:
+        """Open a dialog asking for super_admin password and verify against users with role super_admin.
+
+        Returns True if a valid super_admin password was provided, False otherwise.
+        """
+        # ask for password via simple input dialog
+        from PyQt6.QtWidgets import QInputDialog
+        pwd, ok = QInputDialog.getText(self, 'Autorisation requise', 'Entrez le mot de passe d\'un super administrateur:', QLineEdit.EchoMode.Password)
+        if not ok or not pwd:
+            return False
+        # verify against users with role super_admin
+        try:
+            db = get_database_manager()
+            session = db.get_session()
+            # query all super_admin users
+            users = session.query(User).filter_by(role='super_admin').all()
+            session.close()
+            for u in users:
+                try:
+                    if hasattr(u, 'check_password') and u.check_password(pwd):
+                        return True
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        QMessageBox.warning(self, 'Autorisation refusée', 'Mot de passe super_admin invalide')
+        return False
 
     def _on_client_selected(self, index):
         """Persist selected client into the panier as soon as selection changes."""
@@ -998,6 +1054,10 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
+        # If current user is not super_admin, require super_admin authorization
+        if not self._current_user_is_super_admin():
+            if not self._require_super_admin_password():
+                return
         ok = QMessageBox.question(self, 'Annuler la commande', 'Confirmez-vous l\'annulation de cette commande ?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if ok != QMessageBox.StandardButton.Yes:
             return
