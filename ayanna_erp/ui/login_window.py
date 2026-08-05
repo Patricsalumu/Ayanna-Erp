@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout,
                             QFrame, QApplication, QSpacerItem, QSizePolicy)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap, QPalette, QColor, QIcon
+from sqlalchemy import or_
 from ayanna_erp.database.database_manager import DatabaseManager, User, Entreprise
 from ayanna_erp.modules.core.models import Licence
 from ayanna_erp.core.config import Config
@@ -113,9 +114,9 @@ class LoginWindow(QWidget):
         form_layout = QFormLayout(form_frame)
         form_layout.setSpacing(15)
         
-        # Champ email
+        # Champ email ou nom d'utilisateur
         self.email_input = QLineEdit()
-        self.email_input.setPlaceholderText("Adresse email")
+        self.email_input.setPlaceholderText("Email ou nom d'utilisateur")
         self.email_input.setStyleSheet(self.get_input_style())
         
         # Champ mot de passe
@@ -125,7 +126,7 @@ class LoginWindow(QWidget):
         self.password_input.setStyleSheet(self.get_input_style())
         
         # Labels
-        email_label = QLabel("Email:")
+        email_label = QLabel("Email ou nom d'utilisateur:")
         email_label.setStyleSheet("color: white; font-weight: bold;")
         
         password_label = QLabel("Mot de passe:")
@@ -258,26 +259,28 @@ class LoginWindow(QWidget):
     
     def handle_login(self):
         """Gérer la tentative de connexion"""
-        email = self.email_input.text().strip()
+        identifier = self.email_input.text().strip()
         password = self.password_input.text()
         
-        if not email or not password:
-            self.show_error("Veuillez saisir votre email et votre mot de passe.")
+        if not identifier or not password:
+            self.show_error("Veuillez saisir votre email ou votre nom d'utilisateur, ainsi que votre mot de passe.")
             return
         
         # Vérifier les identifiants
-        if self.authenticate_user(email, password):
+        if self.authenticate_user(identifier, password):
             self.show_main_window()
         else:
-            self.show_error("Email ou mot de passe incorrect.")
+            self.show_error("Email, nom d'utilisateur ou mot de passe incorrect.")
             self.password_input.clear()
             self.password_input.setFocus()
     
-    def authenticate_user(self, email, password):
+    def authenticate_user(self, identifier, password):
         """Authentifier l'utilisateur et initialiser la session"""
         try:
             session = self.db_manager.get_session()
-            user = session.query(User).filter_by(email=email).first()
+            user = session.query(User).filter(
+                or_(User.email == identifier, User.name == identifier)
+            ).first()
             
             if user and user.check_password(password):
                 self.current_user = user

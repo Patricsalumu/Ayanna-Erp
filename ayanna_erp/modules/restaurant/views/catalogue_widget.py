@@ -73,6 +73,40 @@ class CatalogueWidget(QWidget):
             return str(amount)
         return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
+    def _print_pdf_with_default_printer(self, file_path: str) -> tuple[bool, str | None]:
+        """Send a PDF file directly to the system default printer."""
+        try:
+            if platform.system() == 'Windows':
+                # Try common Windows PDF viewers for silent print
+                try:
+                    subprocess.run(['SumatraPDF.exe', '-print-to-default', file_path], check=True, timeout=15)
+                    return True, None
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+
+                try:
+                    subprocess.run(['AcroRd32.exe', '/t', file_path], check=True, timeout=20)
+                    return True, None
+                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                    pass
+
+                # Fallback to PowerShell print command
+                subprocess.run([
+                    'powershell', '-NoProfile', '-Command',
+                    f'Start-Process -FilePath "{file_path}" -Verb Print -WindowStyle Hidden'
+                ], check=True, timeout=30)
+                return True, None
+
+            if platform.system() in ('Darwin', 'Linux'):
+                subprocess.run(['lpr', file_path], check=True, timeout=15)
+                return True, None
+
+            return False, 'Système non pris en charge pour l\'impression automatique.'
+        except Exception as e:
+            error_text = str(e) or 'Erreur inconnue'
+            print(f"Erreur impression directe du PDF: {error_text}")
+            return False, error_text
+
     def init_ui(self):
         main = QVBoxLayout(self)
         header_h = QHBoxLayout()
@@ -1566,7 +1600,7 @@ class CatalogueWidget(QWidget):
 
             invoice_data = {
                 'module': 'restaurant',
-                'reference': f"PANIER-{self.panier.id}",
+                'reference': f"FAC-{self.panier.id}",
                 'client_nom': '',
                 'order_date': getattr(self.panier, 'created_at', None),
                 'items': invoice_items,
@@ -1739,16 +1773,16 @@ class CatalogueWidget(QWidget):
                 tmpf.close()
                 filename = self.bon_commande_printer.print_ticket(ticket_data, tmpf.name)
 
-                system = platform.system()
-                if system == 'Windows':
-                    os.startfile(filename)
-                elif system == 'Darwin':
-                    subprocess.run(['open', filename], check=True)
-                elif system == 'Linux':
-                    subprocess.run(['xdg-open', filename], check=True)
-                QMessageBox.information(self, 'Bon de commande', f'Bon de commande généré: {filename}')
+                printed, error_message = self._print_pdf_with_default_printer(filename)
+                if printed:
+                    QMessageBox.information(self, 'Bon de commande', 'Bon de commande envoyé à l\'imprimante par défaut.')
+                else:
+                    if error_message:
+                        QMessageBox.critical(self, 'Erreur d\'impression', f"Impossible d\'imprimer automatiquement le bon de commande:\n{error_message}")
+                    else:
+                        QMessageBox.critical(self, 'Erreur d\'impression', 'Impossible d\'imprimer automatiquement le bon de commande.')
             except Exception as e:
-                QMessageBox.critical(self, 'Erreur', f"Impossible d\'ouvrir le bon de commande: {e}")
+                QMessageBox.critical(self, 'Erreur', f"Impossible d\'imprimer le bon de commande: {e}")
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Erreur impression bon de commande: {e}")
 

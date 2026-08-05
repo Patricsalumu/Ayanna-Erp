@@ -348,20 +348,24 @@ class InvoicePrintManager:
         if invoice_data.get('items'):
             story.append(Paragraph("PRODUITS COMMANDÉS", self.styles['CustomHeading']))
 
-            products_data = [['Produit', 'Quantité', 'Prix unitaire', 'Total']]
+            products_data = [['Article', 'Qte', 'Prix', 'Total']]
             total_products = 0
+            total_quantity = 0
+            total_lines = 0
 
             for item in invoice_data['items']:
-                total_line = item['quantity'] * item['unit_price']
+                quantity = item.get('quantity', 0)
+                unit_price = item.get('unit_price', 0)
+                total_line = quantity * unit_price
                 total_products += total_line
+                total_quantity += quantity
+                total_lines += 1
                 products_data.append([
-                    item['name'],
-                    str(item['quantity']),
-                    self.format_amount(item['unit_price']),
+                    item.get('name', ''),
+                    str(quantity),
+                    self.format_amount(unit_price),
                     self.format_amount(total_line)
                 ])
-
-            products_data.append(['', '', 'TOTAL PRODUITS:', self.format_amount(total_products)])
 
             products_table = Table(products_data, colWidths=[8*cm, 2*cm, 3*cm, 3*cm])
             products_table.setStyle(TableStyle([
@@ -370,11 +374,25 @@ class InvoicePrintManager:
                 ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
                 ('FONTSIZE', (0, 0), (-1, -1), 9),
                 ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
-                ('BACKGROUND', (0, -1), (-1, -1), HexColor('#D5DBDB')),
-                ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
                 ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
             ]))
             story.append(products_table)
+            story.append(Spacer(1, 10))
+
+            summary_data = [
+                ['Total articles:', str(total_lines)],
+                ['Total quantité article:', str(total_quantity)],
+                ['Total montant:', self.format_amount(total_products)]
+            ]
+            summary_table = Table(summary_data, colWidths=[11*cm, 5*cm])
+            summary_table.setStyle(TableStyle([
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
+                ('BACKGROUND', (0, 0), (-1, -1), HexColor('#F2F3F4')),
+                ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
+            ]))
+            story.append(summary_table)
             story.append(Spacer(1, 15))
 
         # Récapitulatif financier
@@ -694,21 +712,29 @@ class InvoicePrintManager:
         c.drawCentredString(TICKET_WIDTH / 2, y, ref)
         y -= 6 * mm
 
+        c.setFont(self._font_bold, 8)
+        c.drawString(LEFT_MARGIN, y, "Client:")
         c.setFont(self._font_regular, 8)
-        c.drawString(LEFT_MARGIN, y, f"Client: {invoice_data.get('client_nom', '')[:25]}")
-        y -= 3 * mm
+        c.drawString(LEFT_MARGIN + 16 * mm, y, invoice_data.get('client_nom', '')[:25])
+        y -= 4 * mm
 
         date_val = invoice_data.get('order_date')
         if isinstance(date_val, datetime):
             date_val = date_val.strftime('%d/%m/%Y %H:%M')
-        c.drawString(LEFT_MARGIN, y, f"Date: {date_val}")
-        y -= 3 * mm
-        
+        c.setFont(self._font_bold, 8)
+        c.drawString(LEFT_MARGIN, y, "Date:")
+        c.setFont(self._font_regular, 8)
+        c.drawString(LEFT_MARGIN + 16 * mm, y, str(date_val))
+        y -= 4 * mm
+
         # Afficher l'utilisateur qui a passé la commande
         user_display = invoice_data.get('user_name') or user_name or 'Utilisateur'
-        c.drawString(LEFT_MARGIN, y, f"Par: {str(user_display)[:25]}")
-        y -= 2 * mm
-        
+        c.setFont(self._font_bold, 8)
+        c.drawString(LEFT_MARGIN, y, "Caissier :")
+        c.setFont(self._font_regular, 8)
+        c.drawString(LEFT_MARGIN + 16 * mm, y, str(user_display)[:25])
+        y -= 4 * mm
+
         # =========================
         # INFOS RESTAURANT (OPTIONNEL)
         # =========================
@@ -728,23 +754,21 @@ class InvoicePrintManager:
 
         if is_restaurant:
             table_val = _pick(invoice_data, 'table', 'table_number', 'table_no')
-            salle_val = _pick(invoice_data, 'salle', 'salle_name', 'room')
             serveuse_val = _pick(invoice_data, 'serveuse', 'serveur', 'waiter', 'serveur_name')
 
-            c.setFont(self._font_regular, 8)
-
+            c.setFont(self._font_bold, 8)
             if table_val:
-                c.drawString(LEFT_MARGIN, y, f"Table: {str(table_val)[:20]}")
-                y -= 2.5 * mm
-
-            if salle_val:
-                c.drawString(LEFT_MARGIN, y, f"Salle: {str(salle_val)[:20]}")
-                y -= 2.5 * mm
+                c.drawString(LEFT_MARGIN, y, "Table:")
+                c.setFont(self._font_regular, 8)
+                c.drawString(LEFT_MARGIN + 16 * mm, y, str(table_val)[:20])
+                y -= 4 * mm
 
             if serveuse_val:
-                c.drawString(LEFT_MARGIN, y, f"Serveuse: {str(serveuse_val)[:25]}")
-                y -= 3 * mm
-
+                c.setFont(self._font_bold, 8)
+                c.drawString(LEFT_MARGIN, y, "Serveuse:")
+                c.setFont(self._font_regular, 8)
+                c.drawString(LEFT_MARGIN + 16 * mm, y, str(serveuse_val)[:25])
+                y -= 4 * mm
 
         c.line(LEFT_MARGIN, y, TICKET_WIDTH - LEFT_MARGIN, y)
         y -= 4 * mm
@@ -756,22 +780,50 @@ class InvoicePrintManager:
         c.drawString(LEFT_MARGIN, y, "ARTICLES")
         y -= 6 * mm
 
+        # En-têtes de colonnes
+        qty_x = LEFT_MARGIN + 20 * mm
+        price_x = LEFT_MARGIN + 30 * mm
+        total_x = TICKET_WIDTH - LEFT_MARGIN
+
+        c.setFont('Helvetica-Bold', 8)
+        c.drawString(ITEM_NAME_X, y, "Article")
+        c.drawRightString(qty_x, y, "Qte")
+        c.drawRightString(price_x, y, "Prix")
+        c.drawRightString(total_x, y, "Total")
+        y -= 4 * mm
+
         subtotal = 0
-        c.setFont('Helvetica', 10)
+        total_articles = 0
+        total_quantity = 0
+        c.setFont('Helvetica', 8)
         for item in invoice_data.get('items', []):
-            name = item.get('name', '')[:18]
+            name = str(item.get('name', ''))[:14]
             qty = _to_float(item.get('quantity'), 1)
             price = _to_float(item.get('unit_price'))
-            subtotal += qty * price
+            line_total = qty * price
+            subtotal += line_total
+            total_articles += 1
+            total_quantity += qty
 
+            qty_text = str(int(qty)) if float(qty).is_integer() else f"{qty:.2f}"
             c.drawString(ITEM_NAME_X, y, name)
-            c.drawRightString(TICKET_WIDTH - LEFT_MARGIN, y, f"{int(qty)} x {self.format_amount(price)}")
+            c.drawRightString(qty_x, y, qty_text)
+            c.drawRightString(price_x, y, self.format_amount(price))
+            c.drawRightString(total_x, y, self.format_amount(line_total))
             y -= 4 * mm
 
         y -= 2 * mm
-        c.setFont('Helvetica-Bold', 10)
-        c.drawString(LEFT_MARGIN, y, f"Sous-total: {self.format_amount(subtotal)}")
-        y -= 5 * mm
+        c.setLineWidth(0.5)
+        c.line(LEFT_MARGIN, y, TICKET_WIDTH - LEFT_MARGIN, y)
+        y -= 4 * mm
+
+        c.setFont('Helvetica-Bold', 9)
+        total_qty_text = str(int(total_quantity)) if float(total_quantity).is_integer() else f"{total_quantity:.2f}"
+        c.drawString(ITEM_NAME_X, y, str(total_articles))
+        c.drawRightString(qty_x, y, total_qty_text)
+        c.drawRightString(price_x, y, "")
+        c.drawRightString(total_x, y, self.format_amount(subtotal))
+        y -= 6 * mm
 
         # =========================
         # RÉCAP
@@ -782,36 +834,37 @@ class InvoicePrintManager:
         c.setFont('Helvetica', 10)
         c.drawString(LEFT_MARGIN, y, f"Remise: {self.format_amount(remise)}")
         y -= 4 * mm
-        c.drawString(LEFT_MARGIN, y, f"Net à payer: {self.format_amount(net)}")
-        y -= 4 * mm
 
-        # ------ Correspondance devise ------
         _currency = (self.company_info.get('currency') or 'USD') if hasattr(self, 'company_info') and self.company_info else 'USD'
         _taux = self.company_info.get('taux_de_change') if hasattr(self, 'company_info') and self.company_info else None
-        if _taux and _taux > 0 and net > 0:
-            _currency_norm = _currency.upper().strip()
-            _is_franc = _currency_norm in ('FC', 'CDF', 'XAF', 'XOF', 'CFA', 'FRANC')
+        _currency_norm = str(_currency).upper().strip()
+        _is_franc = _currency_norm in ('FC', 'CDF', 'XAF', 'XOF', 'CFA', 'FRANC')
+        _is_usd = _currency_norm in ('USD', '$', 'DOLLAR')
 
-            if _is_franc:
-                _equiv = net / _taux
-                _equiv_str = f"{_equiv:,.2f}".replace(",", " ") + " $"
-                _taux_str = f"{_taux:,.0f}".replace(",", " ")
-                c.setFont(self._font_regular, 8)
-                c.drawString(LEFT_MARGIN, y, f"Soit: {_equiv_str}")
+        if _is_usd:
+            c.setFont('Helvetica-Bold', 10)
+            c.drawString(LEFT_MARGIN, y, f"Net à payer $: {self.format_amount(net)}")
+            y -= 4 * mm
+            if _taux and _taux > 0 and net > 0:
+                total_fc = net * _taux
+                total_fc_str = f"{int(round(total_fc)):,}".replace(",", " ")
+                c.setFont('Helvetica', 10)
+                c.drawString(LEFT_MARGIN, y, f"Total FC: {total_fc_str}")
                 y -= 4 * mm
-                c.drawString(LEFT_MARGIN, y, f"Taux: 1 $ = {_taux_str} FC")
+        elif _is_franc:
+            c.setFont('Helvetica-Bold', 10)
+            c.drawString(LEFT_MARGIN, y, f"Net à payer FC: {self.format_amount(net)}")
+            y -= 4 * mm
+            if _taux and _taux > 0 and net > 0:
+                total_usd = net / _taux
+                total_usd_str = f"{total_usd:,.2f}".replace(",", " ")
+                c.setFont('Helvetica', 10)
+                c.drawString(LEFT_MARGIN, y, f"Total $: {total_usd_str}")
                 y -= 4 * mm
-            elif _currency_norm in ('USD', '$', 'DOLLAR'):
-                _equiv = net * _taux
-                _equiv_rounded = int(round(_equiv))
-                _equiv_str = f"{_equiv_rounded:,}".replace(",", " ") + " FC"
-                _taux_str = f"{_taux:,.0f}".replace(",", " ")
-                c.setFont(self._font_regular, 8)
-                c.drawString(LEFT_MARGIN, y, f"Soit: {_equiv_str}")
-                y -= 4 * mm
-                c.drawString(LEFT_MARGIN, y, f"Taux: 1 $ = {_taux_str} FC")
-                y -= 4 * mm
-        # -----------------------------------
+        else:
+            c.setFont('Helvetica-Bold', 10)
+            c.drawString(LEFT_MARGIN, y, f"Net à payer: {self.format_amount(net)}")
+            y -= 4 * mm
 
         c.setFont('Helvetica', 10)
         c.drawString(LEFT_MARGIN, y, f"Payé: {self.format_amount(total_paid)}")
