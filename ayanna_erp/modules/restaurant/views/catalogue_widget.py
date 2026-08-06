@@ -16,6 +16,7 @@ from ayanna_erp.modules.restaurant.utils.bon_commande_printer import BonCommande
 from ayanna_erp.database.database_manager import get_database_manager, User
 from sqlalchemy import text
 from ayanna_erp.utils.formatting import get_currency
+from ayanna_erp.utils.sumatra_printer import SumatraPrinter
 import os
 import platform
 import subprocess
@@ -75,37 +76,9 @@ class CatalogueWidget(QWidget):
 
     def _print_pdf_with_default_printer(self, file_path: str) -> tuple[bool, str | None]:
         """Send a PDF file directly to the system default printer."""
-        try:
-            if platform.system() == 'Windows':
-                # Try common Windows PDF viewers for silent print
-                try:
-                    subprocess.run(['SumatraPDF.exe', '-print-to-default', file_path], check=True, timeout=15)
-                    return True, None
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-
-                try:
-                    subprocess.run(['AcroRd32.exe', '/t', file_path], check=True, timeout=20)
-                    return True, None
-                except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
-                    pass
-
-                # Fallback to PowerShell print command
-                subprocess.run([
-                    'powershell', '-NoProfile', '-Command',
-                    f'Start-Process -FilePath "{file_path}" -Verb Print -WindowStyle Hidden'
-                ], check=True, timeout=30)
-                return True, None
-
-            if platform.system() in ('Darwin', 'Linux'):
-                subprocess.run(['lpr', file_path], check=True, timeout=15)
-                return True, None
-
-            return False, 'Système non pris en charge pour l\'impression automatique.'
-        except Exception as e:
-            error_text = str(e) or 'Erreur inconnue'
-            print(f"Erreur impression directe du PDF: {error_text}")
-            return False, error_text
+        printer = SumatraPrinter()
+        success, message = printer.print_pdf(file_path)
+        return success, message
 
     def init_ui(self):
         main = QVBoxLayout(self)
@@ -477,7 +450,6 @@ class CatalogueWidget(QWidget):
                 /* no outer border as requested */
             }}
             QFrame:hover {{
-                box-shadow: 0 0 8px rgba(0,0,0,0.06);
                 background-color: #F8FAFF;
             }}
         """)
@@ -1783,6 +1755,12 @@ class CatalogueWidget(QWidget):
                         QMessageBox.critical(self, 'Erreur d\'impression', 'Impossible d\'imprimer automatiquement le bon de commande.')
             except Exception as e:
                 QMessageBox.critical(self, 'Erreur', f"Impossible d\'imprimer le bon de commande: {e}")
+            finally:
+                if tmpf is not None:
+                    try:
+                        os.unlink(tmpf.name)
+                    except Exception:
+                        pass
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Erreur impression bon de commande: {e}")
 

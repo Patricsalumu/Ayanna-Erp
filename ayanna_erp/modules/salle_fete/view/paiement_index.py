@@ -1305,10 +1305,30 @@ class PaiementIndex(QWidget):
                                          check=True, timeout=10)
                         except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
                             try:
+                                os.startfile(file_path, 'print')
+                                QMessageBox.information(self, "Impression envoyée", 
+                                                       "Le document a été envoyé à l'imprimante par défaut.")
+                                return
+                            except Exception:
+                                pass
+
+                            try:
+                                subprocess.run(['cmd', '/c', 'start', '/min', '', '/print', file_path], 
+                                               check=True, timeout=10)
+                                QMessageBox.information(self, "Impression envoyée", 
+                                                       "Le document a été envoyé à l'imprimante par défaut.")
+                                return
+                            except Exception:
+                                pass
+
+                            try:
                                 subprocess.run(['powershell', '-Command', 
-                                              f'Start-Process -FilePath "{file_path}" -Verb Print'], 
-                                             check=True, timeout=10)
-                            except:
+                                                f'Start-Process -FilePath "{file_path}" -Verb Print'], 
+                                               check=True, timeout=10)
+                                QMessageBox.information(self, "Impression envoyée", 
+                                                       "Le document a été envoyé à l'imprimante par défaut.")
+                                return
+                            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired, OSError):
                                 os.startfile(file_path)
                                 QMessageBox.information(self, "Impression", 
                                                        "Le fichier PDF a été ouvert. Veuillez utiliser Ctrl+P pour imprimer.")
