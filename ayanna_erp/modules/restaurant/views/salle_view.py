@@ -161,6 +161,7 @@ class SalleView(QWidget):
         self.entreprise_id = entreprise_id
         self.ctrl = SalleController(entreprise_id=self.entreprise_id)
         self.selected_table_id = None
+        self.current_salle_id = None
         self.table_widgets = {}
         self.init_ui()
 
@@ -187,7 +188,9 @@ class SalleView(QWidget):
 
         # Liste des salles
         self.list_widget = QListWidget()
+        self.list_widget.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
         self.list_widget.itemClicked.connect(self.on_salle_selected)
+        self.list_widget.currentItemChanged.connect(self.on_salle_selected)
         layout.addWidget(self.list_widget)
 
         # Plan + controls
@@ -264,25 +267,57 @@ class SalleView(QWidget):
         if not name:
             return
         try:
-            self.ctrl.create_salle(name)
+            salle = self.ctrl.create_salle(name)
             self.salle_name.setText('')
+            self.current_salle_id = getattr(salle, 'id', None)
             self.load_salles()
+            self._select_salle_by_id(self.current_salle_id)
         except Exception as e:
             print(f"Erreur add_salle: {e}")
 
+    def _select_salle_by_id(self, salle_id):
+        if salle_id is None:
+            return
+        sid_norm = str(salle_id)
+        for index in range(self.list_widget.count()):
+            item = self.list_widget.item(index)
+            try:
+                current_id = str(item.text()).split(' - ', 1)[0].strip()
+            except Exception:
+                continue
+            if current_id == sid_norm:
+                self.list_widget.setCurrentItem(item)
+                self.current_salle_id = sid_norm
+                return
+
     def load_salles(self):
+        previous_id = self.current_salle_id
         self.list_widget.clear()
         try:
             salles = self.ctrl.list_salles()
             for s in salles:
                 self.list_widget.addItem(f"{s.id} - {s.name}")
+            if previous_id is not None:
+                self._select_salle_by_id(previous_id)
+                if self.current_salle_id is not None:
+                    return
+            if self.list_widget.count() > 0:
+                self.list_widget.setCurrentRow(0)
+                first_item = self.list_widget.currentItem()
+                if first_item is not None:
+                    self.on_salle_selected(first_item)
         except Exception as e:
             print(f"Erreur load_salles: {e}")
 
     def on_salle_selected(self, item):
-        # Extraire id
+        if item is None:
+            return
         try:
-            sid = int(str(item.text()).split(' - ')[0])
+            if hasattr(item, 'text'):
+                text = item.text()
+            else:
+                text = str(item)
+            sid = str(text).split(' - ', 1)[0].strip()
         except Exception:
             return
         self.current_salle_id = sid
@@ -305,14 +340,16 @@ class SalleView(QWidget):
     def add_table_from_ui(self):
         number = self.table_number.text().strip() or 'T'
         try:
-            if not getattr(self, 'current_salle_id', None):
-                QMessageBox.warning(self, 'Sélectionnez une salle', 'Veuillez sélectionner une salle avant d\'ajouter une table')
-                return
-            # Default position at 10,10
+            if getattr(self, 'current_salle_id', None) is None:
+                current_item = self.list_widget.currentItem()
+                if current_item is not None:
+                    self.on_salle_selected(current_item)
+                if getattr(self, 'current_salle_id', None) is None:
+                    QMessageBox.warning(self, 'Sélectionnez une salle', 'Veuillez sélectionner une salle avant d\'ajouter une table')
+                    return
             shape = str(self.new_table_shape.currentText() or 'rectangle')
             t = self.ctrl.create_table(self.current_salle_id, number, pos_x=10, pos_y=10, shape=shape)
             self.table_number.setText('')
-            # recharger l'affichage pour assurer cohérence
             self.load_tables_for_salle(self.current_salle_id)
         except Exception as e:
             print(f"Erreur add_table_from_ui: {e}")

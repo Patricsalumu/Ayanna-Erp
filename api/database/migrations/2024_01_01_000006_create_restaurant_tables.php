@@ -18,6 +18,21 @@ return new class extends Migration
             $table->softDeletes();
         });
 
+        Schema::create('restau_bon_commandes', function (Blueprint $table) {
+            $table->uuid('id')->primary();
+            $table->uuid('entreprise_id')->nullable()->index();
+            $table->uuid('restau_panier_id')->nullable()->index();
+            $table->string('numero_bon', 50)->nullable();
+            $table->uuid('user_id')->nullable()->index();
+            $table->uuid('client_id')->nullable()->index();
+            $table->uuid('serveuse_id')->nullable()->index();
+            $table->json('produits_json')->nullable();
+            $table->decimal('montant_total', 15, 2)->default(0);
+            $table->string('statut', 50)->default('valide');
+            $table->timestamps();
+            $table->softDeletes();
+        });
+
         Schema::create('restau_tables', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->uuid('salle_id')->nullable()->index();
@@ -106,6 +121,7 @@ return new class extends Migration
         Schema::dropIfExists('restau_payments');
         Schema::dropIfExists('restau_produit_panier');
         Schema::dropIfExists('restau_paniers');
+        Schema::dropIfExists('restau_bon_commandes');
         Schema::dropIfExists('restau_tables');
         Schema::dropIfExists('restau_salles');
     }

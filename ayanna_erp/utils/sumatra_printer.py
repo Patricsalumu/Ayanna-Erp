@@ -2,6 +2,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 
 
 class SumatraPrinter:
@@ -19,12 +20,28 @@ class SumatraPrinter:
     def find_sumatra_executable(self) -> str | None:
         if platform.system() != "Windows":
             return None
-
         candidates = []
+
+        # 1) If bundled by PyInstaller (--onefile), check the extracted _MEIPASS/printers
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            candidates.append(os.path.join(meipass, 'printers', self.SUMATRA_EXECUTABLE))
+
+        # 2) If running as a frozen executable, prefer printers next to the executable
+        if getattr(sys, 'frozen', False):
+            exe_dir = os.path.dirname(sys.executable)
+            candidates.append(os.path.join(exe_dir, 'printers', self.SUMATRA_EXECUTABLE))
+            candidates.append(os.path.join(exe_dir, self.SUMATRA_EXECUTABLE))
+
+        # 3) Check working directory `printers` (when user places printers folder next to the exe)
+        candidates.append(os.path.join(os.getcwd(), 'printers', self.SUMATRA_EXECUTABLE))
+
+        # 4) Check system PATH
         found_in_path = shutil.which(self.SUMATRA_EXECUTABLE)
         if found_in_path:
             candidates.append(found_in_path)
 
+        # 5) Check common Program Files locations and repo-embedded printers
         candidates.extend(self.SYSTEM_PATHS)
         candidates.extend(self._get_embedded_paths())
 

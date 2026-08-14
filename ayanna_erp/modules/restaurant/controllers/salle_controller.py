@@ -1,6 +1,7 @@
 """
 Controller to manage salles and tables (CRUD)
 """
+import uuid
 from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.restaurant.models.restaurant import RestauSalle, RestauTable
 from datetime import datetime
@@ -15,10 +16,13 @@ class SalleController:
     def create_salle(self, name):
         session = self.db.get_session()
         try:
-            salle = RestauSalle(entreprise_id=self.entreprise_id, name=name)
+            salle = RestauSalle(
+                id=str(uuid.uuid4()),
+                entreprise_id=self.entreprise_id,
+                name=name,
+            )
             session.add(salle)
             session.commit()
-            # rafraîchir et détacher l'objet pour éviter les objets liés à une session fermée
             session.refresh(salle)
             data = {k: v for k, v in salle.__dict__.items() if not k.startswith('_')}
             ns = SimpleNamespace(**data)
@@ -34,6 +38,7 @@ class SalleController:
         session = self.db.get_session()
         try:
             table = RestauTable(
+                id=str(uuid.uuid4()),
                 salle_id=salle_id,
                 number=number,
                 pos_x=pos_x,

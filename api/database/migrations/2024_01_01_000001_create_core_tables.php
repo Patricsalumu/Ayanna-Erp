@@ -39,6 +39,7 @@ return new class extends Migration
             $table->string('email', 100)->unique();
             $table->string('password', 255);
             $table->string('role', 50)->default('admin');
+            $table->json('modules')->nullable();
             $table->timestamps();
             $table->softDeletes();
             $table->index('enterprise_id');

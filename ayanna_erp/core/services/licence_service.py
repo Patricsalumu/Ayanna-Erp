@@ -169,90 +169,26 @@ def activer_licence(cle: str):
 
 
 def verifier_licence():
-    """Vérifie la présence d'une licence active locale et l'intégrité de sa signature.
+    """Vérifie uniquement si une licence valide n'est pas expirée.
 
-    Retourne (True, message) si valide, sinon (False, message).
+    Logique demandée : si aucune licence active et non expirée n'existe,
+    la fenêtre d'activation est affichée. La vérification de signature n'est
+    pas faite au démarrage ; on se base seulement sur la date actuelle et la
+    date d'expiration de la dernière licence enregistrée.
     """
     db_manager = get_database_manager()
     session = db_manager.get_session()
     try:
-        # Chercher une licence active
-        licence = session.query(Licence).filter_by(active=True).order_by(Licence.date_activation.desc()).first()
-
-        # Si aucune licence active trouvée, chercher une licence non expirée
-        if not licence:
-            now = _normalize(_now_utc())
-            licence = session.query(Licence).filter(Licence.date_expiration >= now).order_by(Licence.date_activation.desc()).first()
-            if licence:
-                licence.active = True
-                session.commit()
-
-        if not licence:
-            # Fallback: the ORM mapping might not load rows when PK types differ
-            # Query the table directly as a last resort.
-            try:
-                dbm = get_database_manager()
-                with dbm.engine.connect() as conn:
-                    now = _normalize(_now_utc())
-                    row = conn.execute(text("SELECT id, cle, signature, active, date_activation, date_expiration FROM licences WHERE active=1 ORDER BY date_activation DESC LIMIT 1")).fetchone()
-                    if not row:
-                        # try non-expired
-                        row = conn.execute(text("SELECT id, cle, signature, active, date_activation, date_expiration FROM licences WHERE date_expiration >= :now ORDER BY date_activation DESC LIMIT 1"), {"now": now}).fetchone()
-                    if not row:
-                        return False, "Aucune licence active."
-                    # Build a lightweight object-like dict to reuse validation logic below
-                    licence = type('L', (), {})()
-                    licence.id = row[0]
-                    licence.cle = row[1]
-                    licence.signature = row[2]
-                    licence.active = bool(row[3])
-                    from datetime import datetime as _dt
-                    licence.date_activation = row[4]
-                    de = row[5]
-                    if isinstance(de, str):
-                        try:
-                            licence.date_expiration = _dt.fromisoformat(de)
-                        except Exception:
-                            try:
-                                licence.date_expiration = _dt.strptime(de.split('.')[0], '%Y-%m-%d %H:%M:%S')
-                            except Exception:
-                                licence.date_expiration = de
-                    else:
-                        licence.date_expiration = de
-                    # Also keep a DB session to persist potential fixes
-                    session = dbm.get_session()
-            except Exception:
-                return False, "Aucune licence active."
-
-        # Vérifier la signature : on calcule la signature attendue avec HMAC (si secret présent)
-        signature_attendue = generer_signature(licence.cle, licence.date_expiration, deja_hash=True)
-        if licence.signature != signature_attendue:
-            # The server may have sent the raw key instead of its stored hash.
-            # Try regenerating the signature treating `licence.cle` as raw (not hashed).
-            try_alternate = generer_signature(licence.cle, licence.date_expiration, deja_hash=False)
-            if licence.signature == try_alternate:
-                # Convert stored cle to its hashed form for future checks
-                try:
-                    cle_hash = hash_cle(licence.cle)
-                    licence.cle = cle_hash
-                    session.commit()
-                except Exception:
-                    session.rollback()
-            else:
-                # Fallback backward-compat: essayer ancienne méthode (SHA256 sans secret)
-                base = f"{licence.cle}:{licence.date_expiration.isoformat()}"
-                ancienne = hashlib.sha256(base.encode('utf-8')).hexdigest()
-                if licence.signature != ancienne:
-                    # Si la signature ne correspond pas, on marque la licence inactive (possible modification de la date)
-                    licence.active = False
-                    session.commit()
-                    return False, "Intégrité de la licence compromise (signature invalide)."
-
-        # Vérifier expiration
         now = _normalize(_now_utc())
+
+        # Prendre la licence la plus récente, comme "dernière licence".
+        licence = session.query(Licence).order_by(Licence.date_activation.desc()).first()
+        if not licence:
+            return False, "Aucune licence enregistrée."
+
+        # La licence est valide tant que la date du serveur est avant ou égale
+        # à la date d'expiration de cette licence la plus récente.
         if _normalize(licence.date_expiration) < now:
-            licence.active = False
-            session.commit()
             return False, "La licence a expiré."
 
         return True, "Licence valide."

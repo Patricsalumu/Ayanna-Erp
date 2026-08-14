@@ -17,7 +17,7 @@ import importlib
 import threading
 from datetime import datetime
 import re
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text, event, func
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, ForeignKey, Boolean, Numeric, Text, LargeBinary, text, event, func, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, relationship
 from sqlalchemy.pool import StaticPool
@@ -214,13 +214,18 @@ class DatabaseManager:
     
     def __init__(self, database_url=None):
         if database_url is None:
-            database_url = "sqlite:///ayanna_erp.db"
-        self.engine = create_engine(
-            database_url,
-            poolclass=StaticPool,
-            connect_args={"check_same_thread": False} if "sqlite" in database_url else {},
-            echo=False
-        )
+            database_url = os.getenv("DATABASE_URL", "sqlite:///ayanna_erp.db")
+
+        engine_kwargs = {"echo": False}
+
+        if "sqlite" in database_url:
+            engine_kwargs["poolclass"] = StaticPool
+            engine_kwargs["connect_args"] = {"check_same_thread": False}
+        else:
+            engine_kwargs["pool_pre_ping"] = True
+            engine_kwargs["future"] = True
+
+        self.engine = create_engine(database_url, **engine_kwargs)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.session = None
         self.current_enterprise_id = None
@@ -258,6 +263,14 @@ class DatabaseManager:
                     pass
                 try:
                     self._migrate_updated_at_columns()
+                except Exception:
+                    pass
+                try:
+                    self._fix_restaurant_uuid_primary_keys()
+                except Exception:
+                    pass
+                try:
+                    self._migrate_restaurant_compat_columns()
                 except Exception:
                     pass
                 try:
@@ -303,6 +316,21 @@ class DatabaseManager:
         if self.session:
             self.session.close()
             self.session = None
+
+    def table_exists(self, table_name: str) -> bool:
+        """Retourne True si la table existe quelle que soit la base (SQLite/MySQL)."""
+        try:
+            return table_name in inspect(self.engine).get_table_names()
+        except Exception:
+            return False
+
+    def column_exists(self, table_name: str, column_name: str) -> bool:
+        """Retourne True si la colonne existe quelle que soit la base (SQLite/MySQL)."""
+        try:
+            columns = inspect(self.engine).get_columns(table_name)
+            return any(col.get('name') == column_name for col in columns)
+        except Exception:
+            return False
 
     @contextmanager
     def session_scope(self):
@@ -365,10 +393,13 @@ class DatabaseManager:
             print(f"Erreur lors de l'initialisation de la base de données: {e}")
             return False
     
-    def _insert_default_data(self):
-        """Insérer les données par défaut"""
+    def seed_default_data(self):
+        """Insère les données par défaut pour une base vide, compatible SQLite et MySQL."""
+        Base.metadata.create_all(bind=self.engine, checkfirst=True)
+        self.initialize_modules()
+
         session = self.get_session()
-        
+
         try:
             # Créer une entreprise par défaut si elle n'existe pas
             default_enterprise = session.query(Entreprise).first()
@@ -383,7 +414,7 @@ class DatabaseManager:
                 )
                 session.add(default_enterprise)
                 session.flush()  # Pour obtenir l'ID
-            
+
             # Créer un utilisateur administrateur par défaut
             admin_user = session.query(User).filter_by(email="admin@ayanna.com").first()
             if not admin_user:
@@ -399,7 +430,7 @@ class DatabaseManager:
                 print("   Email: admin@ayanna.com")
                 print("   Mot de passe: admin123")
                 print("   Rôle: super_admin")
-            
+
             # Insérer les modules par défaut (toujours)
             modules_default = [
                 {"name": "SalleFete", "description": "Gestion des salles de fête et événements"},
@@ -418,13 +449,13 @@ class DatabaseManager:
                 if not existing:
                     module = Module(**module_data)
                     session.add(module)
-            
+
             # S'assurer que les modules sont persistés avant de créer les POS
             session.flush()
-            
+
             # Créer automatiquement des POS pour chaque module de l'entreprise par défaut
             self._create_pos_for_enterprise(session, default_enterprise.id)
-            
+
             # Initialiser les données comptables par défaut
             self._insert_default_accounting_data(session, default_enterprise.id)
 
@@ -432,11 +463,18 @@ class DatabaseManager:
             self._insert_default_payment_modes(session, default_enterprise.id)
 
             session.commit()
-            
+            return True
+
         except Exception as e:
             session.rollback()
+            print(f"❌ seed_default_data : {e}")
+            return False
         finally:
             session.close()
+
+    def _insert_default_data(self):
+        """Alias historique pour l'insertion des données par défaut."""
+        return self.seed_default_data()
 
     def _journal_default_data(self):
         """
@@ -618,12 +656,10 @@ class DatabaseManager:
     def initialize_modules(self):
         """Initialiser (créer) les tables pour les modules connus en réutilisant l'engine.
 
-        Pour chaque module listé dans MODULE_MODEL_PATHS, on tente d'importer
-        le module de modèles, on collecte les classes qui exposent `__table__`
-        et on appelle `Base.metadata.create_all(..., tables=...)`.
-        Les erreurs d'import sont tolérées et logguées.
+        Le traitement est centralisé pour éviter les dépendances FK mal ordonnées
+        (MySQL exige qu'une table référencée soit créée avant la table enfant).
         """
-        created_count = 0
+        all_tables = []
         for mod_name, import_path in MODULE_MODEL_PATHS.items():
             try:
                 mod = importlib.import_module(import_path)
@@ -631,24 +667,25 @@ class DatabaseManager:
                 print(f"⚠️ Module '{mod_name}' non importable ({import_path}): {e}")
                 continue
 
-            tables = []
             for attr_name in dir(mod):
                 try:
                     attr = getattr(mod, attr_name)
                     if hasattr(attr, '__table__'):
-                        tables.append(attr.__table__)
+                        all_tables.append(attr.__table__)
                 except Exception:
                     continue
 
-            if tables:
-                try:
-                    Base.metadata.create_all(bind=self.engine, tables=tables, checkfirst=True)
-                    created_count += len(tables)
-                    print(f"✅ {len(tables)} tables créées pour le module '{mod_name}'")
-                except Exception as e:
-                    print(f"⚠️ Erreur lors de la création des tables pour '{mod_name}': {e}")
-            else:
-                print(f"ℹ️ Aucun modèle détecté pour le module '{mod_name}' ({import_path})")
+        unique_tables = list(dict.fromkeys(all_tables))
+        if unique_tables:
+            try:
+                Base.metadata.create_all(bind=self.engine, tables=unique_tables, checkfirst=True)
+                created_count = len(unique_tables)
+                print(f"✅ {created_count} tables créées/validées pour les modules")
+            except Exception as e:
+                print(f"⚠️ Erreur lors de la création des tables des modules: {e}")
+        else:
+            created_count = 0
+            print("ℹ️ Aucun modèle détecté pour les modules importés")
 
         print(f"✅ Initialisation de modules terminée. Total de tables traitées: {created_count}")
 
@@ -689,12 +726,8 @@ class DatabaseManager:
             # Seed pour les entreprises existantes (idempotent).
             # Si la table core_enterprises n'existe pas encore (premier demarrage),
             # on sort silencieusement ; le seed sera fait par _insert_default_data().
-            with self.engine.connect() as conn:
-                tables = conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_enterprises'")
-                ).fetchall()
-                if not tables:
-                    return
+            if not self.table_exists('core_enterprises'):
+                return
             with self.session_scope() as session:
                 enterprises = session.query(Entreprise).all()
                 for ent in enterprises:
@@ -750,17 +783,12 @@ class DatabaseManager:
         accessibles par l'utilisateur. Elle a été ajoutée lors du travail
         sur l'API et peut manquer dans les anciennes bases de données.
         """
-        with self.engine.connect() as conn:
-            exists = conn.execute(
-                text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_users'")
-            ).fetchone()
-            if not exists:
-                return
-            cols = [row[1] for row in conn.execute(text("PRAGMA table_info(core_users)")).fetchall()]
-            if 'modules' not in cols:
+        if not self.table_exists('core_users'):
+            return
+        if not self.column_exists('core_users', 'modules'):
+            with self.engine.begin() as conn:
                 conn.execute(text("ALTER TABLE core_users ADD COLUMN modules TEXT"))
-                conn.commit()
-                print("✅ Migration : colonne modules ajoutée à core_users")
+            print("✅ Migration : colonne modules ajoutée à core_users")
 
     def _migrate_core_sync_tables(self):
         """
@@ -782,8 +810,7 @@ class DatabaseManager:
     def _migrate_updated_at_columns(self):
         """
         Ajoute les colonnes created_at / updated_at aux tables locales si elles sont absentes.
-        Le serveur Laravel retourne toujours ces timestamps ; sans elles le PULL échoue
-        avec OperationalError sur les tables de synchronisation.
+        Le serveur Laravel retourne toujours ces timestamps ; sans elles le PULL échoue.
         """
         tables = {
             'core_enterprises': ['created_at', 'updated_at'],
@@ -845,15 +872,12 @@ class DatabaseManager:
             'production_items': ['created_at', 'updated_at'],
             'production_losses': ['created_at', 'updated_at'],
         }
-        with self.engine.connect() as conn:
+        with self.engine.begin() as conn:
             for tbl, cols in tables.items():
-                exists = conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
-                    {'t': tbl}
-                ).fetchone()
-                if not exists:
+                if not self.table_exists(tbl):
                     continue
-                existing_cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
+                inspector = inspect(self.engine)
+                existing_cols = [col['name'] for col in inspector.get_columns(tbl)]
                 for col in cols:
                     if col in existing_cols:
                         continue
@@ -862,7 +886,222 @@ class DatabaseManager:
                         print(f"✅ Migration : colonne {col} ajoutée à {tbl}")
                     except Exception as e:
                         print(f"⚠️ {col} / {tbl} : {e}")
-            conn.commit()
+
+    def _fix_restaurant_uuid_primary_keys(self):
+        """Nettoie les lignes restaurant dont l'ID est vide (legacy SQLite/MySQL)."""
+        try:
+            for table_name in ['restau_salles', 'restau_tables', 'restau_paniers', 'restau_payments', 'restau_bon_commandes']:
+                if not self.table_exists(table_name):
+                    continue
+                with self.engine.begin() as conn:
+                    try:
+                        conn.execute(text(f"UPDATE {table_name} SET id = UUID() WHERE id IS NULL OR TRIM(id) = ''"))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    def _migrate_restaurant_compat_columns(self):
+        """Ajoute les colonnes PHP/MySQL attendues par les modèles Python.
+
+        Les migrations Laravel ne couvrent pas toujours les colonnes ajoutées par
+        le code Python pour le multi-entreprise et les différents modules. Cette
+        méthode les complète de manière idempotente sans casser le schéma existant.
+        """
+        try:
+            compat_map = {
+                'core_product_categories': {
+                    'entreprise_id': 'INTEGER NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'shop_clients': {
+                    'notes': 'TEXT NULL',
+                    'pays': 'VARCHAR(100) NULL',
+                    'carte_identite': 'VARCHAR(100) NULL',
+                    'type_carte': 'VARCHAR(50) NULL',
+                },
+                'shop_paniers': {
+                    'numero_commande': 'VARCHAR(50) NULL',
+                    'status': 'VARCHAR(50) NULL',
+                    'payment_method': 'VARCHAR(50) NULL',
+                    'subtotal': 'DECIMAL(15,2) NULL',
+                    'remise_amount': 'DECIMAL(15,2) NULL',
+                    'total_final': 'DECIMAL(15,2) NULL',
+                    'pret': 'BOOLEAN NULL',
+                    'livre': 'BOOLEAN NULL',
+                    'notes': 'TEXT NULL',
+                    'validated_at': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'shop_paniers_products': {
+                    'quantity': 'DECIMAL(15,2) NULL',
+                    'price_unit': 'DECIMAL(15,2) NULL',
+                    'total_price': 'DECIMAL(15,2) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'shop_paniers_services': {
+                    'quantity': 'DECIMAL(15,2) NULL',
+                    'price_unit': 'DECIMAL(15,2) NULL',
+                    'total_price': 'DECIMAL(15,2) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'shop_payments': {
+                    'amount': 'DECIMAL(15,2) NULL',
+                    'payment_date': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_salles': {
+                    'entreprise_id': 'INTEGER NULL',
+                    'name': 'VARCHAR(200) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_tables': {
+                    'number': 'VARCHAR(50) NULL',
+                    'name': 'VARCHAR(200) NULL',
+                    'pos_x': 'INTEGER NULL',
+                    'pos_y': 'INTEGER NULL',
+                    'width': 'INTEGER NULL',
+                    'height': 'INTEGER NULL',
+                    'shape': 'VARCHAR(50) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_paniers': {
+                    'subtotal': 'DECIMAL(15,2) NULL',
+                    'remise_amount': 'DECIMAL(15,2) NULL',
+                    'total_final': 'DECIMAL(15,2) NULL',
+                    'payment_method': 'VARCHAR(100) NULL',
+                    'status': 'VARCHAR(50) NULL',
+                    'pret': 'BOOLEAN NULL',
+                    'livre': 'BOOLEAN NULL',
+                    'notes': 'TEXT NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_produit_panier': {
+                    'quantity': 'DECIMAL(15,3) NULL',
+                    'price_unit': 'DECIMAL(15,2) NULL',
+                    'total_price': 'DECIMAL(15,2) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_payments': {
+                    'amount': 'DECIMAL(15,2) NULL',
+                    'payment_method': 'VARCHAR(100) NULL',
+                    'user_id': 'INTEGER NULL',
+                    'payment_date': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'event_services': {
+                    'name': 'VARCHAR(200) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_tables': {
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'restau_printed_invoices': {
+                    'entreprise_id': 'INTEGER NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'event_services': {
+                    'name': 'VARCHAR(200) NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'stock_mouvements': {
+                    'movement_date': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'compta_classes': {
+                    'date_creation': 'DATETIME NULL',
+                    'date_modification': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'compta_comptes': {
+                    'date_creation': 'DATETIME NULL',
+                    'date_modification': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'compta_journaux': {
+                    'date_creation': 'DATETIME NULL',
+                    'date_modification': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+                'compta_ecritures': {
+                    'date_creation': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
+            }
+
+            with self.engine.begin() as conn:
+                for table_name, columns in compat_map.items():
+                    if not self.table_exists(table_name):
+                        continue
+                    cols = {col['name'] for col in inspect(self.engine).get_columns(table_name)}
+                    for col_name, col_type in columns.items():
+                        if col_name in cols:
+                            continue
+                        try:
+                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"))
+                            print(f"✅ Migration : colonne {col_name} ajoutée à {table_name}")
+                        except Exception as exc:
+                            print(f"⚠️ {table_name}.{col_name} : {exc}")
+
+                # Valeurs de secours pour les colonnes de type entreprise_id / dates
+                if self.table_exists('restau_salles') and not self.column_exists('restau_salles', 'entreprise_id'):
+                    conn.execute(text("ALTER TABLE restau_salles ADD COLUMN entreprise_id INTEGER NULL"))
+                    conn.execute(text("UPDATE restau_salles SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'entreprise_id'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN entreprise_id INTEGER NULL"))
+                    conn.execute(text("UPDATE restau_printed_invoices SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'total_items_quantity'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN total_items_quantity INTEGER NOT NULL DEFAULT 0"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'product_lines_count'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN product_lines_count INTEGER NOT NULL DEFAULT 0"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'total_amount'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN total_amount DECIMAL(15,2) NOT NULL DEFAULT 0"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'products_snapshot'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN products_snapshot TEXT NULL"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'printed_by_user_id'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN printed_by_user_id CHAR(36) NULL"))
+                if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'printed_at'):
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN printed_at DATETIME NULL"))
+
+                if self.table_exists('compta_classes') and not self.column_exists('compta_classes', 'date_creation'):
+                    conn.execute(text("ALTER TABLE compta_classes ADD COLUMN date_creation DATETIME NULL"))
+                    conn.execute(text("UPDATE compta_classes SET date_creation = created_at WHERE date_creation IS NULL AND created_at IS NOT NULL"))
+                    conn.execute(text("ALTER TABLE compta_classes ADD COLUMN date_modification DATETIME NULL"))
+                    conn.execute(text("UPDATE compta_classes SET date_modification = updated_at WHERE date_modification IS NULL AND updated_at IS NOT NULL"))
+
+                if self.table_exists('core_product_categories') and not self.column_exists('core_product_categories', 'entreprise_id'):
+                    conn.execute(text("ALTER TABLE core_product_categories ADD COLUMN entreprise_id INTEGER NULL"))
+                    conn.execute(text("UPDATE core_product_categories SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+
+                if self.table_exists('core_products') and not self.column_exists('core_products', 'entreprise_id'):
+                    conn.execute(text("ALTER TABLE core_products ADD COLUMN entreprise_id CHAR(36) NULL"))
+                    conn.execute(text("UPDATE core_products SET `entreprise_id` = `enterprise_id` WHERE `entreprise_id` IS NULL AND `enterprise_id` IS NOT NULL"))
+
+                if self.table_exists('restau_salles') and not self.column_exists('restau_salles', 'name') and self.column_exists('restau_salles', 'nom'):
+                    conn.execute(text("ALTER TABLE restau_salles CHANGE COLUMN nom name VARCHAR(200) NULL"))
+
+        except Exception as e:
+            print(f"⚠️ _migrate_restaurant_compat_columns : {e}")
 
     def _migrate_compta_timestamps(self):
         """
@@ -870,25 +1109,18 @@ class DatabaseManager:
         si ces colonnes sont absentes (le serveur Laravel les retourne toujours).
         """
         tables = ['compta_classes', 'compta_comptes']
-        with self.engine.connect() as conn:
+        with self.engine.begin() as conn:
             for tbl in tables:
-                exists = conn.execute(
-                    text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"),
-                    {'t': tbl}
-                ).fetchone()
-                if not exists:
+                if not self.table_exists(tbl):
                     continue
-                cols = [row[1] for row in conn.execute(text(f"PRAGMA table_info({tbl})")).fetchall()]
+                cols = [col['name'] for col in inspect(self.engine).get_columns(tbl)]
                 for col in ['created_at', 'updated_at']:
                     if col not in cols:
                         try:
-                            conn.execute(text(
-                                f"ALTER TABLE {tbl} ADD COLUMN {col} DATETIME"
-                            ))
+                            conn.execute(text(f"ALTER TABLE {tbl} ADD COLUMN {col} DATETIME"))
                             print(f"✅ Migration : colonne {col} ajoutée à {tbl}")
                         except Exception as e:
                             print(f"⚠️ {col} / {tbl} : {e}")
-            conn.commit()
 
     def _migrate_core_products_columns(self):
         """
@@ -896,13 +1128,10 @@ class DatabaseManager:
         si elles sont absentes (migration idempotente).
         """
         try:
-            with self.engine.connect() as conn:
-                exists = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='core_products'")).fetchone()
-                if not exists:
-                    return
-                res = conn.execute(text("PRAGMA table_info('core_products')")).fetchall()
-                cols = {r[1] for r in res}
-
+            if not self.table_exists('core_products'):
+                return
+            cols = {col['name'] for col in inspect(self.engine).get_columns('core_products')}
+            with self.engine.begin() as conn:
                 if 'product_type' not in cols:
                     try:
                         conn.execute(text("ALTER TABLE core_products ADD COLUMN product_type TEXT DEFAULT 'resale_product'"))
@@ -913,7 +1142,6 @@ class DatabaseManager:
                         conn.execute(text("ALTER TABLE core_products ADD COLUMN stock_account_id INTEGER"))
                     except Exception:
                         pass
-                conn.commit()
             print("✅ Migration : colonnes product_type et stock_account_id ajoutées à core_products (si nécessaire)")
         except Exception as e:
             print(f"⚠️ _migrate_core_products_columns : {e}")
@@ -933,56 +1161,62 @@ class DatabaseManager:
 
     def is_first_run(self) -> bool:
         """
-        Retourne True si la base de données est vide (aucun utilisateur créé).
-        Utilisé pour déclencher l'assistant de premier démarrage.
+        Retourne True si la base de données est vide ou incomplète
+        (aucun utilisateur ou aucune entreprise créée).
+        Utilisé pour déclencher l'assistant de premier démarrage et le seed par défaut.
         """
         try:
             session = self.get_session()
-            count = session.query(User).count()
+            user_count = session.query(User).count()
+            enterprise_count = session.query(Entreprise).count()
             session.close()
-            return count == 0
+            return user_count == 0 or enterprise_count == 0
         except Exception:
             return True
 
     def _migrate_livraison_tables(self):
-        """
-        Crée les tables stock_livraisons et stock_livraison_items si elles
-        n'existent pas encore. Méthode idempotente : sans effet si les tables
-        sont déjà présentes. Appelée automatiquement à chaque démarrage.
-        """
+        """Crée les tables de livraison avec SQL MySQL-compatible."""
         try:
-            with self.engine.connect() as conn:
+            with self.engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS stock_livraisons (
-                        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                        numero              TEXT    NOT NULL UNIQUE,
+                        id                  INTEGER NOT NULL AUTO_INCREMENT,
+                        numero              VARCHAR(50) NOT NULL UNIQUE,
                         entreprise_id       INTEGER NOT NULL,
-                        entrepot_depart_id  INTEGER NOT NULL
-                            REFERENCES stock_warehouses(id),
-                        entrepot_arrivee_id INTEGER NOT NULL
-                            REFERENCES stock_warehouses(id),
-                        statut              TEXT    NOT NULL DEFAULT 'brouillon',
-                        valeur_totale       REAL    NOT NULL DEFAULT 0,
+                        entrepot_depart_id  INTEGER NOT NULL,
+                        entrepot_arrivee_id INTEGER NOT NULL,
+                        statut              VARCHAR(30) NOT NULL DEFAULT 'brouillon',
+                        valeur_totale       DECIMAL(15,2) NOT NULL DEFAULT 0,
                         utilisateur_id      INTEGER,
-                        utilisateur_nom     TEXT,
+                        utilisateur_nom     VARCHAR(100),
                         date_creation       DATETIME DEFAULT CURRENT_TIMESTAMP,
                         date_livraison      DATETIME,
                         date_reception      DATETIME,
-                        notes               TEXT
-                    )
+                        notes               TEXT,
+                        created_at          DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at          DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        KEY idx_stock_livraisons_entreprise (entreprise_id),
+                        CONSTRAINT fk_stock_livraisons_depart FOREIGN KEY (entrepot_depart_id) REFERENCES stock_warehouses(id),
+                        CONSTRAINT fk_stock_livraisons_arrivee FOREIGN KEY (entrepot_arrivee_id) REFERENCES stock_warehouses(id)
+                    ) ENGINE=InnoDB
                 """))
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS stock_livraison_items (
-                        id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                        livraison_id  INTEGER NOT NULL
-                            REFERENCES stock_livraisons(id) ON DELETE CASCADE,
+                        id            INTEGER NOT NULL AUTO_INCREMENT,
+                        livraison_id  INTEGER NOT NULL,
                         product_id    INTEGER NOT NULL,
-                        product_name  TEXT,
-                        product_code  TEXT,
-                        quantite      REAL    NOT NULL,
-                        cout_unitaire REAL    DEFAULT 0,
-                        total_ligne   REAL    DEFAULT 0
-                    )
+                        product_name  VARCHAR(200),
+                        product_code  VARCHAR(50),
+                        quantite      DECIMAL(15,3) NOT NULL,
+                        cout_unitaire DECIMAL(15,2) DEFAULT 0,
+                        total_ligne   DECIMAL(15,2) DEFAULT 0,
+                        created_at    DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        updated_at    DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (id),
+                        KEY idx_stock_livraison_items_livraison (livraison_id),
+                        CONSTRAINT fk_stock_livraison_items_livraison FOREIGN KEY (livraison_id) REFERENCES stock_livraisons(id) ON DELETE CASCADE
+                    ) ENGINE=InnoDB
                 """))
                 conn.commit()
                 print("✅ Migration livraison : tables OK (créées ou déjà présentes)")
@@ -1191,7 +1425,7 @@ class DatabaseManager:
         timestamps, deleted_at).
         """
         try:
-            with self.engine.connect() as conn:
+            with self.engine.begin() as conn:
                 conn.execute(text("""
                     CREATE TABLE IF NOT EXISTS licences (
                         id TEXT PRIMARY KEY,
@@ -1207,16 +1441,12 @@ class DatabaseManager:
                         deleted_at DATETIME
                     )
                 """))
-                conn.commit()
-                # Ensure compatibility column name `entreprise_id` exists (some DBs used `enterprise_id`)
-                cols = [r[1] for r in conn.execute(text("PRAGMA table_info('licences')")).fetchall()]
+                cols = [col['name'] for col in inspect(self.engine).get_columns('licences')]
                 if 'entreprise_id' not in cols:
                     try:
                         conn.execute(text("ALTER TABLE licences ADD COLUMN entreprise_id TEXT"))
-                        # copy values if enterprise_id exists
                         if 'enterprise_id' in cols:
                             conn.execute(text("UPDATE licences SET entreprise_id = enterprise_id WHERE entreprise_id IS NULL OR entreprise_id = ''"))
-                        conn.commit()
                         print('Migrated licences table: added entreprise_id column')
                     except Exception:
                         pass
@@ -1226,17 +1456,12 @@ class DatabaseManager:
         # If an older singular `licence` table exists (legacy schema), copy its rows
         # into the new `licences` table so both schemas remain compatible.
         try:
-            with self.engine.connect() as conn:
-                res = conn.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name='licence'"))
-                row = res.fetchone()
-                if row:
-                    # Only copy if licences is empty (avoid duplicate imports)
-                    count = conn.execute(text("SELECT COUNT(*) FROM licences")).fetchone()[0]
+            if self.table_exists('licence'):
+                with self.engine.begin() as conn:
+                    count = conn.execute(text("SELECT COUNT(*) FROM licences")).scalar()
                     if count == 0:
                         print("ℹ️ Found legacy table `licence`, migrating rows to `licences`...")
-                        # Copy rows; generate a textual id to avoid PK collisions with UUIDs
-                        conn.execute(text("INSERT INTO licences (id, cle, type, date_activation, date_expiration, signature, active, enterprise_id, created_at, updated_at) \nSELECT 'local-' || id, cle, type, date_activation, date_expiration, signature, active, entreprise_id, date_activation, date_activation FROM licence"))
-                        conn.commit()
+                        conn.execute(text("INSERT INTO licences (id, cle, type, date_activation, date_expiration, signature, active, enterprise_id, created_at, updated_at) SELECT CONCAT('local-', CAST(id AS CHAR)), cle, type, date_activation, date_expiration, signature, active, entreprise_id, date_activation, date_activation FROM licence"))
                         print("✅ Migration: copied legacy `licence` -> `licences` (ids prefixed with 'local-')")
                     else:
                         print("ℹ️ Legacy `licence` detected but `licences` already contains data; skipping copy")
@@ -1248,6 +1473,8 @@ class DatabaseManager:
         qui n'en possède pas encore, en utilisant les comptes par défaut (is_default=True)
         déjà présents dans la base."""
         try:
+            if not self.table_exists('core_enterprises'):
+                return
             with self.session_scope() as session:
                 enterprises = session.query(Entreprise).all()
                 for enterprise in enterprises:

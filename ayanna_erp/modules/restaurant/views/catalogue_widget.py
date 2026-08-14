@@ -2,7 +2,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QFrame, QLabel, QPushButton, QLineEdit, QSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QComboBox, QDialog,
-    QSplitter, QTextEdit, QDoubleSpinBox
+    QSplitter, QTextEdit, QDoubleSpinBox, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPixmap
@@ -160,12 +160,19 @@ class CatalogueWidget(QWidget):
         left_l.addLayout(search_h)
 
         self.products_area = QScrollArea(); self.products_area.setWidgetResizable(True)
+        self.products_area.setMinimumHeight(520)
+        self.products_area.setMaximumHeight(520)
+        self.products_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.products_area.setViewportMargins(0, 0, 0, 0)
         self.products_container = QWidget()
         self.products_layout = QGridLayout(self.products_container)
-        self.products_layout.setSpacing(8)
+        self.products_layout.setContentsMargins(0, 0, 0, 0)
+        self.products_layout.setSpacing(6)
         self.products_area.setWidget(self.products_container)
         left_l.addWidget(self.products_area)
         splitter.addWidget(left)
+        splitter.setStretchFactor(0, 2)
+        splitter.setStretchFactor(1, 1)
 
         # Right: cart
         right = QWidget()
@@ -442,7 +449,7 @@ class CatalogueWidget(QWidget):
 
         # ---- Créer le cadre principal ----
         card = QFrame()
-        card.setFixedSize(110, 135)
+        card.setFixedSize(110, 125)
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: white;

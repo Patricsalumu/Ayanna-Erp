@@ -8,6 +8,7 @@ import sys
 import os
 import time
 from pathlib import Path
+from urllib.parse import quote_plus
 
 # Ajouter le répertoire du projet au PYTHONPATH
 project_root = Path(__file__).parent.absolute()
@@ -134,14 +135,309 @@ def _run_migrations_silently():
         pass  # Silence toute erreur pour un démarrage fluide
 
 
+def _database_config_path() -> Path:
+    return project_root / 'database_config.txt'
+
+
+def _save_database_config(server: str, database: str, username: str, password: str) -> None:
+    """Enregistre la configuration MySQL dans un fichier texte de projet."""
+    config_path = _database_config_path()
+    content = (
+        f"server={server}\n"
+        f"database={database}\n"
+        f"username={username}\n"
+        f"password={password}\n"
+    )
+    config_path.write_text(content, encoding='utf-8')
+
+    url = (
+        f"mysql+pymysql://{quote_plus(username)}:{quote_plus(password)}@{server}:3306/{database}"
+        if password
+        else f"mysql+pymysql://{quote_plus(username)}@{server}:3306/{database}"
+    )
+    os.environ["DATABASE_URL"] = url
+    os.environ["DB_USER"] = username
+    os.environ["DB_PASSWORD"] = password
+
+
+def _save_database_url_to_env(url: str) -> None:
+    """Met aussi à jour .env pour compatibilité locale, sans dépendre de lui pour le bootstrap."""
+    env_path = project_root / '.env'
+    try:
+        lines = env_path.read_text(encoding='utf-8').splitlines() if env_path.exists() else []
+        updated = []
+        has_db_line = False
+        for line in lines:
+            if line.strip().startswith('DATABASE_URL='):
+                updated.append(f'DATABASE_URL={url}')
+                has_db_line = True
+            else:
+                updated.append(line)
+        if not has_db_line:
+            updated.append(f'DATABASE_URL={url}')
+        env_path.write_text('\n'.join(updated) + '\n', encoding='utf-8')
+    except Exception:
+        pass
+    os.environ['DATABASE_URL'] = url
+
+
+def _load_database_config_from_file() -> dict | None:
+    """Lit le fichier database_config.txt et retourne les valeurs si elles sont complètes."""
+    config_path = _database_config_path()
+    if not config_path.exists():
+        return None
+
+    try:
+        text = config_path.read_text(encoding='utf-8').strip()
+    except Exception:
+        return None
+
+    if not text:
+        return None
+
+    values = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        key, value = line.split('=', 1)
+        values[key.strip().lower()] = value.strip()
+
+    server = values.get('server', '').strip()
+    database = values.get('database', '').strip()
+    username = values.get('username', '').strip()
+    password = values.get('password', '')
+
+    if not server or not database or not username:
+        return None
+
+    url = (
+        f"mysql+pymysql://{quote_plus(username)}:{quote_plus(password)}@{server}:3306/{database}"
+        if password
+        else f"mysql+pymysql://{quote_plus(username)}@{server}:3306/{database}"
+    )
+    return {
+        'server': server,
+        'database': database,
+        'username': username,
+        'password': password,
+        'url': url,
+    }
+
+
+def _get_database_configuration_from_env() -> tuple[str, str, str] | None:
+    """Retourne la config depuis le fichier de config local si elle existe, sinon depuis l'env."""
+    saved = _load_database_config_from_file()
+    if saved:
+        os.environ["DATABASE_URL"] = saved['url']
+        os.environ["DB_USER"] = saved['username']
+        os.environ["DB_PASSWORD"] = saved['password']
+        return saved['url'], saved['server'], saved['database']
+
+    env_url = os.getenv("DATABASE_URL", "").strip()
+    if not env_url:
+        return None
+
+    try:
+        rest = env_url.split("://", 1)[1]
+        if "@" in rest:
+            rest = rest.split("@", 1)[1]
+        host_part = rest.split("/", 1)[0]
+        host = host_part.rsplit(":", 1)[0] if ":" in host_part else host_part
+        db_name = env_url.rsplit("/", 1)[-1].strip() or "insomnia"
+        user_part = env_url.split("://", 1)[1].split("@", 1)[0]
+        user = user_part.split(":", 1)[0] if ":" in user_part else user_part
+        os.environ["DATABASE_URL"] = env_url
+        os.environ["DB_USER"] = user
+        os.environ["DB_PASSWORD"] = ""
+        return env_url, host, db_name
+    except Exception:
+        return None
+
+
+def _build_database_url(server: str, database: str, username: str, password: str) -> str:
+    port = '3306'
+    if password:
+        return f"mysql+pymysql://{quote_plus(username)}:{quote_plus(password)}@{server}:{port}/{database}"
+    return f"mysql+pymysql://{quote_plus(username)}@{server}:{port}/{database}"
+
+
+def _test_mysql_connection(server: str, database: str, username: str, password: str) -> tuple[bool, str]:
+    """Teste simplement la connectivité MySQL avec SQLAlchemy et retourne le résultat."""
+    try:
+        from sqlalchemy import create_engine, text
+        url = _build_database_url(server, database, username, password)
+        engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
+        with engine.connect() as conn:
+            conn.execute(text('SELECT 1'))
+        return True, 'Connexion MySQL OK.'
+    except Exception as exc:
+        return False, str(exc)
+
+
+def _prompt_database_configuration(existing: dict | None = None) -> tuple[str, str, str]:
+    """Ouvre une boîte de configuration MySQL ergonomique avec les actions demandées."""
+    from PyQt6.QtWidgets import QDialog, QFormLayout, QLineEdit, QPushButton, QVBoxLayout, QLabel, QMessageBox, QHBoxLayout
+    from PyQt6.QtGui import QFont
+    from PyQt6.QtCore import Qt
+
+    current_host = (existing or {}).get('server', '127.0.0.1')
+    current_db = (existing or {}).get('database', 'insomnia')
+    current_user = (existing or {}).get('username', 'ayanna_user')
+    current_password = (existing or {}).get('password', '')
+
+    dialog = QDialog()
+    dialog.setWindowTitle("Configuration MySQL - Ayanna ERP")
+    dialog.resize(540, 340)
+    dialog.setModal(True)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(18, 18, 18, 18)
+    layout.setSpacing(12)
+
+    title = QLabel("Connexion à la base de données")
+    title_font = QFont()
+    title_font.setPointSize(12)
+    title_font.setBold(True)
+    title.setFont(title_font)
+    layout.addWidget(title)
+
+    info = QLabel("Configurez l’accès à votre serveur MySQL. La configuration est sauvegardée localement pour éviter de la re-saisir à chaque lancement.")
+    info.setWordWrap(True)
+    info.setStyleSheet("color: #4a4a4a;")
+    layout.addWidget(info)
+
+    form = QFormLayout()
+    form.setLabelAlignment(Qt.AlignmentFlag.AlignRight)
+    host_edit = QLineEdit(current_host)
+    db_edit = QLineEdit(current_db)
+    user_edit = QLineEdit(current_user)
+    password_edit = QLineEdit(current_password)
+    password_edit.setEchoMode(QLineEdit.EchoMode.Password)
+
+    host_edit.setPlaceholderText("127.0.0.1")
+    db_edit.setPlaceholderText("insomnia")
+    user_edit.setPlaceholderText("root ou ayanna_user")
+
+    form.addRow("Adresse du serveur :", host_edit)
+    form.addRow("Base de données :", db_edit)
+    form.addRow("Nom utilisateur :", user_edit)
+    form.addRow("Mot de passe :", password_edit)
+    layout.addLayout(form)
+
+    status_label = QLabel("Prêt.")
+    status_label.setStyleSheet("color: #2b6cb0; font-weight: 600;")
+    layout.addWidget(status_label)
+
+    buttons_layout = QHBoxLayout()
+    modify_button = QPushButton("Modifier la config")
+    test_button = QPushButton("Tester la connexion")
+    continue_button = QPushButton("Continuer")
+    continue_button.setDefault(True)
+    continue_button.setEnabled(False)
+
+    buttons_layout.addWidget(modify_button)
+    buttons_layout.addWidget(test_button)
+    buttons_layout.addStretch()
+    buttons_layout.addWidget(continue_button)
+    layout.addLayout(buttons_layout)
+
+    connection_validated = False
+
+    def validate_fields() -> tuple[bool, str]:
+        host = host_edit.text().strip()
+        db_name = db_edit.text().strip()
+        user = user_edit.text().strip()
+        password = password_edit.text()
+
+        if not host:
+            return False, "L'adresse du serveur est obligatoire."
+        if not db_name:
+            return False, "Le nom de la base est obligatoire."
+        if not user:
+            return False, "Le nom utilisateur est obligatoire."
+        return True, ""
+
+    def on_modify_config():
+        nonlocal connection_validated
+        connection_validated = False
+        continue_button.setEnabled(False)
+        host_edit.setEnabled(True)
+        db_edit.setEnabled(True)
+        user_edit.setEnabled(True)
+        password_edit.setEnabled(True)
+        status_label.setText("Vous pouvez modifier les informations de connexion.")
+        status_label.setStyleSheet("color: #805ad5; font-weight: 600;")
+        host_edit.setFocus()
+
+    def on_test_connection():
+        nonlocal connection_validated
+        ok, message = validate_fields()
+        if not ok:
+            QMessageBox.critical(dialog, "Erreur de configuration", message)
+            return
+        success, detail = _test_mysql_connection(host_edit.text().strip(), db_edit.text().strip(), user_edit.text().strip(), password_edit.text())
+        if success:
+            connection_validated = True
+            continue_button.setEnabled(True)
+            status_label.setText("Connexion MySQL OK. Vous pouvez continuer.")
+            status_label.setStyleSheet("color: #2f855a; font-weight: 600;")
+            QMessageBox.information(dialog, "Connexion OK", "La connexion MySQL est fonctionnelle.")
+        else:
+            connection_validated = False
+            continue_button.setEnabled(False)
+            status_label.setText("Échec de connexion.")
+            status_label.setStyleSheet("color: #c53030; font-weight: 600;")
+            QMessageBox.critical(dialog, "Connexion impossible", f"Vérifiez les accès MySQL.\n\nDétail : {detail}")
+
+    def on_continue():
+        nonlocal connection_validated
+        ok, message = validate_fields()
+        if not ok:
+            QMessageBox.critical(dialog, "Erreur de configuration", message)
+            return
+        if not connection_validated:
+            QMessageBox.warning(dialog, "Connexion non validée", "Veuillez tester la connexion MySQL avant de continuer.")
+            return
+        dialog.accept()
+
+    modify_button.clicked.connect(on_modify_config)
+    test_button.clicked.connect(on_test_connection)
+    continue_button.clicked.connect(on_continue)
+
+    if dialog.exec() != QDialog.DialogCode.Accepted:
+        raise ValueError("Connexion MySQL annulée par l'utilisateur.")
+
+    host = host_edit.text().strip()
+    db_name = db_edit.text().strip()
+    user = user_edit.text().strip()
+    password = password_edit.text()
+    url = _build_database_url(host, db_name, user, password)
+
+    os.environ["DATABASE_URL"] = url
+    os.environ["DB_USER"] = user
+    os.environ["DB_PASSWORD"] = password
+    _save_database_config(host, db_name, user, password)
+    _save_database_url_to_env(url)
+    return url, host, db_name
+
+
+def _resolve_database_url_from_prompt() -> tuple[str, str, str]:
+    """Vérifie uniquement le fichier de configuration local. S'il manque ou est incomplet, demande/edite la config via dialogue."""
+    saved = _load_database_config_from_file()
+    if saved and saved.get('server') and saved.get('database') and saved.get('username'):
+        os.environ["DATABASE_URL"] = saved['url']
+        os.environ["DB_USER"] = saved['username']
+        os.environ["DB_PASSWORD"] = saved['password']
+        return saved['url'], saved['server'], saved['database']
+
+    return _prompt_database_configuration(saved)
+
+
 def main():
     """Point d'entrée principal de l'application Ayanna ERP"""
-    
-    # Si l'application est gelée avec PyInstaller, indiquer à Qt où sont les plugins
     if getattr(sys, 'frozen', False):
         base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-        # Cherche d'abord un dossier 'platforms' à la racine extrait,
-        # sinon tente 'plugins/platforms' si vous avez inclus tout 'plugins'.
         plugin_candidates = [
             os.path.join(base_path, 'platforms'),
             os.path.join(base_path, 'plugins', 'platforms'),
@@ -151,16 +447,24 @@ def main():
                 os.environ['QT_QPA_PLATFORM_PLUGIN_PATH'] = candidate
                 break
 
-    # Créer l'application Qt
     _log('before_qapplication')
-    app = QApplication(sys.argv)
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(sys.argv)
     _log('after_qapplication')
     app.setApplicationName("Ayanna ERP")
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("Ayanna Tech")
+    app.setStyle('Fusion')
+
+    try:
+        db_url, db_host, db_name = _resolve_database_url_from_prompt()
+    except ValueError as exc:
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(None, "Configuration MySQL incomplète", str(exc))
+        sys.exit(1)
     
     # Configurer le style de l'application
-    app.setStyle('Fusion')
     # Définir l'icône de l'application et de la fenêtre (préfère .ico, fallback png)
     icon_path = os.path.join(str(project_root), 'data', 'images', 'icone_ayanna_erp.ico')
     if not os.path.exists(icon_path):
@@ -173,77 +477,47 @@ def main():
     
     # Initialiser la base de données
     _log('before_db_init')
-    db_manager = DatabaseManager()
+    try:
+        db_manager = DatabaseManager(db_url)
+    except Exception as exc:
+        from PyQt6.QtWidgets import QMessageBox
+        QMessageBox.critical(
+            None,
+            "Connexion MySQL impossible",
+            f"Aucune connexion au serveur MySQL.\n\n"
+            f"Serveur : {db_host}\n"
+            f"Base : {db_name}\n\n"
+            f"Vérifiez l'adresse du serveur et l'accès à la base insomnia."
+        )
+        print(f"Connexion MySQL impossible: {exc}")
+        sys.exit(1)
     from ayanna_erp.database.database_manager import set_database_manager
     set_database_manager(db_manager)   # partager l'instance dès maintenant
 
-    # Créer toutes les tables SANS insérer les données par défaut,
-    # afin de pouvoir tester is_first_run() avant l'initialisation.
+    # Le schéma et les données de base doivent être importés via la migration PHP / SQL.
+    # Ce client Python ne vérifie plus la BDD ni n'injecte les données par défaut.
+    _log('database_seed_is_externalized')
+
+    # Vérification de licence de l'application uniquement, sans logique de bootstrap BDD.
     try:
-        db_manager.create_all_tables()
-    except Exception as _e:
-        print(f"Avertissement lors de la création des tables : {_e}")
-    _log('after_db_table_create')
-    
-    # ✅ Exécuter les migrations de schéma automatiquement
-    _log('before_migrations')
-    _run_migrations_silently()
-    _log('after_migrations')
-
-    # ── Logique de démarrage selon l'état de la BDD ───────────────────────────
-    # • BDD vide (premier démarrage) :
-    #     1. Afficher la fenêtre d'activation de licence
-    #     2. Si licence valide → afficher le wizard de synchronisation/configuration
-    # • BDD existante (démarrage normal) :
-    #     1. Initialiser les données par défaut si besoin
-    #     2. Vérifier la licence → afficher le login
-
-    def _check_and_activate_licence():
-        """Vérifie la licence ; affiche LicenceActivationDialog si invalide.
-        Retourne True si la licence est valide, False sinon (quitte l'app)."""
-        try:
-            _log('before_licence_check')
-            valid, msg = verifier_licence()
-            if not valid:
-                dlg = LicenceActivationDialog()
-                result = dlg.exec()
-                if result == 1:
-                    _log('before_licence_check_2')
-                    valid2, msg2 = verifier_licence()
-                    _log('after_licence_check_2')
-                    if not valid2:
-                        print("Licence introuvable ou invalide après activation :", msg2)
-                        sys.exit(1)
-                else:
-                    print("Activation de licence annulée par l'utilisateur.")
+        _log('before_licence_check')
+        valid, msg = verifier_licence()
+        if not valid:
+            dlg = LicenceActivationDialog()
+            result = dlg.exec()
+            if result == 1:
+                _log('before_licence_check_2')
+                valid2, msg2 = verifier_licence()
+                _log('after_licence_check_2')
+                if not valid2:
+                    print("Licence introuvable ou invalide après activation :", msg2)
                     sys.exit(1)
-        except Exception as e:
-            print("Erreur lors de la vérification de la licence:", e)
-            sys.exit(1)
-
-    if db_manager.is_first_run():
-        # ── Premier démarrage : licence D'ABORD, puis wizard de configuration ──
-        _log('first_run_licence_check')
-        _check_and_activate_licence()
-
-        # Licence valide → afficher le wizard de synchronisation/configuration
-        _log('first_run_wizard')
-        from PyQt6.QtWidgets import QDialog
-        from ayanna_erp.ui.first_run_wizard import FirstRunWizard
-        wizard = FirstRunWizard(db_manager)
-        result = wizard.exec()
-        if result != QDialog.DialogCode.Accepted:
-            # L'utilisateur a fermé le wizard sans terminer la configuration
-            sys.exit(0)
-        _log('first_run_wizard_done')
-    else:
-        # ── Démarrage normal : initialiser les données par défaut + vérifier licence ──
-        if not db_manager.initialize_database():
-            print("Erreur lors de l'initialisation de la base de données")
-            _log('db_init_failed')
-            sys.exit(1)
-        _log('after_db_init')
-        _check_and_activate_licence()
+            else:
+                print("Activation de licence annulée par l'utilisateur.")
+                sys.exit(1)
+    except Exception as e:
+        print("Erreur lors de la vérification de la licence:", e)
+        sys.exit(1)
     
     # Créer et afficher la fenêtre de connexion
     login_window = LoginWindow()

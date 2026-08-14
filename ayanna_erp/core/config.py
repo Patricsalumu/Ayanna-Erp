@@ -94,6 +94,8 @@ class Config:
     
     # Configuration de la base de données
     DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR}/ayanna_erp.db")
+    # Remarque : pour une mise en production multi-postes, il faut utiliser une URL MySQL
+    # du type mysql+pymysql://user:password@host:3306/ayanna_erp
     
     # Debug mode
     DEBUG = os.getenv("DEBUG", "True").lower() == "true"
