@@ -156,8 +156,7 @@ class VenteController:
                 })
                 
                 session.flush()
-                panier_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                panier_id = panier_id_result.fetchone()[0]
+                panier_id = self.db_manager.get_last_insert_id(session)
                 numero_commande = f"FAC-{datetime.now().strftime('%Y%m%d')}-{panier_id}"
                 
                 # Mise à jour du panier avec un numero de commande
@@ -378,8 +377,7 @@ class VenteController:
             })
 
             session.flush()
-            journal_sale_id_result = session.execute(text("SELECT last_insert_rowid()"))
-            journal_sale_id = journal_sale_id_result.fetchone()[0]
+            journal_sale_id = self.db_manager.get_last_insert_id(session)
 
             ordre = 1
 
@@ -491,8 +489,7 @@ class VenteController:
                 })
 
                 session.flush()
-                journal_stock_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                journal_stock_id = journal_stock_id_result.fetchone()[0]
+                journal_stock_id = self.db_manager.get_last_insert_id(session)
 
                 ordre_stock = 1
                 # Pour chaque produit, débiter compte charge (COGS) et créditer compte stock
@@ -598,8 +595,7 @@ class VenteController:
                 })
 
                 session.flush()
-                journal_payment_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                journal_payment_id = journal_payment_id_result.fetchone()[0]
+                journal_payment_id = self.db_manager.get_last_insert_id(session)
 
                 # Écriture débit : Compte de caisse du mode de paiement
                 session.execute(text("""
@@ -858,7 +854,7 @@ class VenteController:
                         'valide': 0
                     })
                     session.flush()
-                    ann_journal_id_val = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+                    ann_journal_id_val = self.db_manager.get_last_insert_id(session)
 
                     # Récupérer toutes les écritures du journal d'origine
                     ecritures = session.execute(text("""

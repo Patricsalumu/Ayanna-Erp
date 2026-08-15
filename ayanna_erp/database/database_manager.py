@@ -310,6 +310,20 @@ class DatabaseManager:
         if not self.session:
             self.session = self.SessionLocal()
         return self.session
+
+    def get_last_insert_id(self, session):
+        """Retourne l'ID de la dernière ligne insérée, compatible SQLite et MySQL."""
+        try:
+            dialect = self.engine.dialect.name.lower()
+        except Exception:
+            dialect = ""
+
+        query = text("SELECT LAST_INSERT_ID()") if dialect != "sqlite" else text("SELECT last_insert_rowid()")
+        result = session.execute(query)
+        row = result.fetchone()
+        if row is None:
+            return None
+        return row[0]
     
     def close_session(self):
         """Fermer la session de base de données"""
@@ -1050,6 +1064,12 @@ class DatabaseManager:
                     'created_at': 'DATETIME NULL',
                     'updated_at': 'DATETIME NULL',
                 },
+                'compta_config': {
+                    'date_creation': 'DATETIME NULL',
+                    'date_modification': 'DATETIME NULL',
+                    'created_at': 'DATETIME NULL',
+                    'updated_at': 'DATETIME NULL',
+                },
             }
 
             with self.engine.begin() as conn:
@@ -1096,6 +1116,12 @@ class DatabaseManager:
                     conn.execute(text("UPDATE compta_classes SET date_creation = created_at WHERE date_creation IS NULL AND created_at IS NOT NULL"))
                     conn.execute(text("ALTER TABLE compta_classes ADD COLUMN date_modification DATETIME NULL"))
                     conn.execute(text("UPDATE compta_classes SET date_modification = updated_at WHERE date_modification IS NULL AND updated_at IS NOT NULL"))
+
+                if self.table_exists('compta_config') and not self.column_exists('compta_config', 'date_creation'):
+                    conn.execute(text("ALTER TABLE compta_config ADD COLUMN date_creation DATETIME NULL"))
+                    conn.execute(text("UPDATE compta_config SET date_creation = created_at WHERE date_creation IS NULL AND created_at IS NOT NULL"))
+                    conn.execute(text("ALTER TABLE compta_config ADD COLUMN date_modification DATETIME NULL"))
+                    conn.execute(text("UPDATE compta_config SET date_modification = updated_at WHERE date_modification IS NULL AND updated_at IS NOT NULL"))
 
                 if self.table_exists('shop_payments') and not self.column_exists('shop_payments', 'payment_method'):
                     conn.execute(text("ALTER TABLE shop_payments ADD COLUMN payment_method VARCHAR(50) NULL"))

@@ -523,7 +523,7 @@ class VenteController:
                 }
             )
             session.flush()
-            journal_sale_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+            journal_sale_id = self.db.get_last_insert_id(session)
 
             ordre = 1
             # Écritures produits (crédit revenus)
@@ -629,7 +629,7 @@ class VenteController:
                 }
             )
             session.flush()
-            journal_stock_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+            journal_stock_id = self.db.get_last_insert_id(session)
 
             ordre_stock = 1
             for ligne in lignes:
@@ -738,7 +738,7 @@ class VenteController:
                     }
                 )
                 session.flush()
-                journal_pay_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+                journal_pay_id = self.db.get_last_insert_id(session)
 
                 # Débit caisse
                 session.execute(text(

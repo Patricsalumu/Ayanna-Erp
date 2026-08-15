@@ -1801,8 +1801,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         })
                         
                         session.flush()
-                        journal_payment_id_result = session.execute(text("SELECT last_insert_rowid()"))
-                        journal_payment_id = journal_payment_id_result.fetchone()[0]
+                        journal_payment_id = db.get_last_insert_id(session)
                         
                         # Écriture débit : Compte de caisse du mode de paiement (augmente la trésorerie)
                         session.execute(text("""
@@ -1930,7 +1929,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             'valide': 0
                         })
                         session.flush()
-                        journal_id = session.execute(text("SELECT last_insert_rowid()")).fetchone()[0]
+                        journal_id = db.get_last_insert_id(session)
                         session.execute(text("""
                             INSERT INTO compta_ecritures (journal_id, compte_comptable_id, debit, credit, ordre, libelle, date_creation)
                             VALUES (:journal_id, :compte_id, :debit, :credit, :ordre, :libelle, :date_creation)

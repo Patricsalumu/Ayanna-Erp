@@ -61,6 +61,12 @@ return new class extends Migration
             DB::table('stock_mouvements')->whereNull('movement_date')->whereNotNull('date_mouvement')->update(['movement_date' => DB::raw('date_mouvement')]);
             DB::table('stock_mouvements')->whereNull('movement_date')->update(['movement_date' => DB::raw('created_at')]);
         }
+
+        if (!Schema::hasColumn('stock_mouvements', 'batch_number')) {
+            Schema::table('stock_mouvements', function (Blueprint $table) {
+                $table->string('batch_number', 50)->nullable()->after('session_id');
+            });
+        }
     }
 
     public function down(): void
@@ -69,7 +75,7 @@ return new class extends Migration
             return;
         }
 
-        foreach (['total_cost', 'warehouse_id_depart', 'warehouse_id_destination', 'quantity_before', 'quantity_after', 'movement_type', 'movement_date'] as $column) {
+        foreach (['total_cost', 'warehouse_id_depart', 'warehouse_id_destination', 'quantity_before', 'quantity_after', 'movement_type', 'movement_date', 'batch_number'] as $column) {
             if (Schema::hasColumn('stock_mouvements', $column)) {
                 Schema::table('stock_mouvements', function (Blueprint $table) use ($column) {
                     $table->dropColumn($column);

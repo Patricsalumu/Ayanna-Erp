@@ -13,7 +13,7 @@ import enum
 class EtatCommande(enum.Enum):
     """États possibles d'une commande"""
     ENCOURS = "encours"
-    ANNULE = "annule" 
+    ANNULE = "annule"
     VALIDE = "valide"
     RECEPTIONNE = "receptionne"
 
@@ -62,7 +62,11 @@ class AchatCommande(Base):
     date_commande = Column(DateTime, default=func.now())
     remise_global = Column(DECIMAL(12, 2), default=0)
     montant_total = Column(DECIMAL(12, 2), nullable=False)
-    etat = Column(Enum(EtatCommande), default=EtatCommande.ENCOURS)
+    etat = Column(
+        Enum(EtatCommande, values_callable=lambda enum_cls: [e.value for e in enum_cls]),
+        default=EtatCommande.ENCOURS,
+        nullable=False,
+    )
     # Statut du paiement (non_paye/partiel/paye) distinct de l'état de la commande
     statut_paiement = Column(String(20), default=StatutPaiement.NON_PAYE.value, nullable=False)
     
