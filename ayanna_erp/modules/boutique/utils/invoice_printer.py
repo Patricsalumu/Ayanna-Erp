@@ -16,6 +16,8 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Tabl
 from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_RIGHT
 from reportlab.pdfgen import canvas
 
+from ayanna_erp.utils.sumatra_printer import SumatraPrinter
+
 # Import du contrôleur d'entreprise
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))))
 try:
@@ -142,7 +144,8 @@ class InvoicePrintManager:
         self.styles.add(ParagraphStyle(
             name='CustomTitle',
             parent=self.styles['Title'],
-            fontSize=16,
+            fontSize=30,
+            leading=34,
             spaceAfter=20,
             textColor=HexColor('#2C3E50'),
             alignment=TA_CENTER,
@@ -153,7 +156,8 @@ class InvoicePrintManager:
         self.styles.add(ParagraphStyle(
             name='CustomHeading',
             parent=self.styles['Heading2'],
-            fontSize=12,
+            fontSize=18,
+            leading=22,
             spaceAfter=10,
             textColor=HexColor('#34495E'),
             fontName='Helvetica-Bold'
@@ -163,10 +167,23 @@ class InvoicePrintManager:
         self.styles.add(ParagraphStyle(
             name='CustomNormal',
             parent=self.styles['Normal'],
-            fontSize=10,
+            fontSize=14,
+            leading=18,
             spaceAfter=6,
-            fontName='Helvetica'
+            fontName='Helvetica-Bold'
         ))
+
+    def print_invoice_a4_and_send_to_printer(self, invoice_data, filename):
+        """Génère la facture PDF puis l'envoie directement à l'imprimante par défaut via SumatraPDF."""
+        generated = self.print_invoice_a4(invoice_data, filename)
+        if not generated or not os.path.exists(generated):
+            return False, "Le PDF de facture n'a pas pu être généré."
+
+        printer = SumatraPrinter()
+        success, message = printer.print_pdf(generated)
+        if success:
+            return True, generated
+        return False, message or "L'impression directe de la facture a échoué."
 
     def create_header_a4(self, canvas, doc):
         """Créer l'en-tête pour les documents A4"""
@@ -201,17 +218,18 @@ class InvoicePrintManager:
                 pass
 
         # Informations entreprise
-        canvas.setFont('Helvetica-Bold', 16)
+        canvas.setFont('Helvetica-Bold', 18)
         canvas.setFillColor(HexColor('#2C3E50'))
         canvas.drawString(130, A4[1] - 60, self.company_info['name'])
 
-        canvas.setFont('Helvetica', 10)
+        canvas.setFont('Helvetica-Bold', 11)
         canvas.setFillColor(black)
         canvas.drawString(130, A4[1] - 75, self.company_info['address'])
         canvas.drawString(130, A4[1] - 88, self.company_info['city'])
         canvas.drawString(130, A4[1] - 101, f"Tél: {self.company_info['phone']}")
 
         # Informations à droite
+        canvas.setFont('Helvetica-Bold', 11)
         canvas.drawRightString(A4[0] - 50, A4[1] - 75, f"Email: {self.company_info['email']}")
         canvas.drawRightString(A4[0] - 50, A4[1] - 88, f"RCCM: {self.company_info['rccm']}")
         canvas.drawRightString(A4[0] - 50, A4[1] - 101, f"Date: {datetime.now().strftime('%d/%m/%Y')}")
@@ -239,16 +257,16 @@ class InvoicePrintManager:
         # Footer text: Informatisé par Ayanna ERP — website + print datetime
         try:
             footer_text = "Informatisé par Ayanna ERP — www.ayanna.top"
-            canvas.setFont('Helvetica', 8)
-            text_width = canvas.stringWidth(footer_text, 'Helvetica', 8)
+            canvas.setFont('Helvetica-Bold', 8)
+            text_width = canvas.stringWidth(footer_text, 'Helvetica-Bold', 8)
             x_center = (A4[0] - text_width) / 2
             canvas.drawString(x_center, 34, footer_text)
 
             # Impression datetime
             printed_ts = datetime.now().strftime('%d/%m/%Y %H:%M')
             printed_text = f"Imprimé le {printed_ts}"
-            canvas.setFont('Helvetica', 7)
-            text_width2 = canvas.stringWidth(printed_text, 'Helvetica', 7)
+            canvas.setFont('Helvetica-Bold', 7)
+            text_width2 = canvas.stringWidth(printed_text, 'Helvetica-Bold', 7)
             x_center2 = (A4[0] - text_width2) / 2
             canvas.drawString(x_center2, 20, printed_text)
         except Exception:
@@ -281,11 +299,11 @@ class InvoicePrintManager:
         if served_by:
             client_data.append(['Servi par:', served_by])
 
-        client_table = Table(client_data, colWidths=[4*cm, 12*cm])
+        client_table = Table(client_data, colWidths=[4.8*cm, 12.2*cm])
         client_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), HexColor('#ECF0F1')),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 13),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
@@ -332,11 +350,11 @@ class InvoicePrintManager:
         if user_name_val and user_name_val != comptoiriste_val:
             order_data.append(['Créé par:', str(user_name_val)])
 
-        order_table = Table(order_data, colWidths=[4*cm, 12*cm])
+        order_table = Table(order_data, colWidths=[4.8*cm, 12.2*cm])
         order_table.setStyle(TableStyle([
             ('BACKGROUND', (0, 0), (0, -1), HexColor('#E8F6F3')),
-            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 13),
             ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
             ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
             ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
@@ -367,12 +385,12 @@ class InvoicePrintManager:
                     self.format_amount(total_line)
                 ])
 
-            products_table = Table(products_data, colWidths=[8*cm, 2*cm, 3*cm, 3*cm])
+            products_table = Table(products_data, colWidths=[8.2*cm, 2.2*cm, 3.3*cm, 3.3*cm])
             products_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), HexColor('#3498DB')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 9),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 12),
                 ('ALIGN', (1, 1), (-1, -1), 'CENTER'),
                 ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
             ]))
@@ -384,10 +402,10 @@ class InvoicePrintManager:
                 ['Total quantité article:', str(total_quantity)],
                 ['Total montant:', self.format_amount(total_products)]
             ]
-            summary_table = Table(summary_data, colWidths=[11*cm, 5*cm])
+            summary_table = Table(summary_data, colWidths=[11.2*cm, 5.8*cm])
             summary_table.setStyle(TableStyle([
                 ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('FONTSIZE', (0, 0), (-1, -1), 13),
                 ('ALIGN', (0, 0), (-1, -1), 'RIGHT'),
                 ('BACKGROUND', (0, 0), (-1, -1), HexColor('#F2F3F4')),
                 ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
@@ -407,12 +425,12 @@ class InvoicePrintManager:
             ['NET À PAYER:', self.format_amount(invoice_data.get('total_net', 0))]
         ]
 
-        financial_table = Table(financial_data, colWidths=[12*cm, 4*cm])
+        financial_table = Table(financial_data, colWidths=[12.5*cm, 4.5*cm])
         financial_table.setStyle(TableStyle([
-            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('FONTSIZE', (0, 0), (-1, -1), 14),
             ('ALIGN', (0, 0), (0, -1), 'RIGHT'),
             ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
-            ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
             ('BACKGROUND', (0, -1), (-1, -1), HexColor('#2ECC71')),
             ('TEXTCOLOR', (0, -1), (-1, -1), white),
             ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
@@ -442,15 +460,14 @@ class InvoicePrintManager:
             payment_data.append(['', '', 'TOTAL PAYÉ:', self.format_amount(total_paid)])
             payment_data.append(['', '', 'RESTE À PAYER:', self.format_amount(balance)])
 
-            payment_table = Table(payment_data, colWidths=[4*cm, 3*cm, 4*cm, 5*cm])
+            payment_table = Table(payment_data, colWidths=[4.2*cm, 3.2*cm, 4.3*cm, 5.3*cm])
             payment_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, 0), (-1, 0), HexColor('#9B59B6')),
                 ('TEXTCOLOR', (0, 0), (-1, 0), white),
-                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 8),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('BACKGROUND', (0, -2), (-1, -1), HexColor('#D5DBDB')),
-                ('FONTNAME', (0, -2), (-1, -1), 'Helvetica-Bold'),
                 ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7'))
             ]))
             story.append(payment_table)
@@ -475,12 +492,12 @@ class InvoicePrintManager:
             
             status_data.append(['STATUT PAIEMENT:', payment_status])
             
-            status_table = Table(status_data, colWidths=[6*cm, 10*cm])
+            status_table = Table(status_data, colWidths=[6.2*cm, 10.8*cm])
             status_table.setStyle(TableStyle([
                 ('BACKGROUND', (0, -1), (-1, -1), status_color),
                 ('TEXTCOLOR', (0, -1), (-1, -1), white),
                 ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
-                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('FONTSIZE', (0, 0), (-1, -1), 13),
                 ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
                 ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
                 ('GRID', (0, 0), (-1, -1), 1, HexColor('#BDC3C7')),
@@ -507,12 +524,13 @@ class InvoicePrintManager:
             notes_style = ParagraphStyle(
                 'NotesStyle',
                 parent=self.styles['CustomNormal'],
-                fontSize=10,
-                leading=14,
+                fontSize=12,
+                leading=16,
                 alignment=0,
-                spaceAfter=6,
+                spaceAfter=8,
                 leftIndent=10,
-                rightIndent=10
+                rightIndent=10,
+                fontName='Helvetica-Bold'
             )
             notes_paragraph = Paragraph(notes, notes_style)
             story.append(notes_paragraph)
@@ -556,10 +574,11 @@ class InvoicePrintManager:
         # =========================
         # PARAMÈTRES TICKET 80mm
         # =========================
-        TICKET_WIDTH = 58 * mm
+        TICKET_WIDTH = 75 * mm
         LEFT_MARGIN = 2 * mm
         ITEM_NAME_X = LEFT_MARGIN
         ITEM_DETAIL_X = LEFT_MARGIN + 2 * mm
+        FONT_SCALE = 1.5
 
         # =========================
         # SIMULATION HAUTEUR
@@ -666,12 +685,12 @@ class InvoicePrintManager:
         # =========================
         # ENTREPRISE
         # =========================
-        c.setFont(self._font_bold, 9)
+        c.setFont(self._font_bold, int(round(9 * FONT_SCALE)))
         name = str(self.company_info.get('name', ''))[:30]
         c.drawCentredString(TICKET_WIDTH / 2, y, name)
         y -= 4 * mm
 
-        c.setFont(self._font_regular, 8)
+        c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
         for k in ['address','phone', 'id_nat', 'rccm']:
             v = self.company_info.get(k)
             if v:
@@ -700,41 +719,18 @@ class InvoicePrintManager:
             status = "PAYEE PARTIELLE"
 
         y -= 3 * mm
-        c.setFont(self._font_bold, 10)
+        c.setFont(self._font_bold, int(round(10 * FONT_SCALE)))
         c.drawCentredString(TICKET_WIDTH / 2, y, f"FACTURE {status}")
         y -= 6 * mm
-
+        
         # =========================
         # RÉFÉRENCE
         # =========================
-        c.setFont(self._font_bold, 12)
+        c.setFont(self._font_bold, int(round(12 * FONT_SCALE)))
         ref = str(invoice_data.get('reference', 'N/A'))
         c.drawCentredString(TICKET_WIDTH / 2, y, ref)
         y -= 6 * mm
-
-        c.setFont(self._font_bold, 8)
-        c.drawString(LEFT_MARGIN, y, "Client:")
-        c.setFont(self._font_regular, 8)
-        c.drawString(LEFT_MARGIN + 16 * mm, y, invoice_data.get('client_nom', '')[:25])
-        y -= 4 * mm
-
-        date_val = invoice_data.get('order_date')
-        if isinstance(date_val, datetime):
-            date_val = date_val.strftime('%d/%m/%Y %H:%M')
-        c.setFont(self._font_bold, 8)
-        c.drawString(LEFT_MARGIN, y, "Date:")
-        c.setFont(self._font_regular, 8)
-        c.drawString(LEFT_MARGIN + 16 * mm, y, str(date_val))
-        y -= 4 * mm
-
-        # Afficher l'utilisateur qui a passé la commande
-        user_display = invoice_data.get('user_name') or user_name or 'Utilisateur'
-        c.setFont(self._font_bold, 8)
-        c.drawString(LEFT_MARGIN, y, "Caissier :")
-        c.setFont(self._font_regular, 8)
-        c.drawString(LEFT_MARGIN + 16 * mm, y, str(user_display)[:25])
-        y -= 4 * mm
-
+        
         # =========================
         # INFOS RESTAURANT (OPTIONNEL)
         # =========================
@@ -744,6 +740,9 @@ class InvoicePrintManager:
                 if v not in (None, ''):
                     return v
             return None
+
+        row_spacing = 5 * mm
+        value_x = LEFT_MARGIN + 20 * mm
 
         is_restaurant = False
         try:
@@ -756,48 +755,145 @@ class InvoicePrintManager:
             table_val = _pick(invoice_data, 'table', 'table_number', 'table_no')
             serveuse_val = _pick(invoice_data, 'serveuse', 'serveur', 'waiter', 'serveur_name')
 
-            c.setFont(self._font_bold, 8)
+            if serveuse_val:
+                c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+                c.drawString(LEFT_MARGIN, y, "Serveuse:")
+                c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+                c.drawString(value_x, y, str(serveuse_val)[:30])
+                y -= row_spacing
+
+            c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
             if table_val:
                 c.drawString(LEFT_MARGIN, y, "Table:")
-                c.setFont(self._font_regular, 8)
-                c.drawString(LEFT_MARGIN + 16 * mm, y, str(table_val)[:20])
-                y -= 4 * mm
+                c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+                c.drawString(value_x, y, str(table_val)[:20])
+                y -= row_spacing
 
-            if serveuse_val:
-                c.setFont(self._font_bold, 8)
-                c.drawString(LEFT_MARGIN, y, "Serveuse:")
-                c.setFont(self._font_regular, 8)
-                c.drawString(LEFT_MARGIN + 16 * mm, y, str(serveuse_val)[:25])
-                y -= 4 * mm
+        c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+        c.drawString(LEFT_MARGIN, y, "Client:")
+        c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+        c.drawString(value_x, y, invoice_data.get('client_nom', '')[:30])
+        y -= row_spacing
+
+        date_val = invoice_data.get('order_date')
+        if isinstance(date_val, datetime):
+            date_val = date_val.strftime('%d/%m/%Y %H:%M')
+        c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+        c.drawString(LEFT_MARGIN, y, "Date:")
+        c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+        c.drawString(value_x, y, str(date_val))
+        y -= row_spacing
 
         c.line(LEFT_MARGIN, y, TICKET_WIDTH - LEFT_MARGIN, y)
-        y -= 4 * mm
+        y -= row_spacing
 
         # =========================
         # ARTICLES
         # =========================
-        c.setFont('Helvetica-Bold', 10)
+        c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
         c.drawString(LEFT_MARGIN, y, "ARTICLES")
         y -= 6 * mm
 
         # En-têtes de colonnes
-        qty_x = LEFT_MARGIN + 20 * mm
-        price_x = LEFT_MARGIN + 30 * mm
-        total_x = TICKET_WIDTH - LEFT_MARGIN
+        usable_width = TICKET_WIDTH - (2 * LEFT_MARGIN)
+        name_to_qty_gap = 3.4 * mm
+        qty_to_price_gap = 1.0 * mm
+        price_to_total_gap = 0.8 * mm
+        name_width = usable_width * 0.42
+        qty_width = usable_width * 0.11
+        price_width = usable_width * 0.14
+        total_width = usable_width * 0.27
+        name_x = LEFT_MARGIN
+        qty_x = LEFT_MARGIN + name_width + name_to_qty_gap
+        price_x = qty_x + qty_width + qty_to_price_gap
+        total_x = price_x + price_width + price_to_total_gap
+        qty_right = qty_x + qty_width
+        price_right = price_x + price_width
 
-        c.setFont('Helvetica-Bold', 8)
-        c.drawString(ITEM_NAME_X, y, "Article")
-        c.drawRightString(qty_x, y, "Qte")
-        c.drawRightString(price_x, y, "Prix")
-        c.drawRightString(total_x, y, "Total")
-        y -= 4 * mm
+        c.setFont('Helvetica-Bold', int(round(7.5 * FONT_SCALE)))
+        c.drawString(name_x, y, "Article")
+        c.drawRightString(qty_right, y, "Qte")
+        c.drawRightString(price_right, y, "Prix")
+        c.drawRightString(total_x + total_width, y, "Total")
+        y -= row_spacing
 
         subtotal = 0
         total_articles = 0
         total_quantity = 0
-        c.setFont('Helvetica', 8)
+        c.setFont('Helvetica-Bold', int(round(8 * FONT_SCALE)))
+
+        def _wrap_name_lines(text, max_width, max_lines=2):
+            """Wrappe un nom d'article sur au plus 2 lignes, en coupant même au milieu d'un mot.
+            Chaque ligne reste limitée à 15 caractères et, si elle est tronquée, garde "...".
+            """
+            raw = (text or '').strip()
+            if not raw:
+                return [""]
+
+            line_limit = 14
+
+            def _ensure_truncation(value):
+                if len(value) <= line_limit:
+                    return value
+                if line_limit <= 3:
+                    return value[:line_limit]
+                return value[:line_limit - 3] + "..."
+
+            # 1) Découper le texte caractère par caractère pour forcer le retour à la ligne
+            # même au milieu d'un mot, tant que l'on ne depasse pas 15 caractères par ligne.
+            chunks = []
+            current = ""
+            for ch in raw:
+                if ch == '\n':
+                    if current:
+                        chunks.append(current)
+                        current = ""
+                    continue
+
+                if len(current) >= line_limit:
+                    chunks.append(current)
+                    current = ""
+
+                current += ch
+                if len(current) == line_limit:
+                    chunks.append(current)
+                    current = ""
+
+            if current:
+                chunks.append(current)
+
+            if not chunks:
+                return [""]
+
+            # 2) Regrouper jusqu'à max_lines, en gardant les "..." si on coupe encore.
+            lines = []
+            for idx, chunk in enumerate(chunks):
+                if len(lines) >= max_lines:
+                    break
+                if len(lines) == max_lines - 1 and idx < len(chunks) - 1:
+                    lines.append(_ensure_truncation(chunk))
+                    break
+                lines.append(chunk)
+
+            if len(lines) > max_lines:
+                lines = lines[:max_lines]
+
+            # 3) Si on a dépassé max_lines, on force la dernière ligne à afficher "...".
+            if len(chunks) > max_lines:
+                if len(lines) == 0:
+                    lines = ["..."]
+                else:
+                    last = lines[-1]
+                    lines[-1] = _ensure_truncation(last)
+
+            # 4) La dernière ligne tronquée doit toujours rester dans la limite de 15 chars.
+            if lines:
+                lines[-1] = _ensure_truncation(lines[-1])
+
+            return lines[:max_lines]
+
         for item in invoice_data.get('items', []):
-            name = str(item.get('name', ''))[:14]
+            name = str(item.get('name', ''))
             qty = _to_float(item.get('quantity'), 1)
             price = _to_float(item.get('unit_price'))
             line_total = qty * price
@@ -806,23 +902,33 @@ class InvoicePrintManager:
             total_quantity += qty
 
             qty_text = str(int(qty)) if float(qty).is_integer() else f"{qty:.2f}"
-            c.drawString(ITEM_NAME_X, y, name)
-            c.drawRightString(qty_x, y, qty_text)
-            c.drawRightString(price_x, y, self.format_amount(price))
-            c.drawRightString(total_x, y, self.format_amount(line_total))
-            y -= 4 * mm
+            price_text = f"{price:,.0f}" if price and float(price).is_integer() else f"{price:,.2f}"
+            total_text = f"{line_total:,.0f}" if line_total and float(line_total).is_integer() else f"{line_total:,.2f}"
+
+            name_lines = _wrap_name_lines(name, name_width, max_lines=2)
+            name_line_y = y
+            for line in name_lines:
+                c.setFont('Helvetica-Bold', int(round(7.2 * FONT_SCALE)))
+                c.drawString(name_x, name_line_y, line)
+                name_line_y -= row_spacing
+
+            c.setFont('Helvetica-Bold', int(round(7.2 * FONT_SCALE)))
+            c.drawRightString(qty_right, y, qty_text)
+            c.drawRightString(price_right, y, price_text)
+            c.drawRightString(total_x + total_width, y, total_text)
+            y = name_line_y - 1 * mm
 
         y -= 2 * mm
         c.setLineWidth(0.5)
         c.line(LEFT_MARGIN, y, TICKET_WIDTH - LEFT_MARGIN, y)
-        y -= 4 * mm
+        y -= row_spacing
 
-        c.setFont('Helvetica-Bold', 9)
+        c.setFont('Helvetica-Bold', int(round(9 * FONT_SCALE)))
         total_qty_text = str(int(total_quantity)) if float(total_quantity).is_integer() else f"{total_quantity:.2f}"
         c.drawString(ITEM_NAME_X, y, str(total_articles))
-        c.drawRightString(qty_x, y, total_qty_text)
-        c.drawRightString(price_x, y, "")
-        c.drawRightString(total_x, y, self.format_amount(subtotal))
+        c.drawRightString(qty_right, y, total_qty_text)
+        c.drawRightString(price_right, y, "")
+        c.drawRightString(total_x + total_width, y, f"{subtotal:,.0f}" if subtotal and float(subtotal).is_integer() else f"{subtotal:,.2f}")
         y -= 6 * mm
 
         # =========================
@@ -831,7 +937,7 @@ class InvoicePrintManager:
         remise = _to_float(invoice_data.get('discount_amount'))
         reste = net - total_paid
 
-        c.setFont('Helvetica', 10)
+        c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
         c.drawString(LEFT_MARGIN, y, f"Remise: {self.format_amount(remise)}")
         y -= 4 * mm
 
@@ -842,31 +948,31 @@ class InvoicePrintManager:
         _is_usd = _currency_norm in ('USD', '$', 'DOLLAR')
 
         if _is_usd:
-            c.setFont('Helvetica-Bold', 10)
+            c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, f"Net à payer $: {self.format_amount(net)}")
             y -= 4 * mm
             if _taux and _taux > 0 and net > 0:
                 total_fc = net * _taux
                 total_fc_str = f"{int(round(total_fc)):,}".replace(",", " ")
-                c.setFont('Helvetica', 10)
+                c.setFont('Helvetica', int(round(10 * FONT_SCALE)))
                 c.drawString(LEFT_MARGIN, y, f"Total FC: {total_fc_str}")
                 y -= 4 * mm
         elif _is_franc:
-            c.setFont('Helvetica-Bold', 10)
+            c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, f"Net à payer FC: {self.format_amount(net)}")
             y -= 4 * mm
             if _taux and _taux > 0 and net > 0:
                 total_usd = net / _taux
                 total_usd_str = f"{total_usd:,.2f}".replace(",", " ")
-                c.setFont('Helvetica', 10)
+                c.setFont('Helvetica', int(round(10 * FONT_SCALE)))
                 c.drawString(LEFT_MARGIN, y, f"Total $: {total_usd_str}")
                 y -= 4 * mm
         else:
-            c.setFont('Helvetica-Bold', 10)
+            c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, f"Net à payer: {self.format_amount(net)}")
             y -= 4 * mm
 
-        c.setFont('Helvetica', 10)
+        c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
         c.drawString(LEFT_MARGIN, y, f"Payé: {self.format_amount(total_paid)}")
         y -= 4 * mm
 
@@ -875,7 +981,7 @@ class InvoicePrintManager:
         change = _to_float(invoice_data.get('change', 0.0))
         reste_a_payer = _to_float(invoice_data.get('reste_a_payer', 0.0))
         
-        c.setFont('Helvetica-Bold', 10)
+        c.setFont('Helvetica-Bold', int(round(10 * FONT_SCALE)))
         if change > 0:
             c.drawString(LEFT_MARGIN, y, f"Monnaie: {self.format_amount(change)}")
             y -= 4 * mm
@@ -885,7 +991,7 @@ class InvoicePrintManager:
 
         # Afficher l'état du panier (en_cours, validé, annulé)
         if etat_clean:
-            c.setFont(self._font_bold, 10)
+            c.setFont(self._font_bold, int(round(10 * FONT_SCALE)))
             c.drawCentredString(TICKET_WIDTH / 2, y, f"État: {etat_clean}")
             y -= 4 * mm
 
@@ -899,22 +1005,22 @@ class InvoicePrintManager:
         if notes and notes.strip() != '':
             y -= 2 * mm
             # Barre horizontale haute
-            c.setFont(self._font_regular, 8)
+            c.setFont(self._font_regular, int(round(8 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, "―" * 35)
             y -= 3 * mm
             
             # Titre NOTES
-            c.setFont(self._font_bold, 9)
+            c.setFont(self._font_bold, int(round(9 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, "NOTES")
             y -= 4 * mm
             
             # Contenu de la note (wrappé)
-            c.setFont(self._font_regular, 8)
-            y = _draw_wrapped(notes, self._font_regular, 8, TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=False, leading=3 * mm)
+            c.setFont(self._font_regular, int(round(8 * FONT_SCALE)))
+            y = _draw_wrapped(notes, self._font_regular, int(round(8 * FONT_SCALE)), TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=False, leading=3 * mm)
             
             y -= 2 * mm
             # Barre horizontale basse
-            c.setFont(self._font_regular, 8)
+            c.setFont(self._font_regular, int(round(8 * FONT_SCALE)))
             c.drawString(LEFT_MARGIN, y, "―" * 35)
             y -= 4 * mm
 
@@ -923,14 +1029,14 @@ class InvoicePrintManager:
         # =========================
         nb = _get_company_slogan()
         if nb:
-            c.setFont(self._font_regular, 8)
-            y = _draw_wrapped(nb, self._font_regular, 8, TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=True)
+            c.setFont(self._font_bold, int(round(8 * FONT_SCALE)))
+            y = _draw_wrapped(nb, self._font_bold, int(round(8 * FONT_SCALE)), TICKET_WIDTH - 2 * LEFT_MARGIN, y, center=True)
 
         # =========================
         # SIGNATURE / FOOTER
         # =========================
         gen_time = datetime.now().strftime('%d/%m/%Y %H:%M')
-        c.setFont(self._font_regular, 7)
+        c.setFont(self._font_bold, int(round(7 * FONT_SCALE)))
         try:
             c.drawCentredString(TICKET_WIDTH / 2, y, "Informatisé par Ayanna ERP")
             y -= 3 * mm
@@ -938,7 +1044,7 @@ class InvoicePrintManager:
             y -= 3 * mm
             # Timestamp
             try:
-                c.setFont(self._font_regular, 7)
+                c.setFont(self._font_bold, int(round(7 * FONT_SCALE)))
                 c.drawCentredString(TICKET_WIDTH / 2, y, f"Imprimé le {gen_time}")
             except Exception:
                 pass

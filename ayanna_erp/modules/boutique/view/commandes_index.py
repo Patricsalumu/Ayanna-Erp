@@ -1795,10 +1795,9 @@ Notes: {notes_preview}
             
             if result and os.path.exists(result):
                 if "53mm" in format_choice:
-                    # Pour les tickets 53mm : ouvrir directement dans le lecteur par défaut
                     try:
                         subprocess.run(['start', '', result], shell=True, check=True)
-                        QMessageBox.information(dialog, "Impression lancée", 
+                        QMessageBox.information(dialog, "Impression lancée",
                                               f"Le ticket 53mm a été généré et l'impression a été lancée automatiquement !\n\n"
                                               f"Fichier: {result}")
                     except Exception as print_error:
@@ -1808,41 +1807,50 @@ Notes: {notes_preview}
                                           f"Erreur d'impression automatique: {print_error}\n"
                                           "Veuillez imprimer manuellement depuis votre lecteur PDF.")
                 else:
-                    # Pour les factures A4 : ouvrir le dossier factures_export
-                    try:
-                        import os, sys, subprocess
-                        opened = False
-                        if os.name == 'nt':
-                            try:
-                                os.startfile(result)
-                                opened = True
-                            except Exception:
-                                opened = False
-                        else:
-                            try:
-                                if sys.platform == 'darwin':
-                                    subprocess.run(['open', result], check=True)
-                                else:
-                                    subprocess.run(['xdg-open', result], check=True)
-                                opened = True
-                            except Exception:
-                                opened = False
+                    from ayanna_erp.utils.sumatra_printer import SumatraPrinter
+                    printer = SumatraPrinter()
+                    ok, err = printer.print_pdf(result)
+                    if ok:
+                        QMessageBox.information(dialog, "Impression directe",
+                                              f"La facture A4 a été générée et envoyée directement à l'imprimante par défaut.\n\n"
+                                              f"Fichier: {result}")
+                    else:
+                        try:
+                            import os, sys, subprocess
+                            opened = False
+                            if os.name == 'nt':
+                                try:
+                                    os.startfile(result)
+                                    opened = True
+                                except Exception:
+                                    opened = False
+                            else:
+                                try:
+                                    if sys.platform == 'darwin':
+                                        subprocess.run(['open', result], check=True)
+                                    else:
+                                        subprocess.run(['xdg-open', result], check=True)
+                                    opened = True
+                                except Exception:
+                                    opened = False
 
-                        if opened:
-                            QMessageBox.information(dialog, "Export réussi",
+                            if opened:
+                                QMessageBox.information(dialog, "Facture exportée",
+                                                      f"La facture A4 a été exportée avec succès !\n\n"
+                                                      f"Fichier: {result}\n\n"
+                                                      "Le fichier a été ouvert dans l'application par défaut.\n"
+                                                      f"Impression Sumatra impossible : {err}")
+                            else:
+                                QMessageBox.information(dialog, "Facture exportée",
+                                                      f"La facture A4 a été exportée avec succès !\n\n"
+                                                      f"Fichier: {result}\n\n"
+                                                      "Impossible d'ouvrir automatiquement le fichier.\n"
+                                                      f"Impression Sumatra impossible : {err}")
+                        except Exception as open_error:
+                            QMessageBox.information(dialog, "Facture exportée",
                                                   f"La facture A4 a été exportée avec succès !\n\n"
                                                   f"Fichier: {result}\n\n"
-                                                  "Le fichier a été ouvert dans l'application par défaut.")
-                        else:
-                            QMessageBox.information(dialog, "Export réussi",
-                                                  f"La facture A4 a été exportée avec succès !\n\n"
-                                                  f"Fichier: {result}\n\n"
-                                                  "Impossible d'ouvrir automatiquement le fichier. Vous pouvez l'ouvrir manuellement.")
-                    except Exception as open_error:
-                        QMessageBox.information(dialog, "Export réussi",
-                                              f"La facture A4 a été exportée avec succès !\n\n"
-                                              f"Fichier: {result}\n\n"
-                                              f"Erreur lors de l'ouverture du fichier: {open_error}")
+                                                  f"Erreur lors de l'ouverture du fichier: {open_error}")
                 
                 dialog.accept()
             else:
