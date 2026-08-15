@@ -248,10 +248,10 @@ class CommandesIndexWidget(QWidget):
     def create_commandes_table(self):
         """Créer le tableau des commandes"""
         self.commandes_table = QTableWidget()
-        # Colonnes : N° Commande, Date, Client, Produits/Services, Sous-total, Remise, Total, Payé, Paiement, Prêt, Livré
-        self.commandes_table.setColumnCount(11)
+        # Colonnes : N° Commande, Date, Client, Serveuse, Produits/Services, Sous-total, Remise, Total, Payé, Paiement, Prêt, Livré
+        self.commandes_table.setColumnCount(12)
         self.commandes_table.setHorizontalHeaderLabels([
-            "N° Commande", "Date", "Client", "Produits / Services", 
+            "N° Commande", "Date", "Client", "Serveuse", "Produits / Services",
             "Sous-total", "Remise", "Total", "Payé", "Paiement", "Prêt", "Livré"
         ])
 
@@ -261,8 +261,9 @@ class CommandesIndexWidget(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)  # N° Commande
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Date
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)           # Client
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)           # Produits
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)  # Client
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)  # Serveuse
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)          # Produits
         
         self.commandes_table.setAlternatingRowColors(True)
         self.commandes_table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
@@ -642,26 +643,39 @@ class CommandesIndexWidget(QWidget):
             client_item = QTableWidgetItem(str(commande.get('client_name', '')))
             self.commandes_table.setItem(row, 2, client_item)
 
+            # Serveuse / utilisateur qui a créé la commande
+            serveuse_name = (
+                commande.get('serveuse_name')
+                or commande.get('user_name')
+                or commande.get('comptoiriste_name')
+                or commande.get('serveuse')
+                or commande.get('waiter_name')
+                or ''
+            )
+            self.commandes_table.setItem(row, 3, QTableWidgetItem(str(serveuse_name)))
+
             # Produits et services (déjà concaténés dans commande['produits'])
             items_text = commande.get('produits', 'Aucun produit/service')
-            if len(items_text) > 100:
-                items_text = items_text[:97] + '...'
-            items_item = QTableWidgetItem(items_text)
-            self.commandes_table.setItem(row, 3, items_item)
+            if not items_text or str(items_text).strip() == 'None':
+                items_text = 'Aucun produit/service'
+            if len(str(items_text)) > 100:
+                items_text = str(items_text)[:97] + '...'
+            items_item = QTableWidgetItem(str(items_text))
+            self.commandes_table.setItem(row, 4, items_item)
 
             # Sous-total
             subtotal_item = QTableWidgetItem(self.format_money(commande.get('subtotal', 0)))
-            self.commandes_table.setItem(row, 4, subtotal_item)
+            self.commandes_table.setItem(row, 5, subtotal_item)
 
             # Remise
             remise_item = QTableWidgetItem(self.format_money(commande.get('remise_amount', 0)))
-            self.commandes_table.setItem(row, 5, remise_item)
+            self.commandes_table.setItem(row, 6, remise_item)
 
             # Total
             total_item = QTableWidgetItem(self.format_money(commande.get('total_final', 0)))
             if commande.get('payment_method') == 'Crédit':
                 total_item.setBackground(QColor("#ffecb3"))
-            self.commandes_table.setItem(row, 6, total_item)
+            self.commandes_table.setItem(row, 7, total_item)
 
             # Payé (montant déjà payé)
             montant_paye = commande.get('montant_paye', 0)
@@ -670,13 +684,13 @@ class CommandesIndexWidget(QWidget):
                 paye_item.setBackground(QColor("#c8e6c9"))  # Vert pour soldé
             elif montant_paye > 0:
                 paye_item.setBackground(QColor("#fff3e0"))  # Orange pour partiellement payé
-            self.commandes_table.setItem(row, 7, paye_item)
+            self.commandes_table.setItem(row, 8, paye_item)
 
             # Paiement
             payment_item = QTableWidgetItem(str(commande.get('payment_method', '')))
             if commande.get('payment_method') == 'Crédit':
                 payment_item.setBackground(QColor("#ffcdd2"))
-            self.commandes_table.setItem(row, 8, payment_item)
+            self.commandes_table.setItem(row, 9, payment_item)
             # Colonne 'Prêt'
             try:
                 pret_val = commande.get('_is_pret', False)
@@ -685,7 +699,7 @@ class CommandesIndexWidget(QWidget):
                     pret_item.setBackground(QColor('#e8f5e9'))
                 else:
                     pret_item.setBackground(QColor('#ffffff'))
-                self.commandes_table.setItem(row, 9, pret_item)
+                self.commandes_table.setItem(row, 10, pret_item)
             except Exception:
                 pass
 
@@ -697,7 +711,7 @@ class CommandesIndexWidget(QWidget):
                     livre_item.setBackground(QColor('#e3f2fd'))
                 else:
                     livre_item.setBackground(QColor('#ffffff'))
-                self.commandes_table.setItem(row, 10, livre_item)
+                self.commandes_table.setItem(row, 11, livre_item)
             except Exception:
                 pass
 

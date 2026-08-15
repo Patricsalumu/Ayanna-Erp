@@ -54,13 +54,16 @@ class CommandeController:
                         sp.numero_commande,
                         sp.created_at,
                         COALESCE(
-                            sc.nom || ' ' ||
-                            COALESCE(sc.prenom, '') ||
-                            CASE 
-                                WHEN sc.telephone IS NOT NULL AND sc.telephone != '' 
-                                    THEN ' (' || sc.telephone || ')'
-                                ELSE ''
-                            END,
+                            CONCAT(
+                                COALESCE(sc.nom, ''),
+                                ' ',
+                                COALESCE(sc.prenom, ''),
+                                CASE 
+                                    WHEN sc.telephone IS NOT NULL AND sc.telephone != '' 
+                                        THEN CONCAT(' (', sc.telephone, ')')
+                                    ELSE ''
+                                END
+                            ),
                             'Client anonyme'
                         ) AS client_name,
                         sp.subtotal,
@@ -71,13 +74,13 @@ class CommandeController:
                         sp.pret as pret,
                         sp.livre as livre,
                         (
-                            SELECT GROUP_CONCAT(cp.name || ' (x' || spp.quantity || ')')
+                            SELECT GROUP_CONCAT(CONCAT(COALESCE(cp.name, 'Produit'), ' (x', spp.quantity, ')'))
                             FROM shop_paniers_products spp
                             JOIN core_products cp ON spp.product_id = cp.id
                             WHERE spp.panier_id = sp.id
                         ) as produits,
                         (
-                            SELECT GROUP_CONCAT(ss.name || ' (x' || sps.quantity || ')')
+                            SELECT GROUP_CONCAT(CONCAT(COALESCE(ss.name, 'Service'), ' (x', sps.quantity, ')'))
                             FROM shop_paniers_services sps
                             JOIN event_services ss ON sps.service_id = ss.id
                             WHERE sps.panier_id = sp.id
@@ -184,26 +187,11 @@ class CommandeController:
 
                 # --- Récupérer également les paniers du module Restaurant (avec mêmes filtres) ---
                 try:
-                    # Vérifier si certaines tables optionnelles existent (core_users, shop_clients)
-                    has_core_users = False
-                    has_shop_clients = False
-                    try:
-                        tbl = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_users'}).fetchone()
-                        has_core_users = tbl is not None
-                    except Exception:
-                        has_core_users = False
-
-                    try:
-                        tbl2 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'shop_clients'}).fetchone()
-                        has_shop_clients = tbl2 is not None
-                    except Exception:
-                        has_shop_clients = False
-
-                    # Construire dynamiquement la sélection et les jointures en fonction des tables disponibles
-                    client_name_expr = "COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client restaurant')" if has_shop_clients else "'Client restaurant'"
-                    serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name" if has_core_users else "NULL as serveuse_name, NULL as comptoiriste_name"
-                    serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                        LEFT JOIN core_users scu ON rp.user_id = scu.id" if has_core_users else ""
-                    client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id" if has_shop_clients else ""
+                    # Les tables métier sont les tables MySQL standards du projet ; les jointures sont donc toujours actives.
+                    client_name_expr = "COALESCE(CONCAT(sc.nom, ' ', COALESCE(sc.prenom, '')), 'Client restaurant')"
+                    serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name"
+                    serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                        LEFT JOIN core_users scu ON rp.user_id = scu.id"
+                    client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id"
 
                     restau_base = f"""
                         SELECT
@@ -219,7 +207,7 @@ class CommandeController:
                                 rp.pret as pret,
                                 rp.livre as livre,
                             (
-                                SELECT GROUP_CONCAT(cp.name || ' (x' || rpp.quantity || ')')
+                                SELECT GROUP_CONCAT(CONCAT(COALESCE(cp.name, 'Produit'), ' (x', rpp.quantity, ')'))
                                 FROM restau_produit_panier rpp
                                 LEFT JOIN core_products cp ON rpp.product_id = cp.id
                                 WHERE rpp.panier_id = rp.id
@@ -261,28 +249,12 @@ class CommandeController:
                     restau_base += " ORDER BY rp.created_at DESC LIMIT :limit"
                     params['limit'] = limit
 
-                    # Vérifier si la table core_products existe (pour afficher les noms produits)
-                    has_core_products = False
-                    try:
-                        tbl3 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_products'}).fetchone()
-                        has_core_products = tbl3 is not None
-                    except Exception:
-                        has_core_products = False
-
-                    # Construire l'expression pour les produits (nom si core_products dispo, sinon id)
-                    if has_core_products:
-                        prod_concat_join = "LEFT JOIN core_products cp ON rpp.product_id = cp.id"
-                        prod_concat_expr = "cp.name"
-                    else:
-                        prod_concat_join = ""
-                        prod_concat_expr = "('Produit #' || rpp.product_id)"
+                    prod_concat_join = "LEFT JOIN core_products cp ON rpp.product_id = cp.id"
+                    prod_concat_expr = "CONCAT(COALESCE(cp.name, 'Produit'), ' (x', rpp.quantity, ')')"
 
                     # Injecter l'expression produit dans la requête
                     restau_base = restau_base.replace("FROM restau_produit_panier rpp\n                                LEFT JOIN core_products cp ON rpp.product_id = cp.id\n                                WHERE rpp.panier_id = rp.id",
                                                         f"FROM restau_produit_panier rpp\n                                {prod_concat_join}\n                                WHERE rpp.panier_id = rp.id")
-
-                    restau_base = restau_base.replace("SELECT GROUP_CONCAT(cp.name || ' (x' || rpp.quantity || ')')",
-                                                        f"SELECT GROUP_CONCAT({prod_concat_expr} || ' (x' || rpp.quantity || ')')")
 
                     restau_query = text(restau_base)
                     restau_rows = session.execute(restau_query, params).fetchall()
@@ -1335,28 +1307,11 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
             with self.db_manager.get_session() as session:
                 # Si le module est spécifié, chercher directement dans la bonne table
                 if module == 'restaurant':
-                    # Module selection debug removed
                     try:
-                        # Vérifier l'existence des tables optionnelles
-                        has_core_users = False
-                        has_shop_clients = False
-                        try:
-                            tbl = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_users'}).fetchone()
-                            has_core_users = tbl is not None
-                        except Exception:
-                            has_core_users = False
-
-                        try:
-                            tbl2 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'shop_clients'}).fetchone()
-                            has_shop_clients = tbl2 is not None
-                        except Exception:
-                            has_shop_clients = False
-
-                        # Construire dynamiquement la sélection et les jointures
-                        serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name, scu.name as user_name" if has_core_users else "NULL as serveuse_name, NULL as comptoiriste_name, 'Utilisateur' as user_name"
-                        serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                            LEFT JOIN core_users scu ON rp.user_id = scu.id" if has_core_users else ""
-                        client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id" if has_shop_clients else ""
-                        client_name_select = "COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client restaurant') as client_name" if has_shop_clients else "'Client restaurant' as client_name"
+                        serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name, scu.name as user_name"
+                        serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                            LEFT JOIN core_users scu ON rp.user_id = scu.id"
+                        client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id"
+                        client_name_select = "COALESCE(CONCAT(sc.nom, ' ', COALESCE(sc.prenom, '')), 'Client restaurant') as client_name"
 
                         r_base = f"""
                             SELECT rp.*, rt.number as table_number, rs.name as salle_name,
@@ -1371,18 +1326,10 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         """
                         r_query = text(r_base)
                         r_res = session.execute(r_query, {'commande_id': commande_id}).fetchone()
-                        if r_res:
-                            # Restaurant table found (no-op here; detailed handling follows below)
-                            pass
-                        else:
-                            # Restaurant table not found, falling back to boutique
-                            r_res = None
-                    except Exception as e:
-                        # Restaurant query failed debug removed
+                    except Exception:
                         r_res = None
-                    
+
                     if r_res:
-                        # if created_at is missing in db, set it to machine time
                         try:
                             if not getattr(r_res, 'created_at', None):
                                 now = datetime.now()
@@ -1393,11 +1340,9 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             pass
 
                         r_dict = dict(r_res._asdict())
-                        # Normaliser le nom du client si absent
                         if not r_dict.get('client_name'):
                             r_dict['client_name'] = 'Client restaurant'
 
-                        # Calculer montant_paye pour restau
                         payments_query = text("""
                             SELECT COALESCE(SUM(amount), 0) as montant_paye
                             FROM restau_payments
@@ -1406,28 +1351,12 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         payments_row = session.execute(payments_query, {'panier_id': r_dict['id']}).fetchone()
                         r_dict['montant_paye'] = payments_row.montant_paye if payments_row else 0
 
-                        # Récupérer produits restau (table restau_produit_panier)
-                        # Construire la requête produits en prenant en compte l'existence de core_products
-                        has_core_products = False
-                        try:
-                            tbl3 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_products'}).fetchone()
-                            has_core_products = tbl3 is not None
-                        except Exception:
-                            has_core_products = False
-
-                        if has_core_products:
-                            products_query = text("""
-                                SELECT rpp.*, cp.name as product_name, rpp.price as unit_price, rpp.total as total_price
-                                FROM restau_produit_panier rpp
-                                LEFT JOIN core_products cp ON rpp.product_id = cp.id
-                                WHERE rpp.panier_id = :commande_id
-                            """)
-                        else:
-                            products_query = text("""
-                                SELECT rpp.*, rpp.product_id as product_name, rpp.price as unit_price, rpp.total as total_price
-                                FROM restau_produit_panier rpp
-                                WHERE rpp.panier_id = :commande_id
-                            """)
+                        products_query = text("""
+                            SELECT rpp.*, cp.name as product_name, rpp.price as unit_price, rpp.total as total_price
+                            FROM restau_produit_panier rpp
+                            LEFT JOIN core_products cp ON rpp.product_id = cp.id
+                            WHERE rpp.panier_id = :commande_id
+                        """)
                         products_result = session.execute(products_query, {'commande_id': r_dict['id']})
                         products = products_result.fetchall()
 
@@ -1439,8 +1368,6 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             )
 
                         r_dict['produits_detail'] = '\n'.join(produits_detail) if produits_detail else 'Aucun produit/service'
-
-                        # Ajouter métadonnées table/serveuse/comptoiriste au dict
                         r_dict['table_number'] = r_dict.get('table_number')
                         r_dict['salle_name'] = r_dict.get('salle_name')
                         r_dict['serveuse_name'] = r_dict.get('serveuse_name')
@@ -1456,7 +1383,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     query = text("""
                         SELECT
                             sp.*,
-                            COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name,
+                            COALESCE(CONCAT(sc.nom, ' ', COALESCE(sc.prenom, '')), 'Client anonyme') as client_name,
                             COALESCE(cu.name, 'Utilisateur') as user_name
                         FROM shop_paniers sp
                         LEFT JOIN shop_clients sc ON sp.client_id = sc.id
@@ -1470,7 +1397,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     query = text("""
                         SELECT
                             sp.*,
-                            COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client anonyme') as client_name,
+                            COALESCE(CONCAT(sc.nom, ' ', COALESCE(sc.prenom, '')), 'Client anonyme') as client_name,
                             COALESCE(cu.name, 'Utilisateur') as user_name
                         FROM shop_paniers sp
                         LEFT JOIN shop_clients sc ON sp.client_id = sc.id
@@ -1489,28 +1416,11 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                     commande = None
 
                 if not commande:
-                    # Si pas trouvé dans shop_paniers, tenter restau_paniers (module restaurant)
                     try:
-                        # Vérifier l'existence des tables optionnelles
-                        has_core_users = False
-                        has_shop_clients = False
-                        try:
-                            tbl = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_users'}).fetchone()
-                            has_core_users = tbl is not None
-                        except Exception:
-                            has_core_users = False
-
-                        try:
-                            tbl2 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'shop_clients'}).fetchone()
-                            has_shop_clients = tbl2 is not None
-                        except Exception:
-                            has_shop_clients = False
-
-                        # Construire dynamiquement la sélection et les jointures
-                        serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name, scu.name as user_name" if has_core_users else "NULL as serveuse_name, NULL as comptoiriste_name, 'Utilisateur' as user_name"
-                        serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                            LEFT JOIN core_users scu ON rp.user_id = scu.id" if has_core_users else ""
-                        client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id" if has_shop_clients else ""
-                        client_name_select = "COALESCE(sc.nom || ' ' || COALESCE(sc.prenom, ''), 'Client restaurant') as client_name" if has_shop_clients else "'Client restaurant' as client_name"
+                        serveuse_select = "su.name as serveuse_name, scu.name as comptoiriste_name, scu.name as user_name"
+                        serveuse_joins = "LEFT JOIN core_users su ON rp.serveuse_id = su.id\n                            LEFT JOIN core_users scu ON rp.user_id = scu.id"
+                        client_join = "LEFT JOIN shop_clients sc ON rp.client_id = sc.id"
+                        client_name_select = "COALESCE(CONCAT(sc.nom, ' ', COALESCE(sc.prenom, '')), 'Client restaurant') as client_name"
 
                         r_base = f"""
                             SELECT rp.*, rt.number as table_number, rs.name as salle_name,
@@ -1528,7 +1438,6 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         if not r_res:
                             return None
 
-                        # if created_at is missing in db, set it to machine time
                         try:
                             if not getattr(r_res, 'created_at', None):
                                 now = datetime.now()
@@ -1539,11 +1448,9 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             pass
 
                         r_dict = dict(r_res._asdict())
-                        # Normaliser le nom du client si absent
                         if not r_dict.get('client_name'):
                             r_dict['client_name'] = 'Client restaurant'
 
-                        # Calculer montant_paye pour restau
                         payments_query = text("""
                             SELECT COALESCE(SUM(amount), 0) as montant_paye
                             FROM restau_payments
@@ -1552,28 +1459,12 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         payments_row = session.execute(payments_query, {'panier_id': r_dict['id']}).fetchone()
                         r_dict['montant_paye'] = payments_row.montant_paye if payments_row else 0
 
-                        # Récupérer produits restau (table restau_produit_panier)
-                        # Construire la requête produits en prenant en compte l'existence de core_products
-                        has_core_products = False
-                        try:
-                            tbl3 = session.execute(text("SELECT name FROM sqlite_master WHERE type='table' AND name=:t"), {'t': 'core_products'}).fetchone()
-                            has_core_products = tbl3 is not None
-                        except Exception:
-                            has_core_products = False
-
-                        if has_core_products:
-                            products_query = text("""
-                                SELECT rpp.*, cp.name as product_name, rpp.price as unit_price, rpp.total as total_price
-                                FROM restau_produit_panier rpp
-                                LEFT JOIN core_products cp ON rpp.product_id = cp.id
-                                WHERE rpp.panier_id = :commande_id
-                            """)
-                        else:
-                            products_query = text("""
-                                SELECT rpp.*, rpp.product_id as product_name, rpp.price as unit_price, rpp.total as total_price
-                                FROM restau_produit_panier rpp
-                                WHERE rpp.panier_id = :commande_id
-                            """)
+                        products_query = text("""
+                            SELECT rpp.*, cp.name as product_name, rpp.price as unit_price, rpp.total as total_price
+                            FROM restau_produit_panier rpp
+                            LEFT JOIN core_products cp ON rpp.product_id = cp.id
+                            WHERE rpp.panier_id = :commande_id
+                        """)
                         products_result = session.execute(products_query, {'commande_id': r_dict['id']})
                         products = products_result.fetchall()
 
@@ -1585,8 +1476,6 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                             )
 
                         r_dict['produits_detail'] = '\n'.join(produits_detail) if produits_detail else 'Aucun produit/service'
-
-                        # Ajouter métadonnées table/serveuse/comptoiriste au dict
                         r_dict['table_number'] = r_dict.get('table_number')
                         r_dict['salle_name'] = r_dict.get('salle_name')
                         r_dict['serveuse_name'] = r_dict.get('serveuse_name')
@@ -1595,7 +1484,6 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
 
                         return r_dict
                     except Exception as e:
-                        # Ne pas masquer l'erreur ici : relancer pour permettre le debug
                         raise
 
                 commande_dict = dict(commande._asdict())
@@ -1709,7 +1597,7 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 commande_result = session.execute(text("""
                     SELECT id, numero_commande, total_final, created_at,
                            (SELECT COALESCE(SUM(amount), 0) FROM shop_payments WHERE panier_id = sp.id) as montant_paye,
-                           (SELECT sc.nom || ' ' || COALESCE(sc.prenom, '') FROM shop_clients sc WHERE sc.id = sp.client_id) as client_name
+                           (SELECT CONCAT(COALESCE(sc.nom, ''), ' ', COALESCE(sc.prenom, '')) FROM shop_clients sc WHERE sc.id = sp.client_id) as client_name
                     FROM shop_paniers sp 
                     WHERE id = :commande_id
                 """), {'commande_id': commande_id})
