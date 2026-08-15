@@ -10,14 +10,14 @@ return new class extends Migration
     {
         // Bon de livraison interne (transfert multi-produits entre entrepôts)
         Schema::create('stock_livraisons', function (Blueprint $table) {
-            $table->uuid('id')->primary();
+            $table->bigIncrements('id');
             $table->string('numero', 50)->unique();
-            $table->foreignUuid('entreprise_id')->constrained('core_enterprises')->cascadeOnDelete();
-            $table->foreignUuid('entrepot_depart_id')->constrained('stock_warehouses');
-            $table->foreignUuid('entrepot_arrivee_id')->constrained('stock_warehouses');
-            $table->string('statut', 30)->default('brouillon'); // brouillon, livre, receptionne, annule
+            $table->unsignedBigInteger('entreprise_id')->nullable()->index();
+            $table->unsignedBigInteger('entrepot_depart_id');
+            $table->unsignedBigInteger('entrepot_arrivee_id');
+            $table->string('statut', 30)->default('brouillon');
             $table->decimal('valeur_totale', 15, 2)->default(0);
-            $table->foreignUuid('utilisateur_id')->nullable()->constrained('core_users')->nullOnDelete();
+            $table->unsignedBigInteger('utilisateur_id')->nullable();
             $table->string('utilisateur_nom', 100)->nullable();
             $table->timestamp('date_creation')->useCurrent();
             $table->timestamp('date_livraison')->nullable();
@@ -25,16 +25,19 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamps();
             $table->softDeletes();
-            $table->index('entreprise_id');
+            $table->foreign('entrepot_depart_id')->references('id')->on('stock_warehouses')->cascadeOnDelete();
+            $table->foreign('entrepot_arrivee_id')->references('id')->on('stock_warehouses')->cascadeOnDelete();
             $table->index('statut');
         });
 
         // Lignes d'un bon de livraison
         Schema::create('stock_livraison_items', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->foreignUuid('livraison_id')->constrained('stock_livraisons')->cascadeOnDelete();
-            $table->foreignUuid('product_id')->constrained('core_products')->cascadeOnDelete();
-            $table->string('product_name', 200)->nullable();  // dénormalisé
+            $table->bigIncrements('id');
+            $table->unsignedBigInteger('livraison_id');
+            $table->unsignedBigInteger('product_id');
+            $table->foreign('livraison_id')->references('id')->on('stock_livraisons')->cascadeOnDelete();
+            $table->foreign('product_id')->references('id')->on('core_products')->cascadeOnDelete();
+            $table->string('product_name', 200)->nullable();
             $table->string('product_code', 50)->nullable();
             $table->decimal('quantite', 15, 3);
             $table->decimal('cout_unitaire', 15, 2)->default(0);

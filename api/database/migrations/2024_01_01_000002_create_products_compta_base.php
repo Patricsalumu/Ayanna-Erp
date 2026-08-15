@@ -10,12 +10,12 @@ return new class extends Migration
     {
         if (!Schema::hasTable('core_product_categories')) {
             Schema::create('core_product_categories', function (Blueprint $table) {
-                $table->uuid('id')->primary();
-                $table->foreignUuid('enterprise_id')->constrained('core_enterprises')->cascadeOnDelete();
+                $table->id();
+                $table->unsignedBigInteger('entreprise_id')->nullable()->index();
+                $table->unsignedBigInteger('enterprise_id')->nullable()->index();
                 $table->string('name', 100);
                 $table->text('description')->nullable();
-                $table->uuid('parent_id')->nullable();
-                $table->foreign('parent_id')->references('id')->on('core_product_categories')->nullOnDelete();
+                $table->unsignedBigInteger('parent_id')->nullable()->index();
                 $table->boolean('is_active')->default(true);
                 $table->timestamps();
                 $table->softDeletes();
@@ -55,9 +55,10 @@ return new class extends Migration
 
         if (!Schema::hasTable('core_products')) {
             Schema::create('core_products', function (Blueprint $table) {
-                $table->uuid('id')->primary();
-                $table->foreignUuid('enterprise_id')->constrained('core_enterprises')->cascadeOnDelete();
-                $table->foreignUuid('category_id')->nullable()->constrained('core_product_categories')->nullOnDelete();
+                $table->id();
+                $table->unsignedBigInteger('entreprise_id')->nullable()->index();
+                $table->unsignedBigInteger('enterprise_id')->nullable()->index();
+                $table->unsignedBigInteger('category_id')->nullable()->index();
                 $table->string('code', 50)->nullable();
                 $table->string('name', 200);
                 $table->text('description')->nullable();
@@ -66,10 +67,10 @@ return new class extends Migration
                 $table->decimal('cost', 15, 2)->default(0);
                 $table->decimal('price_unit', 15, 2)->default(0);
                 $table->string('unit', 50)->default('pièce');
-                $table->uuid('compte_produit_id')->nullable();
-                $table->uuid('compte_charge_id')->nullable();
-                $table->foreign('compte_produit_id')->references('id')->on('compta_comptes')->nullOnDelete();
-                $table->foreign('compte_charge_id')->references('id')->on('compta_comptes')->nullOnDelete();
+                $table->unsignedBigInteger('compte_produit_id')->nullable();
+                $table->unsignedBigInteger('compte_charge_id')->nullable();
+                $table->unsignedBigInteger('stock_account_id')->nullable();
+                $table->string('product_type', 50)->default('resale_product');
                 $table->boolean('is_active')->default(true);
                 $table->timestamps();
                 $table->softDeletes();
@@ -101,7 +102,8 @@ return new class extends Migration
             Schema::create('pos_product_access', function (Blueprint $table) {
                 $table->uuid('id')->primary();
                 $table->foreignUuid('pos_id')->constrained('core_pos_points')->cascadeOnDelete();
-                $table->foreignUuid('product_id')->constrained('core_products')->cascadeOnDelete();
+                $table->unsignedBigInteger('product_id');
+                $table->foreign('product_id')->references('id')->on('core_products')->cascadeOnDelete();
                 $table->decimal('custom_price', 15, 2)->nullable();
                 $table->decimal('custom_cost', 15, 2)->nullable();
                 $table->boolean('is_available')->default(true);

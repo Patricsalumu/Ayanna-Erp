@@ -226,7 +226,26 @@ ON DUPLICATE KEY UPDATE
     classe_comptable_id = VALUES(classe_comptable_id),
     updated_at = NOW();
 
--- 8) Default accounting config by POS
+-- 8) Default stock warehouses
+INSERT INTO stock_warehouses (
+    id, entreprise_id, code, name, type, description, address, contact_person,
+    contact_phone, contact_email, is_default, is_active, capacity_limit,
+    created_at, updated_at
+) VALUES
+    (1, 1, 'POS_2', 'Entrepôt Vente', 'Principal', 'Entrepôt principal pour la vente', NULL, NULL, NULL, NULL, 1, 1, NULL, NOW(), NOW()),
+    (2, 1, 'POS_3', 'Entrepôt Pharmacie', 'Principal', 'Entrepôt principal pour la pharmacie', NULL, NULL, NULL, NULL, 0, 1, NULL, NOW(), NOW()),
+    (3, 1, 'POS_4', 'Entrepôt Restaurant', 'Principal', 'Entrepôt principal pour le restaurant', NULL, NULL, NULL, NULL, 0, 1, NULL, NOW(), NOW())
+ON DUPLICATE KEY UPDATE
+    entreprise_id = VALUES(entreprise_id),
+    code = VALUES(code),
+    name = VALUES(name),
+    type = VALUES(type),
+    description = VALUES(description),
+    is_default = VALUES(is_default),
+    is_active = VALUES(is_active),
+    updated_at = NOW();
+
+-- 9) Default accounting config by POS
 INSERT INTO compta_config (
     id, enterprise_id, pos_id, compte_caisse_id, compte_banque_id, compte_stock_id,
     compte_variation_stock_id, compte_client_id, compte_fournisseur_id,

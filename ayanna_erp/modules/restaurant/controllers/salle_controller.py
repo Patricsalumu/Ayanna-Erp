@@ -1,7 +1,8 @@
 """
 Controller to manage salles and tables (CRUD)
+
+On ne génère plus de UUID côté Python : la base attribue l'ID final.
 """
-import uuid
 from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.restaurant.models.restaurant import RestauSalle, RestauTable
 from datetime import datetime
@@ -17,7 +18,6 @@ class SalleController:
         session = self.db.get_session()
         try:
             salle = RestauSalle(
-                id=str(uuid.uuid4()),
                 entreprise_id=self.entreprise_id,
                 name=name,
             )
@@ -38,7 +38,6 @@ class SalleController:
         session = self.db.get_session()
         try:
             table = RestauTable(
-                id=str(uuid.uuid4()),
                 salle_id=salle_id,
                 number=number,
                 pos_x=pos_x,

@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('hotel_categories', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
             $table->string('nom');
             $table->text('description')->nullable();
             $table->decimal('prix_par_nuit', 15, 2)->default(0);
@@ -20,9 +20,9 @@ return new class extends Migration
         });
 
         Schema::create('hotel_rooms', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
-            $table->uuid('category_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
+            $table->unsignedBigInteger('category_id')->nullable()->index();
             $table->string('numero');
             $table->string('nom')->nullable();
             $table->string('etage')->nullable();
@@ -34,10 +34,10 @@ return new class extends Migration
         });
 
         Schema::create('hotel_reservations', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
-            $table->uuid('room_id')->nullable()->index();
-            $table->uuid('user_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
+            $table->unsignedBigInteger('room_id')->nullable()->index();
+            $table->unsignedBigInteger('user_id')->nullable()->index();
             $table->string('reference')->nullable();
             $table->string('client_nom');
             $table->string('client_telephone')->nullable();
@@ -57,9 +57,9 @@ return new class extends Migration
         });
 
         Schema::create('hotel_payments', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('reservation_id')->index();
-            $table->uuid('payment_mode_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('reservation_id')->index();
+            $table->unsignedBigInteger('payment_mode_id')->nullable()->index();
             $table->decimal('montant', 15, 2)->default(0);
             $table->string('reference')->nullable();
             $table->timestamp('date_paiement')->nullable();

@@ -950,8 +950,10 @@ class DatabaseManager:
                     'updated_at': 'DATETIME NULL',
                 },
                 'shop_payments': {
+                    'payment_method': 'VARCHAR(50) NULL',
                     'amount': 'DECIMAL(15,2) NULL',
                     'payment_date': 'DATETIME NULL',
+                    'notes': 'TEXT NULL',
                     'created_at': 'DATETIME NULL',
                     'updated_at': 'DATETIME NULL',
                 },
@@ -973,6 +975,8 @@ class DatabaseManager:
                     'updated_at': 'DATETIME NULL',
                 },
                 'restau_paniers': {
+                    'client_id': 'INTEGER NULL',
+                    'serveuse_id': 'INTEGER NULL',
                     'subtotal': 'DECIMAL(15,2) NULL',
                     'remise_amount': 'DECIMAL(15,2) NULL',
                     'total_final': 'DECIMAL(15,2) NULL',
@@ -1067,6 +1071,10 @@ class DatabaseManager:
                     conn.execute(text("ALTER TABLE restau_salles ADD COLUMN entreprise_id INTEGER NULL"))
                     conn.execute(text("UPDATE restau_salles SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
 
+                if self.table_exists('restau_paniers') and not self.column_exists('restau_paniers', 'entreprise_id'):
+                    conn.execute(text("ALTER TABLE restau_paniers ADD COLUMN entreprise_id INTEGER NULL"))
+                    conn.execute(text("UPDATE restau_paniers SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+
                 if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'entreprise_id'):
                     conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN entreprise_id INTEGER NULL"))
                     conn.execute(text("UPDATE restau_printed_invoices SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
@@ -1079,7 +1087,7 @@ class DatabaseManager:
                 if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'products_snapshot'):
                     conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN products_snapshot TEXT NULL"))
                 if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'printed_by_user_id'):
-                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN printed_by_user_id CHAR(36) NULL"))
+                    conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN printed_by_user_id BIGINT NULL"))
                 if self.table_exists('restau_printed_invoices') and not self.column_exists('restau_printed_invoices', 'printed_at'):
                     conn.execute(text("ALTER TABLE restau_printed_invoices ADD COLUMN printed_at DATETIME NULL"))
 
@@ -1089,13 +1097,44 @@ class DatabaseManager:
                     conn.execute(text("ALTER TABLE compta_classes ADD COLUMN date_modification DATETIME NULL"))
                     conn.execute(text("UPDATE compta_classes SET date_modification = updated_at WHERE date_modification IS NULL AND updated_at IS NOT NULL"))
 
+                if self.table_exists('shop_payments') and not self.column_exists('shop_payments', 'payment_method'):
+                    conn.execute(text("ALTER TABLE shop_payments ADD COLUMN payment_method VARCHAR(50) NULL"))
+                    conn.execute(text("UPDATE shop_payments SET payment_method = 'non_paye' WHERE payment_method IS NULL"))
+                if self.table_exists('shop_payments') and not self.column_exists('shop_payments', 'notes'):
+                    conn.execute(text("ALTER TABLE shop_payments ADD COLUMN notes TEXT NULL"))
+                    if self.column_exists('shop_payments', 'note'):
+                        conn.execute(text("UPDATE shop_payments SET notes = note WHERE notes IS NULL AND note IS NOT NULL"))
+
+                if self.table_exists('restau_paniers') and not self.column_exists('restau_paniers', 'client_id'):
+                    conn.execute(text("ALTER TABLE restau_paniers ADD COLUMN client_id BIGINT NULL"))
+                if self.table_exists('restau_paniers') and not self.column_exists('restau_paniers', 'serveuse_id'):
+                    conn.execute(text("ALTER TABLE restau_paniers ADD COLUMN serveuse_id BIGINT NULL"))
+
                 if self.table_exists('core_product_categories') and not self.column_exists('core_product_categories', 'entreprise_id'):
                     conn.execute(text("ALTER TABLE core_product_categories ADD COLUMN entreprise_id INTEGER NULL"))
                     conn.execute(text("UPDATE core_product_categories SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+                if self.table_exists('core_product_categories') and self.column_exists('core_product_categories', 'enterprise_id') and self.column_exists('core_product_categories', 'id'):
+                    try:
+                        conn.execute(text("SELECT 1 FROM core_product_categories LIMIT 1"))
+                    except Exception:
+                        pass
 
                 if self.table_exists('core_products') and not self.column_exists('core_products', 'entreprise_id'):
-                    conn.execute(text("ALTER TABLE core_products ADD COLUMN entreprise_id CHAR(36) NULL"))
-                    conn.execute(text("UPDATE core_products SET `entreprise_id` = `enterprise_id` WHERE `entreprise_id` IS NULL AND `enterprise_id` IS NOT NULL"))
+                    conn.execute(text("ALTER TABLE core_products ADD COLUMN entreprise_id INTEGER NULL"))
+                    conn.execute(text("UPDATE core_products SET entreprise_id = 1 WHERE entreprise_id IS NULL"))
+                    if self.column_exists('core_products', 'enterprise_id'):
+                        conn.execute(text("UPDATE core_products SET entreprise_id = CAST(enterprise_id AS SIGNED) WHERE entreprise_id IS NULL AND enterprise_id IS NOT NULL"))
+
+                if self.table_exists('core_product_categories') and self.column_exists('core_product_categories', 'enterprise_id'):
+                    try:
+                        conn.execute(text("ALTER TABLE core_product_categories MODIFY COLUMN id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"))
+                    except Exception:
+                        pass
+                if self.table_exists('core_products') and self.column_exists('core_products', 'enterprise_id'):
+                    try:
+                        conn.execute(text("ALTER TABLE core_products MODIFY COLUMN id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT"))
+                    except Exception:
+                        pass
 
                 if self.table_exists('restau_salles') and not self.column_exists('restau_salles', 'name') and self.column_exists('restau_salles', 'nom'):
                     conn.execute(text("ALTER TABLE restau_salles CHANGE COLUMN nom name VARCHAR(200) NULL"))

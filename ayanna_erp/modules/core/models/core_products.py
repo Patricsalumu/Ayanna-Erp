@@ -5,7 +5,7 @@ Remplace shop_products avec une logique centralisée par entreprise
 """
 
 from sqlalchemy import Column, DateTime, Integer, String, ForeignKey, Boolean, Numeric, Text, func
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym
 from datetime import datetime
 from ayanna_erp.database.base import Base
 
@@ -15,7 +15,8 @@ class CoreProduct(Base):
     __tablename__ = "core_products"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    entreprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)  # Changé de pos_id vers entreprise_id
+    enterprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
+    entreprise_id = synonym('enterprise_id')
     category_id = Column(Integer, ForeignKey('core_product_categories.id'))
     code = Column(String(50), unique=True)  # Code produit unique dans l'entreprise
     name = Column(String(200), nullable=False)
@@ -63,7 +64,8 @@ class CoreProductCategory(Base):
     __tablename__ = "core_product_categories"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
-    entreprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
+    enterprise_id = Column(Integer, ForeignKey('core_enterprises.id'), nullable=False)
+    entreprise_id = synonym('enterprise_id')
     name = Column(String(100), nullable=False)
     description = Column(Text)
     parent_id = Column(Integer, ForeignKey('core_product_categories.id'))  # Catégorie parente

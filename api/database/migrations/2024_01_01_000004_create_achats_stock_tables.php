@@ -19,8 +19,8 @@ return new class extends Migration
         });
 
         Schema::create('stock_warehouses', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->foreignUuid('entreprise_id')->constrained('core_enterprises')->cascadeOnDelete();
+            $table->bigIncrements('id');
+            $table->unsignedBigInteger('entreprise_id')->nullable()->index();
             $table->string('code', 50)->unique();
             $table->string('name', 255);
             $table->string('type', 50)->default('Principal');
@@ -34,14 +34,13 @@ return new class extends Migration
             $table->decimal('capacity_limit', 15, 2)->nullable();
             $table->timestamps();
             $table->softDeletes();
-            $table->index('entreprise_id');
         });
 
         Schema::create('achat_commandes', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->string('numero', 50)->unique();
             $table->foreignUuid('fournisseur_id')->nullable()->constrained('core_fournisseurs')->nullOnDelete();
-            $table->foreignUuid('entrepot_id')->constrained('stock_warehouses');
+            $table->unsignedBigInteger('entrepot_id');
             $table->foreignUuid('utilisateur_id')->constrained('core_users');
             $table->timestamp('date_commande')->useCurrent();
             $table->decimal('remise_global', 12, 2)->default(0);
@@ -50,13 +49,15 @@ return new class extends Migration
             $table->string('statut_paiement', 20)->default('non_paye');
             $table->timestamps();
             $table->softDeletes();
+            $table->foreign('entrepot_id')->references('id')->on('stock_warehouses')->cascadeOnDelete();
             $table->index(['fournisseur_id', 'etat']);
         });
 
         Schema::create('achat_commande_lignes', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('bon_commande_id')->constrained('achat_commandes')->cascadeOnDelete();
-            $table->foreignUuid('produit_id')->constrained('core_products');
+            $table->unsignedBigInteger('produit_id');
+            $table->foreign('produit_id')->references('id')->on('core_products');
             $table->decimal('quantite', 12, 2);
             $table->decimal('prix_unitaire', 12, 2);
             $table->decimal('remise_ligne', 12, 2)->default(0);

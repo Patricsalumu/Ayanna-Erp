@@ -9,8 +9,8 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('event_clients', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
             $table->string('nom');
             $table->string('telephone')->nullable();
             $table->string('adresse')->nullable();
@@ -21,8 +21,8 @@ return new class extends Migration
         });
 
         Schema::create('event_services', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
             $table->string('nom');
             $table->text('description')->nullable();
             $table->decimal('prix', 15, 2)->default(0);
@@ -33,9 +33,9 @@ return new class extends Migration
         });
 
         Schema::create('event_products', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
-            $table->uuid('product_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
+            $table->unsignedBigInteger('product_id')->nullable()->index();
             $table->boolean('is_available')->default(true);
             $table->decimal('custom_price', 15, 2)->nullable();
             $table->timestamps();
@@ -43,10 +43,10 @@ return new class extends Migration
         });
 
         Schema::create('event_reservations', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('pos_id')->nullable()->index();
-            $table->uuid('client_id')->nullable()->index();
-            $table->uuid('user_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('pos_id')->nullable()->index();
+            $table->unsignedBigInteger('client_id')->nullable()->index();
+            $table->unsignedBigInteger('user_id')->nullable()->index();
             $table->string('reference')->nullable();
             $table->string('nom_evenement')->nullable();
             $table->timestamp('date_evenement')->nullable();
@@ -63,9 +63,9 @@ return new class extends Migration
         });
 
         Schema::create('event_reservation_services', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('reservation_id')->index();
-            $table->uuid('service_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('reservation_id')->index();
+            $table->unsignedBigInteger('service_id')->nullable()->index();
             $table->decimal('quantite', 15, 3)->default(1);
             $table->decimal('prix_unitaire', 15, 2)->default(0);
             $table->decimal('remise', 15, 2)->default(0);
@@ -75,9 +75,9 @@ return new class extends Migration
         });
 
         Schema::create('event_reservation_products', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('reservation_id')->index();
-            $table->uuid('product_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('reservation_id')->index();
+            $table->unsignedBigInteger('product_id')->nullable()->index();
             $table->decimal('quantite', 15, 3)->default(1);
             $table->decimal('prix_unitaire', 15, 2)->default(0);
             $table->decimal('remise', 15, 2)->default(0);
@@ -87,9 +87,9 @@ return new class extends Migration
         });
 
         Schema::create('event_payments', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('reservation_id')->index();
-            $table->uuid('payment_mode_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('reservation_id')->index();
+            $table->unsignedBigInteger('payment_mode_id')->nullable()->index();
             $table->decimal('montant', 15, 2)->default(0);
             $table->string('reference')->nullable();
             $table->timestamp('date_paiement')->nullable();
@@ -99,10 +99,10 @@ return new class extends Migration
         });
 
         Schema::create('event_stock_movements', function (Blueprint $table) {
-            $table->uuid('id')->primary();
-            $table->uuid('reservation_id')->nullable()->index();
-            $table->uuid('product_id')->nullable()->index();
-            $table->uuid('warehouse_id')->nullable()->index();
+            $table->id();
+            $table->unsignedBigInteger('reservation_id')->nullable()->index();
+            $table->unsignedBigInteger('product_id')->nullable()->index();
+            $table->unsignedBigInteger('warehouse_id')->nullable()->index();
             $table->decimal('quantite', 15, 3)->default(0);
             $table->string('type_mouvement')->default('sortie');
             $table->text('note')->nullable();
