@@ -92,12 +92,12 @@ class BonCommandePrinter:
         c.line(left_margin, y, ticket_width - left_margin, y)
         y -= 3 * mm
 
-        # Client name - bold at bottom
-        client_name = ticket_data.get('client_name', '')
-        if client_name:
+        # Serveuse name - bold at bottom
+        serveuse_name = ticket_data.get('serveuse_name') or ticket_data.get('serveuse', '')
+        if serveuse_name:
             c.setFont('Helvetica-Bold', 9)
             y -= 1 * mm
-            c.drawCentredString(ticket_width / 2, y, f"{client_name}")
+            c.drawCentredString(ticket_width / 2, y, f"{serveuse_name}")
 
 
         # Footer - Informatisé par Ayanna ERP

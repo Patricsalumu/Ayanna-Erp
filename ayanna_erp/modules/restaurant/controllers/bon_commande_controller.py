@@ -127,8 +127,8 @@ class BonCommandeController:
             self.db.close_session()
 
     def create_bon_commande(self, panier_id, user_id=None, client_id=None, serveuse_id=None):
-        if not client_id:
-            return False, 'CLIENT_REQUIRED', None
+        if not serveuse_id:
+            return False, 'SERVEUSE_REQUIRED', None
 
         items = self.get_pending_bon_items(panier_id)
         if not items:

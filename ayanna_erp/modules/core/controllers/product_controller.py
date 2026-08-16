@@ -34,16 +34,20 @@ class CoreProductController:
 
     def get_products(self, session: Session, category_id: Optional[int] = None, search_term: Optional[str] = None, active_only: Optional[bool] = None, allowed_types: Optional[list] = None) -> List[CoreProduct]:
         """
-        Récupérer tous les produits du POS, filtrés par catégorie, recherche et statut
+        Récupérer tous les produits du POS, filtrés par catégorie, recherche et statut.
+        Si une recherche est active, la recherche ignore la catégorie pour parcourir toute la base.
         """
         query = session.query(CoreProduct).filter(CoreProduct.entreprise_id == self.entreprise_id)
-        if category_id:
-            query = query.filter(CoreProduct.category_id == category_id)
+
         if allowed_types is not None:
             query = query.filter(CoreProduct.product_type.in_(allowed_types))
+
         if search_term:
             like_term = f"%{search_term}%"
             query = query.filter((CoreProduct.name.ilike(like_term)) | (CoreProduct.description.ilike(like_term)))
+        elif category_id:
+            query = query.filter(CoreProduct.category_id == category_id)
+
         if active_only is not None:
             query = query.filter(CoreProduct.is_active == active_only)
         return query.order_by(CoreProduct.name.asc()).all()

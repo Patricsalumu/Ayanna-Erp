@@ -80,6 +80,19 @@ class CatalogueWidget(QWidget):
         success, message = printer.print_pdf(file_path)
         return success, message
 
+    def _return_to_vente_view(self):
+        """Retourne automatiquement à la vue vente lorsque le widget est contenu dans le QStackedWidget du plan."""
+        parent = self.parent()
+        while parent is not None:
+            if hasattr(parent, 'show_plan_view') and callable(parent.show_plan_view):
+                try:
+                    parent.show_plan_view()
+                    return True
+                except Exception:
+                    return False
+            parent = parent.parent()
+        return False
+
     def init_ui(self):
         main = QVBoxLayout(self)
         header_h = QHBoxLayout()
@@ -200,45 +213,29 @@ class CatalogueWidget(QWidget):
 
         # Numeric pad and actions
         pad = QHBoxLayout()
-        self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999)
+        self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999); self.qty_spin.setVisible(False)
         pad.addWidget(self.qty_spin)
-        # apply qty when editing finished (focus lost)
         try:
             self.qty_spin.editingFinished.connect(self._apply_qty_from_spin)
         except Exception:
             pass
+
         inc_btn = QPushButton('+'); dec_btn = QPushButton('-'); del_btn = QPushButton('Suppr')
+        inc_btn.setMinimumHeight(46); inc_btn.setMinimumWidth(72); inc_btn.setStyleSheet('font-size:16px; font-weight:700;')
+        dec_btn.setMinimumHeight(46); dec_btn.setMinimumWidth(72); dec_btn.setStyleSheet('font-size:16px; font-weight:700;')
+        del_btn.setMinimumHeight(46); del_btn.setMinimumWidth(92); del_btn.setStyleSheet('font-size:15px; font-weight:700; background:#d32f2f; color:white;')
         inc_btn.clicked.connect(self.increment_selected_qty)
         dec_btn.clicked.connect(self.decrement_selected_qty)
         del_btn.clicked.connect(self.delete_selected_line)
         pad.addWidget(inc_btn); pad.addWidget(dec_btn); pad.addWidget(del_btn)
         right_l.addLayout(pad)
 
-        # (numeric keypad removed - we keep qty_spin + +/-/Suppr controls)
-
-        # Note du panier (hauteur réduite) + bouton sur la même ligne
-        note_h = QHBoxLayout()
-        note_h.setSpacing(8)
-        note_h.addWidget(QLabel('Note'))
-        self.note_edit = QTextEdit()
-        self.note_edit.setFixedHeight(48)
-        # make the note edit expand and occupy available horizontal space
-        self.note_edit.setSizePolicy(self.note_edit.sizePolicy().horizontalPolicy(), self.note_edit.sizePolicy().verticalPolicy())
-        note_h.addWidget(self.note_edit, stretch=1)
-        save_note_btn = QPushButton('Enregistrer')
-        save_note_btn.setFixedHeight(36)
-        save_note_btn.setFixedWidth(120)
-        save_note_btn.clicked.connect(self.save_note)
-        # style the button to match primary action
-        save_note_btn.setStyleSheet('background-color:#1976D2; color:white; font-weight:600;')
-        note_h.addWidget(save_note_btn)
-        right_l.addLayout(note_h)
-
         # Remise (montant) et label Total
         totals_h = QHBoxLayout()
         self.remise_edit = QLineEdit()
         self.remise_edit.setPlaceholderText('Remise (montant)')
-        self.remise_edit.setFixedWidth(120)
+        self.remise_edit.setMinimumHeight(38)
+        self.remise_edit.setMinimumWidth(140)
         try:
             self.remise_edit.editingFinished.connect(self._on_remise_changed)
         except Exception:
@@ -247,6 +244,8 @@ class CatalogueWidget(QWidget):
         totals_h.addWidget(self.remise_edit)
         totals_h.addStretch()
         self.total_label = QLabel('Total: 0 F')
+        self.total_label.setMinimumHeight(38)
+        self.total_label.setStyleSheet('font-size:15px; font-weight:700;')
         totals_h.addWidget(self.total_label)
         right_l.addLayout(totals_h)
 
@@ -256,10 +255,14 @@ class CatalogueWidget(QWidget):
         self.payer_btn = QPushButton('Payer')
         self.imprimer_btn = QPushButton('Prefacture')
         self.bon_btn = QPushButton('Envoyer Commande')
-        self.annuler_btn.setStyleSheet('background-color:#e53935; color:white;')
-        self.payer_btn.setStyleSheet('background-color:#28a745; color:white;')
-        self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white;')
-        self.bon_btn.setStyleSheet('background-color:#1976D2; color:white;')
+        for btn in (self.annuler_btn, self.payer_btn, self.imprimer_btn, self.bon_btn):
+            btn.setMinimumHeight(46)
+            btn.setMinimumWidth(110)
+            btn.setStyleSheet('font-size:14px; font-weight:700;')
+        self.annuler_btn.setStyleSheet('background-color:#e53935; color:white; font-size:14px; font-weight:700;')
+        self.payer_btn.setStyleSheet('background-color:#28a745; color:white; font-size:14px; font-weight:700;')
+        self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
+        self.bon_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
         actions_h.addWidget(self.annuler_btn)
         actions_h.addWidget(self.payer_btn)
         actions_h.addWidget(self.imprimer_btn)
@@ -853,15 +856,33 @@ class CatalogueWidget(QWidget):
                 q = 1
             self.qty_spin.setValue(q)
 
+    def _get_current_line_quantity(self, lp_id):
+        """Retourne la quantité réelle enregistrée dans le panier, sans dépendre du dernier état affiché dans la table."""
+        try:
+            items = self.controller.list_cart_items(self.panier.id)
+            for it in items:
+                if int(getattr(it, 'id', 0)) == int(lp_id):
+                    return int(float(getattr(it, 'quantity', 0) or 0))
+        except Exception:
+            pass
+        try:
+            row = self.selected_cart_row
+            if row is not None and row < self.cart_table.rowCount():
+                return int(float(self.cart_table.item(row, 2).text() or 0))
+        except Exception:
+            pass
+        return 1
+
     def increment_selected_qty(self):
         if self.selected_cart_row is None:
             return
         row = self.selected_cart_row
         lp_id = int(self.cart_table.item(row, 0).text())
-        current = int(self.qty_spin.value())
+        current = self._get_current_line_quantity(lp_id)
         newq = current + 1
         try:
             self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            self.selected_line_id = lp_id
             self.refresh_cart()
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
@@ -869,16 +890,16 @@ class CatalogueWidget(QWidget):
     def decrement_selected_qty(self):
         if self.selected_cart_row is None:
             return
-        # If current user is not super_admin, require super_admin authorization
         if not self._current_user_is_super_admin():
             if not self._require_super_admin_password():
                 return
         row = self.selected_cart_row
         lp_id = int(self.cart_table.item(row, 0).text())
-        current = int(self.qty_spin.value())
+        current = self._get_current_line_quantity(lp_id)
         newq = max(1, current - 1)
         try:
             self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            self.selected_line_id = lp_id
             self.refresh_cart()
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
@@ -1669,21 +1690,22 @@ class CatalogueWidget(QWidget):
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
 
-        client_id = getattr(self.panier, 'client_id', None)
-        if not client_id:
-            QMessageBox.information(self, 'Info', 'Veuillez sélectionner un client avant d\'imprimer le bon de commande.')
+        serveuse_id = getattr(self.panier, 'serveuse_id', None)
+        if not serveuse_id:
+            QMessageBox.information(self, 'Info', 'Veuillez sélectionner une serveuse avant d\'imprimer le bon de commande.')
             return
 
+        client_id = getattr(self.panier, 'client_id', None)
         success, result, pending_items = self.bon_commande_ctrl.create_bon_commande(
             panier_id=self.panier.id,
             user_id=getattr(self.current_user, 'id', None),
             client_id=client_id,
-            serveuse_id=getattr(self.panier, 'serveuse_id', None),
+            serveuse_id=serveuse_id,
         )
 
         if not success:
-            if result == 'CLIENT_REQUIRED':
-                QMessageBox.information(self, 'Info', 'Veuillez sélectionner un client avant d\'imprimer le bon de commande.')
+            if result == 'SERVEUSE_REQUIRED':
+                QMessageBox.information(self, 'Info', 'Veuillez sélectionner une serveuse avant d\'imprimer le bon de commande.')
                 return
             if result == 'NO_NEW_ITEMS':
                 QMessageBox.information(self, 'Info', 'Aucun nouveau produit à envoyer en cuisine.')
@@ -1738,6 +1760,7 @@ class CatalogueWidget(QWidget):
             ticket_data = {
                 'numero_bon': getattr(bon, 'numero_bon', 'N/A'),
                 'serveuse': serveuse_name,
+                'serveuse_name': serveuse_name,
                 'table': table_display,
                 'panier_id': getattr(bon, 'restau_panier_id', ''),
                 'created_at': getattr(bon, 'created_at', None),
@@ -1755,6 +1778,7 @@ class CatalogueWidget(QWidget):
                 printed, error_message = self._print_pdf_with_default_printer(filename)
                 if printed:
                     QMessageBox.information(self, 'Bon de commande', 'Bon de commande envoyé à l\'imprimante par défaut.')
+                    self._return_to_vente_view()
                 else:
                     if error_message:
                         QMessageBox.critical(self, 'Erreur d\'impression', f"Impossible d\'imprimer automatiquement le bon de commande:\n{error_message}")
