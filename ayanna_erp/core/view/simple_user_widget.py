@@ -216,10 +216,10 @@ class SimpleUserWidget(QDialog):
             available_roles = list(self.user_controller.ROLES.keys())
         elif current_role == 'admin':
             # Admin peut attribuer des rôles inférieurs
-            available_roles = ['admin', 'manager', 'caissier', 'user']
+            available_roles = ['admin', 'manager', 'caissier', 'serveuse', 'user']
         else:
             # Manager peut seulement créer des utilisateurs standards
-            available_roles = ['caissier', 'user']
+            available_roles = ['caissier', 'serveuse', 'user']
         
         for role in available_roles:
             role_display = self.user_controller.ROLES[role]
@@ -328,14 +328,20 @@ class SimpleUserWidget(QDialog):
         # Mot de passe (obligatoire seulement pour création)
         password = self.password_edit.text()
         password_confirm = self.password_confirm_edit.text()
-        
+        selected_role = self.role_combo.currentData()
+
         if not self.is_editing and not password:
             errors.append("Le mot de passe est obligatoire")
-        elif password and len(password) < 6:
-            errors.append("Le mot de passe doit contenir au moins 6 caractères")
-        elif password != password_confirm:
+        elif password:
+            if selected_role == 'serveuse':
+                if not password.isdigit() or len(password) != 4:
+                    errors.append("Le mot de passe de la serveuse doit contenir exactement 4 chiffres")
+            elif len(password) < 6:
+                errors.append("Le mot de passe doit contenir au moins 6 caractères")
+
+        if password and password != password_confirm:
             errors.append("Les mots de passe ne correspondent pas")
-        
+
         if errors:
             QMessageBox.warning(
                 self,
@@ -359,6 +365,10 @@ class SimpleUserWidget(QDialog):
         password = self.password_edit.text()
         if password:
             data['password'] = password
+
+        if data.get('role') == 'serveuse' and password:
+            if not password.isdigit() or len(password) != 4:
+                raise ValueError('Le mot de passe de la serveuse doit contenir exactement 4 chiffres')
 
         # Modules
         modules = []

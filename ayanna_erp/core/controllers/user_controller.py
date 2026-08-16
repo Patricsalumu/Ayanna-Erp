@@ -33,6 +33,7 @@ class UserController(QObject):
         'admin': 'Administrateur',
         'manager': 'Manager',
         'caissier': 'Caissier',
+        'serveuse': 'Serveuse',
         'user': 'Utilisateur',
         'guest': 'Invité',
     }

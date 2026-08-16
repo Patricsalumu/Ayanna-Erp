@@ -11,6 +11,8 @@ from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteCont
 from ayanna_erp.modules.restaurant.views.catalogue_widget import CatalogueWidget
 from ayanna_erp.database.database_manager import get_database_manager, Entreprise
 from ayanna_erp.utils.formatting import get_currency
+from ayanna_erp.core.session_manager import SessionManager
+from ayanna_erp.modules.restaurant.views.serveuse_login_view import ServeuseLoginView
 
 
 # ----------------------------------------------------------------------
@@ -184,8 +186,64 @@ class VenteView(QWidget):
             return str(amount)
         return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
+    def _refresh_user_label(self):
+        user = getattr(self, 'current_user', None)
+        if user is None:
+            self.user_label.setText("Serveuse: --")
+            return
+        if isinstance(user, dict):
+            name = user.get('name') or user.get('email') or 'Serveuse'
+        else:
+            name = getattr(user, 'name', None) or getattr(user, 'email', None) or 'Serveuse'
+        self.user_label.setText(f"Serveuse: {name}")
+
+    def _open_serveuse_login(self):
+        login_view = ServeuseLoginView(entreprise_id=self.entreprise_id, parent=self)
+        login_view.user_authenticated.connect(self._on_serveuse_authenticated)
+        login_view.show()
+        login_view.raise_()
+        login_view.activateWindow()
+
+        screen = self.screen().availableGeometry()
+        login_rect = login_view.frameGeometry()
+        login_rect.moveCenter(screen.center())
+        login_view.move(login_rect.topLeft())
+
+    def _on_serveuse_authenticated(self, user):
+        if user is None:
+            return
+        self.current_user = user
+        SessionManager.set_current_user(user)
+        self._refresh_user_label()
+
     def init_ui(self):
         layout = QVBoxLayout(self)
+
+        self.user_bar = QWidget()
+        self.user_bar_layout = QHBoxLayout(self.user_bar)
+        self.user_bar_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.user_label = QLabel("Serveuse: --")
+        self.user_label.setStyleSheet("font-weight: bold; color: #1f2937;")
+        self.user_bar_layout.addWidget(self.user_label)
+        self.user_bar_layout.addStretch()
+
+        self.logout_btn = QPushButton("Déconnexion serveuse")
+        self.logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc2626;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                padding: 8px 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #b91c1c; }
+        """)
+        self.logout_btn.clicked.connect(self._open_serveuse_login)
+        self.user_bar_layout.addWidget(self.logout_btn)
+        layout.addWidget(self.user_bar)
+
         # ----------------------------
         # ✅ BARRE D’ONGLETS DES SALLES (wrap in a widget so we can hide it)
         # ----------------------------
@@ -198,6 +256,8 @@ class VenteView(QWidget):
         # ✅ ZONE PRINCIPALE (Stack : plan de salle <-> catalogue)
         # ----------------------------
         self.stack = QStackedWidget()
+
+        self._refresh_user_label()
 
         # Page 0 : plan de salle (conserve self.plan_frame pour compatibilité)
         self.plan_page = QWidget()

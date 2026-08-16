@@ -1,0 +1,177 @@
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QPushButton, QLabel, QLineEdit, QMessageBox
+from PyQt6.QtCore import Qt, pyqtSignal
+
+from ayanna_erp.database.database_manager import DatabaseManager, User
+
+
+class ServeuseLoginView(QDialog):
+    """Écran de connexion rapide des serveuses via keypad numérique."""
+
+    user_authenticated = pyqtSignal(object)
+
+    def __init__(self, entreprise_id=1, parent=None):
+        super().__init__(parent)
+        self.entreprise_id = entreprise_id
+        self.db = DatabaseManager()
+        self.password = ""
+        self.setWindowModality(Qt.WindowModality.ApplicationModal)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        self.setWindowTitle("Connexion serveuse")
+        self.setFixedSize(420, 520)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setStyleSheet("""
+            QWidget {
+                background: #f5f7fa;
+                color: #1f2937;
+            }
+            QLabel { color: #111827; }
+            QLineEdit {
+                background: white;
+                border: 2px solid #d1d5db;
+                border-radius: 10px;
+                padding: 16px 12px;
+                font-size: 28px;
+                font-weight: bold;
+                text-align: center;
+            }
+            QPushButton {
+                background: #ffffff;
+                border: 1px solid #d1d5db;
+                border-radius: 12px;
+                font-size: 22px;
+                font-weight: bold;
+                color: #111827;
+            }
+            QPushButton:hover {
+                background: #e5e7eb;
+            }
+            QPushButton#key_submit {
+                background: #16a34a;
+                color: white;
+                border: none;
+            }
+            QPushButton#key_clear {
+                background: #f59e0b;
+                color: white;
+                border: none;
+            }
+            QPushButton#key_cancel {
+                background: #ef4444;
+                color: white;
+                border: none;
+            }
+        """)
+
+        main = QVBoxLayout(self)
+        main.setContentsMargins(24, 20, 24, 24)
+        main.setSpacing(16)
+
+        title = QLabel("Serveuse - Saisissez votre code")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setStyleSheet("font-size: 22px; font-weight: bold;")
+        main.addWidget(title)
+
+        self.password_input = QLineEdit()
+        self.password_input.setPlaceholderText("••••")
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.password_input.setReadOnly(True)
+        self.password_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main.addWidget(self.password_input)
+
+        keypad = QGridLayout()
+        keypad.setHorizontalSpacing(12)
+        keypad.setVerticalSpacing(12)
+
+        digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+        for idx, digit in enumerate(digits):
+            btn = QPushButton(digit)
+            btn.setFixedHeight(68)
+            btn.clicked.connect(lambda checked=False, val=digit: self._add_digit(val))
+            row, col = divmod(idx, 3)
+            keypad.addWidget(btn, row, col)
+
+        clear_btn = QPushButton("C")
+        clear_btn.setObjectName("key_clear")
+        clear_btn.setFixedHeight(68)
+        clear_btn.clicked.connect(self._clear_password)
+        keypad.addWidget(clear_btn, 3, 0)
+
+        back_btn = QPushButton("⌫")
+        back_btn.setFixedHeight(68)
+        back_btn.clicked.connect(self._backspace)
+        keypad.addWidget(back_btn, 3, 1)
+
+        submit_btn = QPushButton("OK")
+        submit_btn.setObjectName("key_submit")
+        submit_btn.setFixedHeight(68)
+        submit_btn.clicked.connect(self._authenticate)
+        keypad.addWidget(submit_btn, 3, 2)
+
+        main.addLayout(keypad)
+
+        cancel_btn = QPushButton("Annuler")
+        cancel_btn.setObjectName("key_cancel")
+        cancel_btn.setFixedHeight(48)
+        cancel_btn.clicked.connect(self.close)
+        main.addWidget(cancel_btn)
+
+    def _add_digit(self, digit: str):
+        if len(self.password) >= 4:
+            return
+        self.password += str(digit)
+        self._refresh_password_display()
+        if len(self.password) == 4:
+            self._authenticate()
+
+    def _backspace(self):
+        self.password = self.password[:-1]
+        self._refresh_password_display()
+
+    def _clear_password(self):
+        self.password = ""
+        self._refresh_password_display()
+
+    def _refresh_password_display(self):
+        visible = "•" * len(self.password)
+        self.password_input.setText(visible)
+
+    def _authenticate(self):
+        if not self.password:
+            QMessageBox.warning(self, "Code requis", "Veuillez saisir le mot de passe de la serveuse.")
+            return
+
+        entered = str(self.password).strip()
+        session = self.db.get_session()
+        try:
+            users = session.query(User).filter(User.enterprise_id == self.entreprise_id).all()
+            matches = []
+            for user in users:
+                role = str(getattr(user, 'role', '') or '').lower()
+                if role != 'serveuse':
+                    continue
+                if user.check_password(entered):
+                    matches.append(user)
+
+            if not matches:
+                QMessageBox.warning(self, "Accès refusé", "Code inconnu pour cette serveuse.")
+                self.password = ""
+                self._refresh_password_display()
+                return
+
+            selected_user = matches[0]
+            self.user_authenticated.emit(selected_user)
+            self.close()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erreur", f"Impossible de valider le code: {exc}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
+
+    def closeEvent(self, event):
+        self.password = ""
+        self._refresh_password_display()
+        super().closeEvent(event)

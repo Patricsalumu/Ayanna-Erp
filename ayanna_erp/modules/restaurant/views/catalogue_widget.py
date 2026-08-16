@@ -136,6 +136,8 @@ class CatalogueWidget(QWidget):
             self._populate_serveuse_combo()
         except Exception:
             pass
+        self.serveuse_combo.setEnabled(False)
+        self.serveuse_combo.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         header_h.addWidget(QLabel("Serveuse:"))
         header_h.addWidget(self.serveuse_combo)
         try:

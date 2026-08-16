@@ -53,11 +53,9 @@ class RestaurantWindow(QMainWindow):
         """Configuration de l'interface utilisateur"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        
-        # Layout principal avec onglets
+
         main_layout = QVBoxLayout(central_widget)
-        
-        # Widget à onglets
+
         self.tab_widget = QTabWidget()
         self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
@@ -74,39 +72,45 @@ class RestaurantWindow(QMainWindow):
                 color: white;
             }
         """)
-        
+
+        if self._get_current_user_role() == 'serveuse':
+            self.setup_pos_tab()
+            self.setup_bon_commande_tab()
+            self.setup_orders_tab()
+            main_layout.addWidget(self.tab_widget)
+            return
+
         # Onglet POS Restaurant
         self.setup_pos_tab()
-        
+
         # Onglet Commandes
         self.setup_orders_tab()
-        
+
         # Onglet Categories
         self.setup_categories_tab()
-        
+
         # Onglet Produits
         self.setup_produits_tab()
-        
+
         # Onglet Gestion des salles
         self.setup_halls_tab()
-        
+
         # Onglet Gestion des tables
         # self.setup_tables_tab()
-        
+
         # Onglet Bons de Commande
         self.setup_bon_commande_tab()
-        
+
         # Onglet Clients
         self.setup_clients_tab()
 
         # Onglet factures imprimees (super admin uniquement)
         if self._get_current_user_role() == 'super_admin':
             self.setup_printed_invoices_tab()
-        
-        
+
         # Onglet Rapports
         self.setup_caisse_tab()
-        
+
         main_layout.addWidget(self.tab_widget)
     
     def setup_pos_tab(self):
@@ -190,5 +194,13 @@ class RestaurantWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Gérer la fermeture de la fenêtre"""
+        if self._get_current_user_role() == 'serveuse':
+            event.ignore()
+            QMessageBox.warning(
+                self,
+                "Accès bloqué",
+                "La serveuse ne peut pas quitter la fenêtre du restaurant. Utilisez la déconnexion serveuse."
+            )
+            return
         self.db_manager.close_session()
         event.accept()
