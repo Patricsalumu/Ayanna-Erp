@@ -9,7 +9,8 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QSpinBox, QDoubleSpinBox, QTextEdit, QMessageBox,
                             QGroupBox, QGridLayout, QListWidget, QSplitter,
                             QFrame, QScrollArea, QFormLayout, QCheckBox,
-                            QGraphicsView, QGraphicsScene, QGraphicsRectItem)
+                            QGraphicsView, QGraphicsScene, QGraphicsRectItem,
+                            QApplication)
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QRectF
 from PyQt6.QtGui import QFont, QPixmap, QIcon, QBrush, QPen, QColor
 from decimal import Decimal
@@ -64,6 +65,7 @@ class RestaurantWindow(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
+
         self.tab_widget = QTabWidget()
         self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
@@ -83,6 +85,32 @@ class RestaurantWindow(QMainWindow):
         main_layout.addWidget(self.tab_widget)
 
         if self._get_current_user_role() == 'serveuse':
+            self.bottom_bar = QWidget()
+            self.bottom_bar_layout = QHBoxLayout(self.bottom_bar)
+            self.bottom_bar_layout.setContentsMargins(8, 4, 8, 8)
+            self.bottom_bar_layout.setSpacing(10)
+            self.serveuse_label = QLabel("Serveuse: --")
+            self.serveuse_label.setStyleSheet("font-weight: bold; color: #1f2937;")
+            self.bottom_bar_layout.addWidget(self.serveuse_label)
+            self.bottom_bar_layout.addStretch()
+            self.logout_btn = QPushButton("Déconnexion")
+            self.logout_btn.setFixedHeight(34)
+            self.logout_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #dc2626;
+                    color: white;
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 14px;
+                    font-weight: bold;
+                }
+                QPushButton:hover { background-color: #b91c1c; }
+            """)
+            self.logout_btn.clicked.connect(self._logout_from_parent_vente)
+            self.bottom_bar_layout.addWidget(self.logout_btn)
+            self.bottom_bar.setFixedHeight(46)
+            main_layout.addWidget(self.bottom_bar)
+            self._update_serveuse_label()
             self.setup_pos_tab()
             self.setup_bon_commande_tab()
             self.setup_orders_tab()
@@ -133,28 +161,106 @@ class RestaurantWindow(QMainWindow):
         try:
             self._clear_tabs()
             self.setup_ui()
+            self._update_serveuse_label()
             self.tab_widget.setCurrentIndex(0)
+            self.show()
+            self.raise_()
+            self.activateWindow()
             QTimer.singleShot(0, self._refresh_after_serveuse_login)
+            QTimer.singleShot(50, self._refresh_after_serveuse_login)
+            QTimer.singleShot(150, self._refresh_after_serveuse_login)
+            QApplication.instance().processEvents()
         except Exception:
             pass
 
     def _refresh_after_serveuse_login(self):
-        """Force le premier onglet POS à se reconstruire immédiatement après authentification."""
+        """Force l'affichage immédiat du plan de vente sur le premier rendu après login."""
         try:
             if self.tab_widget.count() == 0:
                 return
-            first_widget = self.tab_widget.widget(0)
-            if hasattr(first_widget, 'ensure_first_salle_loaded'):
-                first_widget.ensure_first_salle_loaded()
+
+            pos_index = None
+            pos_widget = None
+            for idx in range(self.tab_widget.count()):
+                widget = self.tab_widget.widget(idx)
+                if isinstance(widget, VenteView):
+                    pos_index = idx
+                    pos_widget = widget
+                    break
+
+            if pos_widget is None:
+                return
+
+            self.tab_widget.setCurrentWidget(pos_widget)
+            self.tab_widget.setCurrentIndex(pos_index)
+            QApplication.instance().processEvents()
+
+            pos_widget.current_user = self.current_user
+            try:
+                from ayanna_erp.core.session_manager import SessionManager
+                SessionManager.set_current_user(self.current_user)
+            except Exception:
+                pass
+
+            try:
+                pos_widget._reload_vente_for_current_user()
+                QTimer.singleShot(0, pos_widget._reload_vente_for_current_user)
+                QTimer.singleShot(50, pos_widget._reload_vente_for_current_user)
+            except Exception:
+                pass
+
+            QApplication.instance().processEvents()
+            pos_widget.show()
+            pos_widget.raise_()
+            pos_widget.activateWindow()
+        except Exception:
+            pass
+
+    def _update_serveuse_label(self):
+        user = self.current_user
+        if user is None:
+            label = "Serveuse: --"
+        elif isinstance(user, dict):
+            label = f"Serveuse: {user.get('name') or user.get('email') or 'Serveuse'}"
+        else:
+            label = f"Serveuse: {getattr(user, 'name', None) or getattr(user, 'email', None) or 'Serveuse'}"
+
+        if hasattr(self, 'serveuse_label'):
+            self.serveuse_label.setText(label)
+
+    def _logout_from_parent_vente(self):
+        """Déconnecte la serveuse depuis le widget parent, puis ouvre le login serveuse."""
+        try:
+            from ayanna_erp.core.session_manager import SessionManager
+            SessionManager.clear_session()
+        except Exception:
+            pass
+
+        self.current_user = None
+        self._update_serveuse_label()
+        self.open_serveuse_login()
+
+    def _restore_restaurant_access(self):
+        """Réactive la fenêtre restaurant après la fermeture du dialog de login serveuse."""
+        try:
+            self.setEnabled(True)
+            self.show()
+            self.raise_()
+            self.activateWindow()
         except Exception:
             pass
 
     def open_serveuse_login(self):
-        """Ouvre un login serveuse séparé de la vue de vente actuelle."""
+        """Ouvre un login serveuse séparé de la vue de vente actuelle, centré et modal."""
         try:
             from ayanna_erp.modules.restaurant.views.serveuse_login_view import ServeuseLoginView
+            self.current_user = None
+            self.setEnabled(False)
             login_view = ServeuseLoginView(entreprise_id=1, parent=self)
+            login_view.setWindowModality(Qt.WindowModality.ApplicationModal)
             login_view.user_authenticated.connect(self._on_serveuse_authenticated)
+            login_view.finished.connect(self._restore_restaurant_access)
+            login_view.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
             login_view.show()
             login_view.raise_()
             login_view.activateWindow()
@@ -163,25 +269,34 @@ class RestaurantWindow(QMainWindow):
             login_rect.moveCenter(screen.center())
             login_view.move(login_rect.topLeft())
         except Exception:
+            self.setEnabled(True)
             pass
 
     def setup_pos_tab(self):
         """Configuration de l'onglet POS en réutilisant la vue du module (VenteView)"""
         pos_view = VenteView(entreprise_id=1, current_user=self.current_user, parent=self)
         self.tab_widget.addTab(pos_view, "🍽️ Point de Vente")
-        # s'assurer que la première salle est chargée par défaut
+        self.tab_widget.setCurrentWidget(pos_view)
+
         try:
-            pos_view.ensure_first_salle_loaded()
+            pos_view.current_user = self.current_user
+            try:
+                from ayanna_erp.core.session_manager import SessionManager
+                SessionManager.set_current_user(self.current_user)
+            except Exception:
+                pass
+            pos_view._initial_load_for_current_user()
+            pos_view.show_plan_view()
         except Exception:
             pass
 
-        # Quand l'onglet change, si on revient sur le POS, s'assurer aussi de charger la première salle
         try:
             def on_tab_changed(index):
                 widget = self.tab_widget.widget(index)
                 if isinstance(widget, VenteView):
                     try:
-                        widget.ensure_first_salle_loaded()
+                        widget.current_user = self.current_user
+                        widget._reload_vente_for_current_user()
                     except Exception:
                         pass
             self.tab_widget.currentChanged.connect(on_tab_changed)
@@ -245,14 +360,30 @@ class RestaurantWindow(QMainWindow):
         self.tab_widget.addTab(caisses_view, "📊 Caisse")
     
     def closeEvent(self, event):
-        """Gérer la fermeture de la fenêtre"""
+        """Gérer la fermeture de la fenêtre pour la serveuse avec confirmation explicite."""
         if self._get_current_user_role() == 'serveuse':
-            event.ignore()
-            QMessageBox.warning(
+            reply = QMessageBox.question(
                 self,
-                "Accès bloqué",
-                "La serveuse ne peut pas quitter la fenêtre du restaurant. Utilisez la déconnexion serveuse."
+                "Quitter le module restaurant",
+                "Voulez-vous vraiment quitter le module restaurant ?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
             )
+            if reply != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+
+            try:
+                from ayanna_erp.core.session_manager import SessionManager
+                SessionManager.clear_session()
+            except Exception:
+                pass
+
+            self.current_user = None
+            self._update_serveuse_label()
+            self.db_manager.close_session()
+            event.accept()
             return
+
         self.db_manager.close_session()
         event.accept()

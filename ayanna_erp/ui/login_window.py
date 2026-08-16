@@ -253,9 +253,27 @@ class LoginWindow(QWidget):
     def setup_connections(self):
         """Configuration des connexions de signaux"""
         self.login_button.clicked.connect(self.handle_login)
-        self.quit_button.clicked.connect(self.close)
+        self.quit_button.clicked.connect(self.confirm_quit_application)
         self.password_input.returnPressed.connect(self.handle_login)
         self.email_input.returnPressed.connect(self.password_input.setFocus)
+
+    def confirm_quit_application(self):
+        """Demande confirmation avant de quitter toute l'application."""
+        reply = QMessageBox.question(
+            self,
+            "Quitter l'application",
+            "Voulez-vous vraiment quitter Ayanna ERP ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+        else:
+            self.close()
     
     def handle_login(self):
         """Gérer la tentative de connexion"""

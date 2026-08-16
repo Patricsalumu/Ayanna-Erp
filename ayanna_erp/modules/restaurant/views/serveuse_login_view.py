@@ -1,7 +1,8 @@
-from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QPushButton, QLabel, QLineEdit, QMessageBox
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QPushButton, QLabel, QLineEdit, QMessageBox, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal
 
 from ayanna_erp.database.database_manager import DatabaseManager, User
+from ayanna_erp.core.session_manager import SessionManager
 
 
 class ServeuseLoginView(QDialog):
@@ -111,11 +112,20 @@ class ServeuseLoginView(QDialog):
 
         main.addLayout(keypad)
 
-        cancel_btn = QPushButton("Annuler")
-        cancel_btn.setObjectName("key_cancel")
-        cancel_btn.setFixedHeight(48)
-        cancel_btn.clicked.connect(self.close)
-        main.addWidget(cancel_btn)
+        main_login_btn = QPushButton("Connexion principale")
+        main_login_btn.setObjectName("key_main_login")
+        main_login_btn.setFixedHeight(48)
+        main_login_btn.setStyleSheet("""
+            QPushButton#key_main_login {
+                background: #ef4444;
+                color: white;
+                border: none;
+                border-radius: 10px;
+                font-weight: bold;
+            }
+        """)
+        main_login_btn.clicked.connect(self._return_to_main_login)
+        main.addWidget(main_login_btn)
 
     def _add_digit(self, digit: str):
         if len(self.password) >= 4:
@@ -170,6 +180,46 @@ class ServeuseLoginView(QDialog):
                 session.close()
             except Exception:
                 pass
+
+    def _return_to_main_login(self):
+        """Retourne à la fenêtre de connexion principale après confirmation."""
+        answer = QMessageBox.question(
+            self,
+            "Retour à la connexion principale",
+            "Voulez-vous vraiment vous déconnecter et revenir à l'écran de connexion principal ?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            SessionManager.clear_session()
+        except Exception:
+            pass
+
+        try:
+            if self.parent() is not None:
+                self.parent().close()
+        except Exception:
+            pass
+
+        try:
+            self.close()
+        except Exception:
+            pass
+
+        try:
+            from ayanna_erp.ui.login_window import LoginWindow
+            app = QApplication.instance()
+            login_window = LoginWindow()
+            login_window.show()
+            login_window.raise_()
+            login_window.activateWindow()
+            if app is not None:
+                app.processEvents()
+        except Exception as exc:
+            QMessageBox.critical(self, "Erreur", f"Impossible d'ouvrir la fenêtre de connexion principale: {exc}")
 
     def closeEvent(self, event):
         self.password = ""

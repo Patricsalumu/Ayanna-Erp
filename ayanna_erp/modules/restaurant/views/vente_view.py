@@ -3,7 +3,7 @@ from PyQt6.QtWidgets import (
     QFrame, QDialog, QFormLayout, QLineEdit, QSpinBox,
     QMessageBox, QScrollArea, QStackedWidget
 )
-from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, QPoint
+from PyQt6.QtCore import Qt, QPropertyAnimation, QEasingCurve, QRect, QPoint, QTimer
 from PyQt6.QtGui import QColor, QFont, QPainter
 
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
@@ -164,7 +164,7 @@ class VenteView(QWidget):
     def __init__(self, entreprise_id=1, current_user=None, parent=None):
         super().__init__(parent)
         self.entreprise_id = entreprise_id
-        self.current_user = current_user
+        self.current_user = current_user or SessionManager.get_current_user()
 
         self.salle_ctrl = SalleController(entreprise_id=entreprise_id)
         self.vente_ctrl = VenteController(entreprise_id=entreprise_id)
@@ -177,6 +177,14 @@ class VenteView(QWidget):
         self.current_filter = None        # Serveuse actuellement filtrée (None = toutes)
 
         self.init_ui()
+        self._initial_render_done = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if getattr(self, '_initial_render_done', False):
+            return
+        self._initial_render_done = True
+        QTimer.singleShot(0, self._initial_load_for_current_user)
 
     def _format_display_amount(self, amount):
         """Formatte les montants avec deux décimales et séparateurs français."""
@@ -248,17 +256,25 @@ class VenteView(QWidget):
                         old_catalog.deleteLater()
                 except Exception:
                     pass
+
                 try:
                     self.stack.setCurrentIndex(0)
+                    self.stack.currentWidget().show()
                 except Exception:
                     pass
 
             if hasattr(self, 'load_salles'):
                 self.load_salles()
+
+            if hasattr(self, 'stack') and hasattr(self, 'show_plan_view'):
+                try:
+                    self.show_plan_view()
+                except Exception:
+                    pass
+
             if hasattr(self, 'ensure_first_salle_loaded'):
-                self.ensure_first_salle_loaded()
-            if hasattr(self, 'stack') and self.stack.currentIndex() != 0:
-                self.show_plan_view()
+                QTimer.singleShot(0, self.ensure_first_salle_loaded)
+                QTimer.singleShot(50, self.ensure_first_salle_loaded)
         except Exception:
             pass
 
@@ -278,26 +294,30 @@ class VenteView(QWidget):
         self._clear_table_buttons()
 
         parent = self.parent()
-        if parent is not None and hasattr(parent, 'open_serveuse_login') and callable(parent.open_serveuse_login):
+        if parent is not None and hasattr(parent, 'tab_widget'):
             try:
-                self.hide()
+                idx = parent.tab_widget.indexOf(self)
+                if idx >= 0:
+                    parent.tab_widget.removeTab(idx)
             except Exception:
                 pass
-            try:
-                parent.open_serveuse_login()
-                return
-            except Exception:
-                pass
+
+        try:
+            self.close()
+        except Exception:
+            pass
 
         try:
             self.hide()
         except Exception:
             pass
 
-        try:
-            self.close()
-        except Exception:
-            pass
+        if parent is not None and hasattr(parent, 'open_serveuse_login') and callable(parent.open_serveuse_login):
+            try:
+                parent.open_serveuse_login()
+                return
+            except Exception:
+                pass
 
         try:
             self._open_serveuse_login()
@@ -337,6 +357,14 @@ class VenteView(QWidget):
 
     def init_ui(self):
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        # En-tête global : nom de la serveuse puis onglets des salles
+        self.header_widget = QWidget()
+        self.header_layout = QVBoxLayout(self.header_widget)
+        self.header_layout.setContentsMargins(0, 0, 0, 0)
+        self.header_layout.setSpacing(6)
 
         self.user_bar = QWidget()
         self.user_bar_layout = QHBoxLayout(self.user_bar)
@@ -346,22 +374,7 @@ class VenteView(QWidget):
         self.user_label.setStyleSheet("font-weight: bold; color: #1f2937;")
         self.user_bar_layout.addWidget(self.user_label)
         self.user_bar_layout.addStretch()
-
-        self.logout_btn = QPushButton("Déconnexion serveuse")
-        self.logout_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #dc2626;
-                color: white;
-                border: none;
-                border-radius: 8px;
-                padding: 8px 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover { background-color: #b91c1c; }
-        """)
-        self.logout_btn.clicked.connect(self._disconnect_current_serveuse)
-        self.user_bar_layout.addWidget(self.logout_btn)
-        layout.addWidget(self.user_bar)
+        self.header_layout.addWidget(self.user_bar)
 
         # ----------------------------
         # ✅ BARRE D’ONGLETS DES SALLES (wrap in a widget so we can hide it)
@@ -369,7 +382,9 @@ class VenteView(QWidget):
         self.tabs_widget = QWidget()
         self.tabs_layout = QHBoxLayout(self.tabs_widget)
         self.tabs_layout.setSpacing(10)
-        layout.addWidget(self.tabs_widget)
+        self.header_layout.addWidget(self.tabs_widget)
+
+        layout.addWidget(self.header_widget)
 
         # ----------------------------
         # ✅ ZONE PRINCIPALE (Stack : plan de salle <-> catalogue)
@@ -448,12 +463,7 @@ class VenteView(QWidget):
 
         layout.addWidget(self.stack)
 
-        self.load_salles()
-        # Charger automatiquement la première salle si disponible
-        try:
-            self.ensure_first_salle_loaded()
-        except Exception:
-            pass
+        self._initial_load_for_current_user()
 
     # ------------------------------------------------------------------
     def load_salles(self):
@@ -700,13 +710,40 @@ class VenteView(QWidget):
             self.stats_label.setText(f"📊 Tables occupées: {occupied_count}\n👩‍🍳 Serveuses: {unique_serveuses}")
 
 
+    def _initial_load_for_current_user(self):
+        """Charge d'abord les salles puis sélectionne la première salle pour le premier affichage."""
+        try:
+            self.current_user = self.current_user or SessionManager.get_current_user()
+            self._refresh_user_label()
+            self._clear_table_buttons()
+            if hasattr(self, 'stack'):
+                self.stack.setCurrentIndex(0)
+            self.load_salles()
+            QTimer.singleShot(0, self._select_first_salle_if_needed)
+        except Exception:
+            pass
+
+    def _select_first_salle_if_needed(self):
+        """Sélectionne la première salle seulement après que les salles aient été chargées."""
+        try:
+            if hasattr(self, 'stack'):
+                self.stack.setCurrentIndex(0)
+            if hasattr(self, 'salle_buttons') and self.salle_buttons:
+                first_id = next(iter(self.salle_buttons.keys()))
+                first_btn = self.salle_buttons.get(first_id)
+                if first_btn:
+                    self.select_salle(first_id, first_btn)
+                    self.show_plan_view()
+                    return
+            self.ensure_first_salle_loaded()
+        except Exception:
+            pass
+
     def ensure_first_salle_loaded(self):
         """Sélectionne la première salle disponible si aucune salle n'est active."""
         try:
             if not getattr(self, 'current_salle_id', None):
-                # sélectionner le premier bouton de salle créé
                 if hasattr(self, 'salle_buttons') and self.salle_buttons:
-                    # prendre le premier id dans l'ordre d'insertion
                     first_id = next(iter(self.salle_buttons.keys()))
                     first_btn = self.salle_buttons.get(first_id)
                     if first_btn:
@@ -844,14 +881,24 @@ class VenteView(QWidget):
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 
     def show_plan_view(self):
-        # Réafficher la barre des salles puis retourner à la page du plan
+        # Réafficher la barre des salles puis forcer la page du plan même si on est déjà dessus.
         try:
             if hasattr(self, 'tabs_widget') and self.tabs_widget:
                 self.tabs_widget.show()
         except Exception:
             pass
 
-        self._animate_transition(to_index=0, direction='right')
+        try:
+            if hasattr(self, 'stack'):
+                self.stack.setCurrentIndex(0)
+        except Exception:
+            pass
+
+        try:
+            if self.stack.currentIndex() != 0:
+                self._animate_transition(to_index=0, direction='right')
+        except Exception:
+            pass
 
     def _animate_transition(self, to_index=0, direction='left'):
         """Animation simple de slide entre pages du QStackedWidget."""
