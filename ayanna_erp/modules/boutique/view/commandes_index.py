@@ -66,6 +66,63 @@ class CommandesIndexWidget(QWidget):
             role = getattr(self.current_user, 'role', '')
         return role in ('super_admin', 'admin')
 
+    def _get_current_user_context(self):
+        user = getattr(self, 'current_user', None)
+        if user is None:
+            return {'id': None, 'role': '', 'name': ''}
+        if isinstance(user, dict):
+            return {
+                'id': user.get('id'),
+                'role': str(user.get('role') or '').strip().lower(),
+                'name': str(user.get('name') or user.get('email') or '').strip(),
+            }
+        return {
+            'id': getattr(user, 'id', None),
+            'role': str(getattr(user, 'role', '') or '').strip().lower(),
+            'name': str(getattr(user, 'name', None) or getattr(user, 'email', None) or '').strip(),
+        }
+
+    def _is_serveuse_view(self):
+        return self._get_current_user_context().get('role') in {'serveuse', 'waitress'}
+
+    def _filter_commandes_for_current_user(self, commandes):
+        ctx = self._get_current_user_context()
+        if not self._is_serveuse_view():
+            return commandes
+
+        user_id = ctx.get('id')
+        user_name = (ctx.get('name') or '').strip().lower()
+        user_email = (ctx.get('email') if isinstance(ctx, dict) and 'email' in ctx else '')
+        if user_email:
+            user_email = str(user_email).strip().lower()
+
+        def matches_current_user(commande):
+            if not isinstance(commande, dict):
+                return False
+
+            serveuse_id = commande.get('serveuse_id')
+            if serveuse_id is not None and user_id is not None and int(serveuse_id) == int(user_id):
+                return True
+
+            for key in ('serveuse_name', 'user_name', 'comptoiriste_name', 'waiter_name', 'serveuse', 'utilisateur'):
+                value = commande.get(key)
+                if not value:
+                    continue
+                text = str(value).strip().lower()
+                if user_name and user_name == text:
+                    return True
+                if user_email and user_email == text:
+                    return True
+                if user_name and user_name in text:
+                    return True
+            return False
+
+        filtered = []
+        for commande in commandes:
+            if matches_current_user(commande):
+                filtered.append(commande)
+        return filtered
+
     def _format_display_amount(self, amount):
         """Formatte les montants avec deux décimales et séparateurs français."""
         try:
@@ -563,7 +620,8 @@ class CommandesIndexWidget(QWidget):
                 search_term=search_term,
                 payment_filter=payment_filter
             )
-            
+            commandes = self._filter_commandes_for_current_user(commandes)
+
             self.populate_table(commandes)
             self.update_statistics(commandes)
             
@@ -865,6 +923,7 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
                 search_term=search_term,
                 payment_filter=payment_filter
             )
+            commandes = self._filter_commandes_for_current_user(commandes)
 
             # Mettre à jour le tableau sans déclencher de signaux problématiques
             self.commandes_table.setRowCount(0)  # Vider le tableau proprement

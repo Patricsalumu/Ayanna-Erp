@@ -206,6 +206,7 @@ class CommandeController:
                                 rp.status,
                                 rp.pret as pret,
                                 rp.livre as livre,
+                                rp.serveuse_id,
                             (
                                 SELECT GROUP_CONCAT(CONCAT(COALESCE(cp.name, 'Produit'), ' (x', rpp.quantity, ')'))
                                 FROM restau_produit_panier rpp
@@ -296,6 +297,7 @@ class CommandeController:
                             'module': 'restaurant',
                             'table_number': getattr(r, 'table_number', None),
                             'salle_name': getattr(r, 'salle_name', None),
+                            'serveuse_id': getattr(r, 'serveuse_id', None),
                             'serveuse_name': getattr(r, 'serveuse_name', None),
                             'comptoiriste_name': getattr(r, 'comptoiriste_name', None)
                         }

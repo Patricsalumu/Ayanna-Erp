@@ -274,6 +274,7 @@ class BonCommandeController:
                     restau_panier_id=getattr(rec, 'restau_panier_id', None),
                     client_id=getattr(rec, 'client_id', None),
                     client_name=customer_name,
+                    serveuse_id=getattr(rec, 'serveuse_id', None),
                     serveuse_name=serveuse_name,
                     table_id=table_id,
                     montant_total=getattr(rec, 'montant_total', 0.0),

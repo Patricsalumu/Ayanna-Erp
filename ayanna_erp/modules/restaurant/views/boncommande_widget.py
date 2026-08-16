@@ -82,6 +82,66 @@ class BonCommandeWidget(QWidget):
         self.totals_label.setStyleSheet('font-weight: 600;')
         main.addWidget(self.totals_label)
 
+    def _get_current_user_context(self):
+        user = getattr(self, 'current_user', None)
+        if user is None:
+            return {'id': None, 'role': '', 'name': ''}
+        if isinstance(user, dict):
+            return {
+                'id': user.get('id'),
+                'role': str(user.get('role') or '').strip().lower(),
+                'name': str(user.get('name') or user.get('email') or '').strip(),
+            }
+        return {
+            'id': getattr(user, 'id', None),
+            'role': str(getattr(user, 'role', '') or '').strip().lower(),
+            'name': str(getattr(user, 'name', None) or getattr(user, 'email', None) or '').strip(),
+        }
+
+    def _is_serveuse_view(self):
+        return self._get_current_user_context().get('role') in {'serveuse', 'waitress'}
+
+    def _filter_rows_for_current_user(self, rows):
+        ctx = self._get_current_user_context()
+        if not self._is_serveuse_view():
+            return rows
+
+        user_id = ctx.get('id')
+        user_name = (ctx.get('name') or '').strip().lower()
+        if user_id is not None:
+            try:
+                user_id = int(user_id)
+            except (TypeError, ValueError):
+                user_id = None
+
+        if user_id is None and not user_name:
+            return []
+
+        filtered = []
+        for rec in rows:
+            try:
+                serveuse_id = getattr(rec, 'serveuse_id', None)
+                if serveuse_id is None:
+                    serveuse_id = getattr(rec, 'serveuse', None)
+                if serveuse_id is not None:
+                    try:
+                        serveuse_id_int = int(serveuse_id)
+                    except (TypeError, ValueError):
+                        serveuse_id_int = None
+                else:
+                    serveuse_id_int = None
+
+                if user_id is not None and serveuse_id_int == user_id:
+                    filtered.append(rec)
+                    continue
+
+                name = str(getattr(rec, 'serveuse_name', '') or '').strip().lower()
+                if user_name and name and user_name == name:
+                    filtered.append(rec)
+            except Exception:
+                pass
+        return filtered
+
     def _format_display_amount(self, amount):
         """Format amounts with two decimals for the bon commande view."""
         try:
@@ -104,6 +164,7 @@ class BonCommandeWidget(QWidget):
                 status_filter=self.status_filter.currentData(),
                 panier_search=self.panier_search.text().strip() or None,
             )
+            rows = self._filter_rows_for_current_user(rows)
             self.table.setRowCount(0)
             total_amount = 0.0
             for rec in rows:
