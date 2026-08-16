@@ -166,6 +166,13 @@ class BonCommandeController:
         finally:
             self.db.close_session()
 
+    def get_bon_by_id(self, bon_id):
+        session = self.db.get_session()
+        try:
+            return session.query(RestauBonCommande).filter_by(id=bon_id).first()
+        finally:
+            self.db.close_session()
+
     def cancel_bon(self, bon_id):
         session = self.db.get_session()
         try:
@@ -175,6 +182,72 @@ class BonCommandeController:
             if getattr(bon, 'statut', None) == 'annule':
                 return False, 'BON_ALREADY_CANCELLED'
             bon.statut = 'annule'
+            bon.produits_json = '[]'
+            bon.montant_total = 0.0
+            bon.updated_at = datetime.now()
+            session.commit()
+            return True, 'OK'
+        except Exception as e:
+            try:
+                session.rollback()
+            except Exception:
+                pass
+            return False, str(e)
+        finally:
+            self.db.close_session()
+
+    def cancel_bon_partial(self, bon_id, cancelled_quantities_by_product):
+        """Annule partiellement un bon sans supprimer toutes les lignes."""
+        session = self.db.get_session()
+        try:
+            bon = session.query(RestauBonCommande).filter_by(id=bon_id).first()
+            if not bon:
+                return False, 'BON_INEXISTANT'
+            if getattr(bon, 'statut', None) == 'annule':
+                return False, 'BON_ALREADY_CANCELLED'
+
+            items = self._safe_load_snapshot(getattr(bon, 'produits_json', None))
+            if not items:
+                return False, 'NO_ITEMS'
+
+            cleaned_items = []
+            cancelled_any = False
+            for item in items:
+                pid = item.get('produit_id') or item.get('product_id')
+                qty = int(item.get('quantite', item.get('quantity', 0)) or 0)
+                if pid is None or qty <= 0:
+                    continue
+
+                cancel_count = 0
+                try:
+                    cancel_count = int(cancelled_quantities_by_product.get(str(pid), cancelled_quantities_by_product.get(int(pid), 0)) or 0)
+                except Exception:
+                    cancel_count = 0
+
+                if cancel_count > 0:
+                    cancelled_any = True
+                    remaining = qty - cancel_count
+                    if remaining > 0:
+                        item_copy = dict(item)
+                        item_copy['quantite'] = remaining
+                        item_copy['quantity'] = remaining
+                        cleaned_items.append(item_copy)
+                    continue
+
+                cleaned_items.append(item)
+
+            if not cleaned_items:
+                bon.statut = 'annule'
+                bon.produits_json = '[]'
+                bon.montant_total = 0.0
+            else:
+                bon.statut = 'valide'
+                bon.produits_json = json.dumps(cleaned_items, ensure_ascii=False)
+                bon.montant_total = sum(
+                    float(item.get('quantite', item.get('quantity', 0)) or 0) * float(item.get('prix_vente', item.get('price', 0.0)) or 0.0)
+                    for item in cleaned_items
+                )
+
             bon.updated_at = datetime.now()
             session.commit()
             return True, 'OK'

@@ -8,7 +8,7 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QTableWidget, QTableWidgetItem, QHeaderView,
-    QDateEdit, QComboBox, QMessageBox
+    QDateEdit, QComboBox, QMessageBox, QDialog, QSpinBox, QFormLayout
 )
 
 from ayanna_erp.modules.restaurant.controllers.bon_commande_controller import BonCommandeController
@@ -250,19 +250,99 @@ class BonCommandeWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible de réimprimer le bon: {e}")
 
-    def _on_cancel_bon(self, bon_id):
-        ok = QMessageBox.question(
-            self,
-            'Annuler le bon',
-            'Confirmez-vous l\'annulation de ce bon de commande ?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        if ok != QMessageBox.StandardButton.Yes:
+    def _open_partial_cancel_dialog(self, bon_id):
+        bon = self.controller.get_bon_by_id(bon_id)
+        if bon is None:
+            QMessageBox.warning(self, 'Bon introuvable', 'Le bon de commande demandé est introuvable.')
             return
 
-        success, msg = self.controller.cancel_bon(bon_id)
-        if success:
-            QMessageBox.information(self, 'Succès', 'Bon de commande annulé')
-            self.load_data()
-        else:
-            QMessageBox.critical(self, 'Erreur', f'Impossible d\'annuler le bon: {msg}')
+        items = self.controller._safe_load_snapshot(getattr(bon, 'produits_json', None))
+        if not items:
+            success, msg = self.controller.cancel_bon(bon_id)
+            if success:
+                QMessageBox.information(self, 'Succès', 'Bon de commande annulé')
+                self.load_data()
+            else:
+                QMessageBox.critical(self, 'Erreur', f'Impossible d\'annuler le bon: {msg}')
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Annulation partielle du bon')
+        dialog.resize(700, 420)
+
+        layout = QVBoxLayout(dialog)
+        title = QLabel(f'Bon n° {bon.numero_bon} — choisissez les quantités à annuler')
+        title.setWordWrap(True)
+        title.setStyleSheet('font-weight: 600;')
+        layout.addWidget(title)
+
+        table = QTableWidget(len(items), 4)
+        table.setHorizontalHeaderLabels(['Produit', 'Qté du bon', 'Annuler', 'Reste'])
+        table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        table.verticalHeader().setVisible(False)
+        table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
+
+        spin_map = {}
+        for row, item in enumerate(items):
+            product_name = item.get('nom') or item.get('name') or f"Produit {item.get('produit_id') or item.get('product_id') or row}"
+            qty = int(item.get('quantite', item.get('quantity', 0)) or 0)
+
+            table.setItem(row, 0, QTableWidgetItem(str(product_name)))
+            table.setItem(row, 1, QTableWidgetItem(str(qty)))
+
+            spin = QSpinBox()
+            spin.setRange(0, qty)
+            spin.setValue(0)
+            table.setCellWidget(row, 2, spin)
+            spin_map[(item.get('produit_id') or item.get('product_id') or row)] = spin
+
+            remain_label = QLabel(str(qty))
+            table.setCellWidget(row, 3, remain_label)
+
+            def _update_remaining(index_row, max_qty, label_widget, box):
+                label_widget.setText(str(max_qty - box.value()))
+
+            spin.valueChanged.connect(lambda _, row_idx=row, max_qty=qty, label=remain_label, box=spin: _update_remaining(row_idx, max_qty, label, box))
+
+        layout.addWidget(table)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch()
+        cancel_btn = QPushButton('Fermer')
+        confirm_btn = QPushButton('Valider l\'annulation')
+        confirm_btn.setDefault(True)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def _confirm_partial_cancel():
+            cancelled_map = {}
+            for item in items:
+                pid = item.get('produit_id') or item.get('product_id')
+                if pid is None:
+                    continue
+                qty_to_cancel = spin_map.get(pid)
+                if qty_to_cancel is not None and qty_to_cancel.value() > 0:
+                    cancelled_map[str(pid)] = qty_to_cancel.value()
+            if not cancelled_map:
+                QMessageBox.information(self, 'Aucune quantité', 'Aucune quantité n\'a été sélectionnée pour l\'annulation.')
+                return
+
+            ok, msg = self.controller.cancel_bon_partial(bon_id, cancelled_map)
+            if ok:
+                QMessageBox.information(self, 'Succès', 'Les quantités sélectionnées ont été annulées.')
+                dialog.accept()
+                self.load_data()
+            else:
+                QMessageBox.critical(self, 'Erreur', f'Impossible d\'annuler ces quantités: {msg}')
+
+        confirm_btn.clicked.connect(_confirm_partial_cancel)
+        buttons.addWidget(cancel_btn)
+        buttons.addWidget(confirm_btn)
+        layout.addLayout(buttons)
+
+        dialog.exec()
+
+    def _on_cancel_bon(self, bon_id):
+        self._open_partial_cancel_dialog(bon_id)
