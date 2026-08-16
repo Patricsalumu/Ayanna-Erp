@@ -49,13 +49,21 @@ class RestaurantWindow(QMainWindow):
         
         self.setup_ui()
     
+    def _clear_tabs(self):
+        """Supprime proprement les onglets existants pour reconstruire l'interface sans état stale."""
+        if not hasattr(self, 'tab_widget') or self.tab_widget is None:
+            return
+        while self.tab_widget.count() > 0:
+            widget = self.tab_widget.widget(0)
+            self.tab_widget.removeTab(0)
+            if widget is not None:
+                widget.deleteLater()
+
     def setup_ui(self):
-        """Configuration de l'interface utilisateur"""
+        """Configuration de l'interface utilisateur sur une base complètement neuve."""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-
         main_layout = QVBoxLayout(central_widget)
-
         self.tab_widget = QTabWidget()
         self.tab_widget.setStyleSheet("""
             QTabWidget::pane {
@@ -72,12 +80,12 @@ class RestaurantWindow(QMainWindow):
                 color: white;
             }
         """)
+        main_layout.addWidget(self.tab_widget)
 
         if self._get_current_user_role() == 'serveuse':
             self.setup_pos_tab()
             self.setup_bon_commande_tab()
             self.setup_orders_tab()
-            main_layout.addWidget(self.tab_widget)
             return
 
         # Onglet POS Restaurant
@@ -110,9 +118,53 @@ class RestaurantWindow(QMainWindow):
 
         # Onglet Rapports
         self.setup_caisse_tab()
-
-        main_layout.addWidget(self.tab_widget)
     
+    def _on_serveuse_authenticated(self, user):
+        """Reconstruit l'interface après une authentification serveuse sur une fenêtre stable."""
+        if user is None:
+            return
+        self.current_user = user
+        try:
+            from ayanna_erp.core.session_manager import SessionManager
+            SessionManager.set_current_user(user)
+        except Exception:
+            pass
+
+        try:
+            self._clear_tabs()
+            self.setup_ui()
+            self.tab_widget.setCurrentIndex(0)
+            QTimer.singleShot(0, self._refresh_after_serveuse_login)
+        except Exception:
+            pass
+
+    def _refresh_after_serveuse_login(self):
+        """Force le premier onglet POS à se reconstruire immédiatement après authentification."""
+        try:
+            if self.tab_widget.count() == 0:
+                return
+            first_widget = self.tab_widget.widget(0)
+            if hasattr(first_widget, 'ensure_first_salle_loaded'):
+                first_widget.ensure_first_salle_loaded()
+        except Exception:
+            pass
+
+    def open_serveuse_login(self):
+        """Ouvre un login serveuse séparé de la vue de vente actuelle."""
+        try:
+            from ayanna_erp.modules.restaurant.views.serveuse_login_view import ServeuseLoginView
+            login_view = ServeuseLoginView(entreprise_id=1, parent=self)
+            login_view.user_authenticated.connect(self._on_serveuse_authenticated)
+            login_view.show()
+            login_view.raise_()
+            login_view.activateWindow()
+            screen = self.screen().availableGeometry()
+            login_rect = login_view.frameGeometry()
+            login_rect.moveCenter(screen.center())
+            login_view.move(login_rect.topLeft())
+        except Exception:
+            pass
+
     def setup_pos_tab(self):
         """Configuration de l'onglet POS en réutilisant la vue du module (VenteView)"""
         pos_view = VenteView(entreprise_id=1, current_user=self.current_user, parent=self)

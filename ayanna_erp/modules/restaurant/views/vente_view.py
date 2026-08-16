@@ -198,6 +198,11 @@ class VenteView(QWidget):
         self.user_label.setText(f"Serveuse: {name}")
 
     def _open_serveuse_login(self):
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'open_serveuse_login') and callable(parent.open_serveuse_login):
+            parent.open_serveuse_login()
+            return
+
         login_view = ServeuseLoginView(entreprise_id=self.entreprise_id, parent=self)
         login_view.user_authenticated.connect(self._on_serveuse_authenticated)
         login_view.show()
@@ -209,12 +214,126 @@ class VenteView(QWidget):
         login_rect.moveCenter(screen.center())
         login_view.move(login_rect.topLeft())
 
+    def _clear_table_buttons(self):
+        """Supprime les tables visibles pour forcer un rechargement propre à chaque connexion/déconnexion."""
+        for btn in list(getattr(self, 'table_buttons', {}).values()):
+            try:
+                btn.setParent(None)
+            except Exception:
+                pass
+            try:
+                btn.deleteLater()
+            except Exception:
+                pass
+        self.table_buttons = {}
+        self.current_table_serveuses = {}
+        self.current_filter = None
+        self.active_table_btn = None
+
+    def _reload_vente_for_current_user(self):
+        """Recharge entièrement le plan de salle pour l'utilisateur actif."""
+        try:
+            if self.current_user is None:
+                self.current_user = SessionManager.get_current_user()
+            self._clear_table_buttons()
+            self._refresh_user_label()
+            self.active_salle = None
+            self.current_salle_id = None
+
+            if hasattr(self, 'stack'):
+                try:
+                    old_catalog = self.stack.widget(1)
+                    if old_catalog is not None:
+                        self.stack.removeWidget(old_catalog)
+                        old_catalog.deleteLater()
+                except Exception:
+                    pass
+                try:
+                    self.stack.setCurrentIndex(0)
+                except Exception:
+                    pass
+
+            if hasattr(self, 'load_salles'):
+                self.load_salles()
+            if hasattr(self, 'ensure_first_salle_loaded'):
+                self.ensure_first_salle_loaded()
+            if hasattr(self, 'stack') and self.stack.currentIndex() != 0:
+                self.show_plan_view()
+        except Exception:
+            pass
+
+    def _disconnect_current_serveuse(self):
+        """Efface la session et revient au login via le parent stable, sans laisser une vue morte derrière."""
+        try:
+            SessionManager.clear_session()
+        except Exception:
+            pass
+
+        self.current_user = None
+        self.active_salle = None
+        self.active_table_btn = None
+        self.current_salle_id = None
+        self.current_filter = None
+        self.current_table_serveuses = {}
+        self._clear_table_buttons()
+
+        parent = self.parent()
+        if parent is not None and hasattr(parent, 'open_serveuse_login') and callable(parent.open_serveuse_login):
+            try:
+                self.hide()
+            except Exception:
+                pass
+            try:
+                parent.open_serveuse_login()
+                return
+            except Exception:
+                pass
+
+        try:
+            self.hide()
+        except Exception:
+            pass
+
+        try:
+            self.close()
+        except Exception:
+            pass
+
+        try:
+            self._open_serveuse_login()
+        except Exception:
+            pass
+
+    def _confirm_after_print_action(self):
+        """Demande à la serveuse si elle veut continuer ou se déconnecter après impression."""
+        msg = QMessageBox(self)
+        msg.setWindowTitle('Bon envoyé')
+        msg.setText('Le bon a bien été envoyé à l\'imprimante.')
+        msg.setInformativeText('Que souhaitez-vous faire ?')
+        msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
+
+        continue_btn = msg.addButton('Continuer', QMessageBox.ButtonRole.ActionRole)
+        logout_btn = msg.addButton('Déconnexion', QMessageBox.ButtonRole.DestructiveRole)
+        msg.setDefaultButton(continue_btn)
+        msg.exec()
+
+        if msg.clickedButton() == logout_btn:
+            self._disconnect_current_serveuse()
+            return
+
+        try:
+            self.show_plan_view()
+        except Exception:
+            pass
+        self._reload_vente_for_current_user()
+
     def _on_serveuse_authenticated(self, user):
         if user is None:
             return
         self.current_user = user
         SessionManager.set_current_user(user)
         self._refresh_user_label()
+        self._reload_vente_for_current_user()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -240,7 +359,7 @@ class VenteView(QWidget):
             }
             QPushButton:hover { background-color: #b91c1c; }
         """)
-        self.logout_btn.clicked.connect(self._open_serveuse_login)
+        self.logout_btn.clicked.connect(self._disconnect_current_serveuse)
         self.user_bar_layout.addWidget(self.logout_btn)
         layout.addWidget(self.user_bar)
 
@@ -344,6 +463,7 @@ class VenteView(QWidget):
             if w:
                 w.deleteLater()
 
+        self.active_salle = None
         salles = self.salle_ctrl.list_salles()
 
         self.salle_buttons = {}
@@ -373,70 +493,126 @@ class VenteView(QWidget):
 
     # ------------------------------------------------------------------
     def select_salle(self, salle_id, btn):
-        if hasattr(self, "active_salle") and self.active_salle:
-            self.active_salle.setChecked(False)
+        if btn is None:
+            return
 
-        btn.setChecked(True)
+        if hasattr(self, "active_salle") and self.active_salle is not None and self.active_salle is not btn:
+            try:
+                self.active_salle.setChecked(False)
+            except RuntimeError:
+                pass
+            except Exception:
+                pass
+
+        try:
+            btn.setChecked(True)
+        except RuntimeError:
+            return
+
         self.active_salle = btn
-
         self.current_salle_id = salle_id
         self.load_tables_for_salle(salle_id)
 
     # ------------------------------------------------------------------
-    def load_tables_for_salle(self, salle_id):
-        # Clear plan
-        for b in list(self.table_buttons.values()):
-            b.setParent(None)
-        self.table_buttons.clear()
+    def _resolve_serveuse_name(self, serveuse_id):
+        """Retourne le libellé de la serveuse à partir de son ID."""
+        try:
+            if serveuse_id in (None, '', 0):
+                return None
+            from ayanna_erp.database.database_manager import User as DBUser
+            db = get_database_manager()
+            session = db.get_session()
+            user = session.query(DBUser).filter_by(id=int(serveuse_id)).first()
+            session.close()
+            if user:
+                return getattr(user, 'name', None) or getattr(user, 'email', None) or str(user.id)
+        except Exception:
+            return None
+        return None
 
-        tables = self.salle_ctrl.list_tables_for_salle(salle_id)
-        
-        # ✅ Récupérer les serveuses associées aux tables occupées
-        serveuses_set = set()  # Pour les serveuses uniques
-        table_serveuses = {}   # Mapping table_id -> serveuse_name
+    def _current_user_context(self):
+        user = getattr(self, 'current_user', None)
+        if user is None:
+            user = SessionManager.get_current_user()
+
+        if isinstance(user, dict):
+            return {
+                'id': user.get('id'),
+                'role': str(user.get('role') or '').strip(),
+                'name': user.get('name') or user.get('email') or 'Serveuse'
+            }
+
+        if user is None:
+            return {'id': None, 'role': '', 'name': 'Serveuse'}
+
+        return {
+            'id': getattr(user, 'id', None),
+            'role': str(getattr(user, 'role', '') or '').strip(),
+            'name': getattr(user, 'name', None) or getattr(user, 'email', None) or 'Serveuse'
+        }
+
+    def load_tables_for_salle(self, salle_id):
+        # Nettoyage strict du plan avant chaque chargement pour ne jamais garder des tables d'une ancienne serveuse.
+        for b in list(getattr(self, 'table_buttons', {}).values()):
+            try:
+                b.setParent(None)
+            except Exception:
+                pass
+            try:
+                b.deleteLater()
+            except Exception:
+                pass
+        self.table_buttons = {}
+
+        user_ctx = self._current_user_context()
+        current_user_id = user_ctx.get('id')
+        user_role = (user_ctx.get('role') or '').lower()
+
+        if user_role in {'serveuse', 'waitress'}:
+            if current_user_id is None:
+                tables = []
+            else:
+                tables = self.salle_ctrl.list_tables_for_salle(salle_id, serveuse_id=current_user_id)
+        else:
+            tables = self.salle_ctrl.list_tables_for_salle(salle_id)
+
+        serveuses_set = set()
+        table_serveuses = {}
 
         for t in tables:
             btn = TableButton(t, self)
 
+            serveuse_name = None
+            table_serveuse_id = getattr(t, 'serveuse_id', None)
+            if table_serveuse_id not in (None, '', 0):
+                serveuse_name = self._resolve_serveuse_name(table_serveuse_id)
+
+            if not serveuse_name:
+                panier = self.vente_ctrl.get_open_panier_for_table(t.id)
+                if panier and getattr(panier, 'serveuse_id', None) not in (None, '', 0):
+                    serveuse_name = self._resolve_serveuse_name(getattr(panier, 'serveuse_id', None))
+
+            if serveuse_name:
+                btn.serveuse_name = serveuse_name
+                table_serveuses[t.id] = serveuse_name
+                serveuses_set.add(serveuse_name)
+            else:
+                btn.serveuse_name = None
+
             panier = self.vente_ctrl.get_open_panier_for_table(t.id)
-
             if panier:
-                serveuse_name = None
-                try:
-                    if getattr(panier, 'serveuse_id', None):
-                        from ayanna_erp.database.database_manager import User as DBUser
-                        db = get_database_manager()
-                        session = db.get_session()
-                        u = session.query(DBUser).filter_by(id=panier.serveuse_id).first()
-                        if u:
-                            serveuse_name = getattr(u, 'name', None) or getattr(u, 'email', None) or str(u.id)
-                        session.close()
-                except Exception:
-                    serveuse_name = None
-
-                if serveuse_name:
-                    btn.serveuse_name = serveuse_name
-                    table_serveuses[t.id] = serveuse_name
-                    serveuses_set.add(serveuse_name)
-                
-                # If a panier exists we mark the table occupied even when it has no items/amounts.
                 try:
                     total, _ = self.vente_ctrl.get_panier_total(panier.id)
                 except Exception:
                     total = None
 
-                # If panier exists, mark occupied. Show numeric badge only when total > 0.
                 if total is None:
                     occ = True
                 else:
                     try:
                         num_total = float(total)
-                        if num_total > 0:
-                            occ = num_total
-                        else:
-                            occ = True
+                        occ = num_total if num_total > 0 else True
                     except Exception:
-                        # non-numeric totals: show as-is
                         occ = total
 
                 btn.apply_style(occupied=occ)
@@ -445,12 +621,16 @@ class VenteView(QWidget):
 
             btn.show()
             self.table_buttons[t.id] = btn
-        
-        # ✅ Créer les boutons de filtres pour chaque serveuse
+
+        if not serveuses_set and user_role in {'serveuse', 'waitress'}:
+            current_name = self._resolve_serveuse_name(current_user_id)
+            if current_name:
+                serveuses_set.add(current_name)
+
         self._create_serveuse_filter_buttons(sorted(list(serveuses_set)))
         self._update_stats(len([t for t in self.table_buttons.values() if t.serveuse_name]), len(serveuses_set))
-        self.current_table_serveuses = table_serveuses  # Stocker pour le filtrage
-        self.current_filter = None  # Aucun filtre actif
+        self.current_table_serveuses = table_serveuses
+        self.current_filter = None
 
     # ✅ NOUVELLE MÉTHODE: Créer les boutons de filtres
     def _create_serveuse_filter_buttons(self, serveuses):

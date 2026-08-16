@@ -31,6 +31,7 @@ class RestauTable(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     salle_id = Column(Integer, ForeignKey('restau_salles.id'), nullable=False)
+    serveuse_id = Column(Integer, nullable=True)
     number = Column(String(50), nullable=False)
     pos_x = Column(Integer, default=0)
     pos_y = Column(Integer, default=0)

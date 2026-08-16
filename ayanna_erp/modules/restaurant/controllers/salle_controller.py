@@ -34,7 +34,7 @@ class SalleController:
         finally:
             self.db.close_session()
 
-    def create_table(self, salle_id, number, pos_x=0, pos_y=0, width=80, height=80, shape='rectangle'):
+    def create_table(self, salle_id, number, pos_x=0, pos_y=0, width=80, height=80, shape='rectangle', serveuse_id=None):
         session = self.db.get_session()
         try:
             table = RestauTable(
@@ -44,7 +44,8 @@ class SalleController:
                 pos_y=pos_y,
                 width=width,
                 height=height,
-                shape=shape
+                shape=shape,
+                serveuse_id=serveuse_id if serveuse_id not in (None, '', 0) else None,
             )
             session.add(table)
             session.commit()
@@ -71,10 +72,13 @@ class SalleController:
         finally:
             self.db.close_session()
 
-    def list_tables_for_salle(self, salle_id):
+    def list_tables_for_salle(self, salle_id, serveuse_id=None):
         session = self.db.get_session()
         try:
-            rows = session.query(RestauTable).filter_by(salle_id=salle_id).all()
+            query = session.query(RestauTable).filter_by(salle_id=salle_id)
+            if serveuse_id not in (None, ''):
+                query = query.filter_by(serveuse_id=serveuse_id)
+            rows = query.all()
             result = []
             for r in rows:
                 data = {k: v for k, v in r.__dict__.items() if not k.startswith('_')}
@@ -94,7 +98,7 @@ class SalleController:
         finally:
             self.db.close_session()
 
-    def update_table(self, table_id, pos_x=None, pos_y=None, width=None, height=None, number=None, shape=None):
+    def update_table(self, table_id, pos_x=None, pos_y=None, width=None, height=None, number=None, shape=None, serveuse_id=None):
         """Mettre à jour une table existante (position, dimensions, etc.)"""
         session = self.db.get_session()
         try:
@@ -113,6 +117,8 @@ class SalleController:
                 table.number = str(number)
             if shape is not None:
                 table.shape = shape
+            if serveuse_id is not None:
+                table.serveuse_id = int(serveuse_id) if int(serveuse_id) else None
             session.commit()
             session.refresh(table)
             data = {k: v for k, v in table.__dict__.items() if not k.startswith('_')}

@@ -980,6 +980,7 @@ class DatabaseManager:
                 'restau_tables': {
                     'number': 'VARCHAR(50) NULL',
                     'name': 'VARCHAR(200) NULL',
+                    'serveuse_id': 'BIGINT NULL',
                     'pos_x': 'INTEGER NULL',
                     'pos_y': 'INTEGER NULL',
                     'width': 'INTEGER NULL',
@@ -1131,6 +1132,8 @@ class DatabaseManager:
                     if self.column_exists('shop_payments', 'note'):
                         conn.execute(text("UPDATE shop_payments SET notes = note WHERE notes IS NULL AND note IS NOT NULL"))
 
+                if self.table_exists('restau_tables') and not self.column_exists('restau_tables', 'serveuse_id'):
+                    conn.execute(text("ALTER TABLE restau_tables ADD COLUMN serveuse_id BIGINT NULL"))
                 if self.table_exists('restau_paniers') and not self.column_exists('restau_paniers', 'client_id'):
                     conn.execute(text("ALTER TABLE restau_paniers ADD COLUMN client_id BIGINT NULL"))
                 if self.table_exists('restau_paniers') and not self.column_exists('restau_paniers', 'serveuse_id'):

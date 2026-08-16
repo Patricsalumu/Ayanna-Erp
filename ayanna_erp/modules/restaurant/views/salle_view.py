@@ -209,9 +209,15 @@ class SalleView(QWidget):
         self.table_number = QLineEdit()
         self.table_number.setPlaceholderText('Numéro table')
         right.addWidget(self.table_number)
+
+        right.addWidget(QLabel('Serveuse affectée'))
+        self.new_table_serveuse = QComboBox()
+        self.new_table_serveuse.addItem('--- Aucune ---', 0)
+        self._populate_serveuse_combo(self.new_table_serveuse)
+        right.addWidget(self.new_table_serveuse)
+
         # Choix de la forme lors de la création
         right.addWidget(QLabel('Forme de la table'))
-        from PyQt6.QtWidgets import QComboBox
         self.new_table_shape = QComboBox()
         self.new_table_shape.addItems(['rectangle', 'round'])
         right.addWidget(self.new_table_shape)
@@ -239,6 +245,12 @@ class SalleView(QWidget):
         self.edit_height.setRange(10, 1000)
         self.edit_height.setValue(80)
         right.addWidget(self.edit_height)
+
+        right.addWidget(QLabel('Serveuse affectée'))
+        self.edit_serveuse = QComboBox()
+        self.edit_serveuse.addItem('--- Aucune ---', 0)
+        self._populate_serveuse_combo(self.edit_serveuse)
+        right.addWidget(self.edit_serveuse)
 
         right.addWidget(QLabel('Forme'))
         # Utiliser QComboBox pour l'édition (même choix que la création)
@@ -337,6 +349,29 @@ class SalleView(QWidget):
         except Exception as e:
             print(f"Erreur load_tables_for_salle: {e}")
 
+    def _populate_serveuse_combo(self, combo):
+        try:
+            from ayanna_erp.database.database_manager import User, get_database_manager
+            db = get_database_manager()
+            session = db.get_session()
+            users = session.query(User).filter_by(enterprise_id=self.entreprise_id).all()
+            session.close()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItem('--- Aucune ---', 0)
+            for user in users:
+                if getattr(user, 'role', '').lower() == 'serveuse':
+                    combo.addItem(getattr(user, 'name', getattr(user, 'email', 'Serveuse')), getattr(user, 'id', 0))
+            combo.blockSignals(False)
+        except Exception:
+            try:
+                combo.blockSignals(True)
+                combo.clear()
+                combo.addItem('--- Aucune ---', 0)
+                combo.blockSignals(False)
+            except Exception:
+                pass
+
     def add_table_from_ui(self):
         number = self.table_number.text().strip() or 'T'
         try:
@@ -348,8 +383,10 @@ class SalleView(QWidget):
                     QMessageBox.warning(self, 'Sélectionnez une salle', 'Veuillez sélectionner une salle avant d\'ajouter une table')
                     return
             shape = str(self.new_table_shape.currentText() or 'rectangle')
-            t = self.ctrl.create_table(self.current_salle_id, number, pos_x=10, pos_y=10, shape=shape)
+            serveuse_id = int(self.new_table_serveuse.currentData() or 0) if self.new_table_serveuse.currentData() else None
+            t = self.ctrl.create_table(self.current_salle_id, number, pos_x=10, pos_y=10, shape=shape, serveuse_id=serveuse_id)
             self.table_number.setText('')
+            self.new_table_serveuse.setCurrentIndex(0)
             self.load_tables_for_salle(self.current_salle_id)
         except Exception as e:
             print(f"Erreur add_table_from_ui: {e}")
@@ -376,6 +413,15 @@ class SalleView(QWidget):
                 self.edit_number.setText(str(t.number))
                 self.edit_width.setValue(int(t.width or 80))
                 self.edit_height.setValue(int(t.height or 80))
+                try:
+                    serveuse_id = getattr(t, 'serveuse_id', None) or 0
+                    idx = self.edit_serveuse.findData(int(serveuse_id))
+                    if idx >= 0:
+                        self.edit_serveuse.setCurrentIndex(idx)
+                    else:
+                        self.edit_serveuse.setCurrentIndex(0)
+                except Exception:
+                    self.edit_serveuse.setCurrentIndex(0)
                 # QComboBox: utiliser setCurrentText pour sélectionner la forme
                 try:
                     self.edit_shape.setCurrentText(str(t.shape or ''))
@@ -409,23 +455,21 @@ class SalleView(QWidget):
             num = self.edit_number.text().strip() or None
             w = int(self.edit_width.value())
             h = int(self.edit_height.value())
-            # QComboBox: récupérer la valeur via currentText()
+            serveuse_id = int(self.edit_serveuse.currentData() or 0) if self.edit_serveuse.currentData() else None
             try:
                 shape = str(self.edit_shape.currentText()).strip() or None
             except Exception:
-                # fallback si widget inattendu
                 shape = None
-            t = self.ctrl.update_table(self.selected_table_id, width=w, height=h, number=num, shape=shape)
-            # Update widget size/appearance
+            t = self.ctrl.update_table(self.selected_table_id, width=w, height=h, number=num, shape=shape, serveuse_id=serveuse_id)
             if t and t.id in self.table_widgets:
                 widget = self.table_widgets[t.id]
                 widget.setFixedSize(t.width or 80, t.height or 80)
                 widget.setText(str(t.number))
-                # mettre à jour l'objet interne et le style
                 widget.table_obj.width = int(t.width or 80)
                 widget.table_obj.height = int(t.height or 80)
                 widget.table_obj.number = t.number
                 widget.table_obj.shape = t.shape
+                widget.table_obj.serveuse_id = getattr(t, 'serveuse_id', None)
                 widget.apply_style()
             QMessageBox.information(self, 'Succès', 'Table mise à jour')
         except Exception as e:

@@ -1779,8 +1779,15 @@ class CatalogueWidget(QWidget):
 
                 printed, error_message = self._print_pdf_with_default_printer(filename)
                 if printed:
-                    QMessageBox.information(self, 'Bon de commande', 'Bon de commande envoyé à l\'imprimante par défaut.')
-                    self._return_to_vente_view()
+                    parent = self.parent()
+                    while parent is not None:
+                        if hasattr(parent, '_confirm_after_print_action') and callable(parent._confirm_after_print_action):
+                            parent._confirm_after_print_action()
+                            break
+                        parent = parent.parent()
+                    else:
+                        QMessageBox.information(self, 'Bon de commande', 'Bon de commande envoyé à l\'imprimante par défaut.')
+                        self._return_to_vente_view()
                 else:
                     if error_message:
                         QMessageBox.critical(self, 'Erreur d\'impression', f"Impossible d\'imprimer automatiquement le bon de commande:\n{error_message}")
