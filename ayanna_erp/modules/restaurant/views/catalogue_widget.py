@@ -956,21 +956,13 @@ class CatalogueWidget(QWidget):
         except Exception:
             return False
 
-    def _require_super_admin_password(self) -> bool:
-        """Open a dialog asking for super_admin password and verify against users with role super_admin.
-
-        Returns True if a valid super_admin password was provided, False otherwise.
-        """
-        # ask for password via simple input dialog
-        from PyQt6.QtWidgets import QInputDialog
-        pwd, ok = QInputDialog.getText(self, 'Autorisation requise', 'Entrez le mot de passe d\'un super administrateur:', QLineEdit.EchoMode.Password)
-        if not ok or not pwd:
+    def _verify_super_admin_password(self, pwd: str) -> bool:
+        """Verify the entered super-admin password against known super-admin users."""
+        if not pwd:
             return False
-        # verify against users with role super_admin
         try:
             db = get_database_manager()
             session = db.get_session()
-            # query all super_admin users
             users = session.query(User).filter_by(role='super_admin').all()
             session.close()
             for u in users:
@@ -981,8 +973,79 @@ class CatalogueWidget(QWidget):
                     pass
         except Exception:
             pass
-        QMessageBox.warning(self, 'Autorisation refusée', 'Mot de passe super_admin invalide')
         return False
+
+    def _require_super_admin_password(self) -> bool:
+        """Open a custom keypad dialog for super-admin password entry and verify it."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle('Autorisation requise')
+        dialog.setModal(True)
+        dialog.resize(320, 380)
+
+        main_layout = QVBoxLayout(dialog)
+        main_layout.setSpacing(12)
+
+        title = QLabel('Entrez le mot de passe d\'un super administrateur:')
+        title.setWordWrap(True)
+        title.setStyleSheet('font-weight: 600;')
+        main_layout.addWidget(title)
+
+        pwd_edit = QLineEdit()
+        pwd_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        pwd_edit.setPlaceholderText('Mot de passe')
+        pwd_edit.setMinimumHeight(42)
+        pwd_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        pwd_edit.returnPressed.connect(dialog.accept)
+        main_layout.addWidget(pwd_edit)
+
+        keypad = QGridLayout()
+        keypad.setHorizontalSpacing(10)
+        keypad.setVerticalSpacing(10)
+
+        for row, col, text in [
+            (0, 0, '1'), (0, 1, '2'), (0, 2, '3'),
+            (1, 0, '4'), (1, 1, '5'), (1, 2, '6'),
+            (2, 0, '7'), (2, 1, '8'), (2, 2, '9'),
+            (3, 0, 'C'), (3, 1, '0'), (3, 2, '⌫'),
+        ]:
+            btn = QPushButton(text)
+            btn.setMinimumHeight(48)
+            btn.setStyleSheet('font-size: 16px; font-weight: 600;')
+
+            if text == 'C':
+                btn.clicked.connect(lambda: pwd_edit.clear())
+            elif text == '⌫':
+                btn.clicked.connect(lambda: pwd_edit.backspace())
+            else:
+                btn.clicked.connect(lambda checked=False, value=text: pwd_edit.insert(value))
+
+            keypad.addWidget(btn, row, col)
+
+        main_layout.addLayout(keypad)
+
+        actions = QHBoxLayout()
+        ok_btn = QPushButton('OK')
+        ok_btn.setDefault(True)
+        cancel_btn = QPushButton('Annuler')
+        ok_btn.clicked.connect(dialog.accept)
+        cancel_btn.clicked.connect(dialog.reject)
+        actions.addStretch()
+        actions.addWidget(cancel_btn)
+        actions.addWidget(ok_btn)
+        main_layout.addLayout(actions)
+
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+
+        pwd = pwd_edit.text().strip()
+        if not pwd:
+            return False
+
+        if not self._verify_super_admin_password(pwd):
+            QMessageBox.warning(self, 'Autorisation refusée', 'Mot de passe super_admin invalide')
+            return False
+
+        return True
 
     def _on_client_selected(self, index):
         """Persist selected client into the panier as soon as selection changes."""

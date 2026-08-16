@@ -112,21 +112,6 @@ class ServeuseLoginView(QDialog):
 
         main.addLayout(keypad)
 
-        main_login_btn = QPushButton("Connexion principale")
-        main_login_btn.setObjectName("key_main_login")
-        main_login_btn.setFixedHeight(48)
-        main_login_btn.setStyleSheet("""
-            QPushButton#key_main_login {
-                background: #ef4444;
-                color: white;
-                border: none;
-                border-radius: 10px;
-                font-weight: bold;
-            }
-        """)
-        main_login_btn.clicked.connect(self._return_to_main_login)
-        main.addWidget(main_login_btn)
-
     def _add_digit(self, digit: str):
         if len(self.password) >= 4:
             return
