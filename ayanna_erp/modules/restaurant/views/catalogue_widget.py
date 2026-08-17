@@ -818,7 +818,7 @@ class CatalogueWidget(QWidget):
             self.cart_title_label.setVisible(not is_empty)
             self.liberer_table_btn.setVisible(is_empty)
             self.annuler_btn.setVisible(not is_empty)
-            self.payer_btn.setVisible(not is_empty)
+            self.payer_btn.setVisible(not is_empty and not self._current_user_is_serveuse())
             self.imprimer_btn.setVisible(not is_empty)
             self.bon_btn.setVisible(not is_empty)
             self.cart_table.setVisible(not is_empty)
@@ -1064,6 +1064,20 @@ class CatalogueWidget(QWidget):
                 return False
             role = getattr(self.current_user, 'role', None) or getattr(self.current_user, 'role', None)
             return str(role) == 'super_admin'
+        except Exception:
+            return False
+
+    def _current_user_is_serveuse(self):
+        """Return True if current_user is a waitress/serveuse."""
+        try:
+            user = getattr(self, 'current_user', None)
+            if user is None:
+                return False
+            if isinstance(user, dict):
+                role = str(user.get('role', '') or '').lower()
+            else:
+                role = str(getattr(user, 'role', '') or '').lower()
+            return role in {'serveuse', 'waitress'}
         except Exception:
             return False
 
@@ -1347,6 +1361,9 @@ class CatalogueWidget(QWidget):
         """
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        if self._current_user_is_serveuse():
+            QMessageBox.warning(self, 'Paiement interdit', 'Une serveuse ne peut pas payer une commande.')
             return
         try:
             # refresh panier from DB to get latest subtotal/remise/total_final
@@ -1845,15 +1862,23 @@ class CatalogueWidget(QWidget):
                     # La generation du ticket ne doit pas etre bloquee par ce tracking
                     pass
                 
-                # Ouvrir directement le PDF avec le lecteur par défaut
+                # Envoyer directement le PDF à l'imprimante par défaut via SumatraPDF
                 try:
-                    system = platform.system()
-                    if system == "Windows":
-                        os.startfile(filename)
-                    elif system == "Darwin":  # macOS
-                        subprocess.run(["open", filename], check=True)
-                    elif system == "Linux":
-                        subprocess.run(["xdg-open", filename], check=True)
+                    print_ok, print_error = self._print_pdf_with_default_printer(filename)
+                    if print_ok:
+                        parent = self.parent()
+                        while parent is not None:
+                            if hasattr(parent, '_confirm_after_print_action') and callable(parent._confirm_after_print_action):
+                                parent._confirm_after_print_action(document_type='facture')
+                                break
+                            parent = parent.parent()
+                        else:
+                            QMessageBox.information(self, 'Facture envoyée', 'La facture a été envoyée à l\'imprimante par défaut.')
+                    else:
+                        if print_error:
+                            QMessageBox.warning(self, 'Impression non confirmée', f"La facture a été générée mais l\'impression automatique a échoué:\n{print_error}")
+                        else:
+                            QMessageBox.warning(self, 'Impression non confirmée', 'La facture a été générée mais l\'impression automatique a échoué.')
                 except Exception as e:
                     QMessageBox.information(self, 'Ticket généré', f'Ticket enregistré: {filename}')
             except Exception as e:
@@ -1956,11 +1981,11 @@ class CatalogueWidget(QWidget):
                     parent = self.parent()
                     while parent is not None:
                         if hasattr(parent, '_confirm_after_print_action') and callable(parent._confirm_after_print_action):
-                            parent._confirm_after_print_action()
+                            parent._confirm_after_print_action(document_type='bon')
                             break
                         parent = parent.parent()
                     else:
-                        QMessageBox.information(self, 'Bon de commande', 'Bon de commande envoyé à l\'imprimante par défaut.')
+                        QMessageBox.information(self, 'Bon de commande', 'Le bon de commande a été envoyé à l\'imprimante par défaut.')
                         self._return_to_vente_view()
                 else:
                     if error_message:

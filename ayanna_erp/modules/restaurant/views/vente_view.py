@@ -313,13 +313,31 @@ class VenteView(QWidget):
         except Exception:
             pass
 
-    def _confirm_after_print_action(self):
+    def _confirm_after_print_action(self, document_type='bon'):
         """Demande à la serveuse si elle veut continuer ou se déconnecter après impression."""
         msg = QMessageBox(self)
-        msg.setWindowTitle('Bon envoyé')
-        msg.setText('Le bon a bien été envoyé à l\'imprimante.')
+        msg.setWindowTitle('Impression terminée')
+        if document_type == 'facture':
+            msg.setText('La facture a bien été envoyée à l\'imprimante.')
+        else:
+            msg.setText('Le bon a bien été envoyé à l\'imprimante.')
         msg.setInformativeText('Que souhaitez-vous faire ?')
         msg.setStandardButtons(QMessageBox.StandardButton.NoButton)
+        msg.setStyleSheet('''
+            QMessageBox {
+                min-width: 420px;
+                min-height: 180px;
+            }
+            QLabel {
+                font-size: 16px;
+            }
+            QPushButton {
+                min-width: 140px;
+                min-height: 42px;
+                font-size: 15px;
+                font-weight: 600;
+            }
+        ''')
 
         continue_btn = msg.addButton('Continuer', QMessageBox.ButtonRole.ActionRole)
         logout_btn = msg.addButton('Déconnexion', QMessageBox.ButtonRole.DestructiveRole)
