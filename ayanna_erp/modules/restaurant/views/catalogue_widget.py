@@ -842,15 +842,6 @@ class CatalogueWidget(QWidget):
             QMessageBox.information(self, 'Info', 'Aucune table active à libérer')
             return
 
-        ok = QMessageBox.question(
-            self,
-            'Libérer la table',
-            'Le panier est vide. Voulez-vous libérer cette table ?',
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-        )
-        if ok != QMessageBox.StandardButton.Yes:
-            return
-
         try:
             session = self.vente_ctrl.db.get_session()
             from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier, RestauPrintedInvoice
@@ -869,7 +860,6 @@ class CatalogueWidget(QWidget):
                 p.status = 'annule'
                 session.commit()
                 session.close()
-                QMessageBox.information(self, 'Succès', 'Table libérée (facture imprimée conservée)')
             else:
                 try:
                     session.delete(p)
@@ -879,7 +869,6 @@ class CatalogueWidget(QWidget):
                     raise
                 finally:
                     session.close()
-                QMessageBox.information(self, 'Succès', 'Table libérée')
 
             parent = self.parent()
             while parent is not None and not hasattr(parent, 'show_plan_view'):
@@ -887,6 +876,14 @@ class CatalogueWidget(QWidget):
             try:
                 if parent and hasattr(parent, 'show_plan_view'):
                     parent.show_plan_view()
+            except Exception:
+                pass
+
+            self.panier = None
+            self.selected_line_id = None
+            self.selected_cart_row = None
+            try:
+                self.refresh_cart()
             except Exception:
                 pass
         except Exception as e:

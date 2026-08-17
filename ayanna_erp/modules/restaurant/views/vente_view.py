@@ -871,10 +871,16 @@ class VenteView(QWidget):
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 
     def show_plan_view(self):
-        # Réafficher la barre des salles puis forcer la page du plan même si on est déjà dessus.
+        """Rafraîchit le plan de salle avant de revenir à la vue plan."""
         try:
             if hasattr(self, 'tabs_widget') and self.tabs_widget:
                 self.tabs_widget.show()
+        except Exception:
+            pass
+
+        try:
+            if getattr(self, 'current_salle_id', None):
+                self.load_tables_for_salle(self.current_salle_id)
         except Exception:
             pass
 

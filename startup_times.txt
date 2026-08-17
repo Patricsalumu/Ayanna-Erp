@@ -11810,3 +11810,14 @@ after_login_window_created: 1.969s
 before_app_exec: 2.053s
 after_app_exec: 90.195s
 exit: 90.195s
+script_start: 0.001s
+after_imports: 0.907s
+before_qapplication: 0.907s
+after_qapplication: 0.963s
+before_db_init: 0.983s
+database_seed_is_externalized: 1.485s
+before_licence_check: 1.485s
+after_login_window_created: 1.966s
+before_app_exec: 2.048s
+after_app_exec: 173.500s
+exit: 173.501s
