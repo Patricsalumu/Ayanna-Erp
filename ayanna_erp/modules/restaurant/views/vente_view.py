@@ -224,6 +224,7 @@ class VenteView(QWidget):
 
     def _clear_table_buttons(self):
         """Supprime les tables visibles pour forcer un rechargement propre à chaque connexion/déconnexion."""
+        self.active_table_btn = None
         for btn in list(getattr(self, 'table_buttons', {}).values()):
             try:
                 btn.setParent(None)
@@ -236,7 +237,6 @@ class VenteView(QWidget):
         self.table_buttons = {}
         self.current_table_serveuses = {}
         self.current_filter = None
-        self.active_table_btn = None
 
     def _reload_vente_for_current_user(self):
         """Recharge entièrement le plan de salle pour l'utilisateur actif."""
@@ -279,7 +279,8 @@ class VenteView(QWidget):
             pass
 
     def _disconnect_current_serveuse(self):
-        """Efface la session et revient au login via le parent stable, sans laisser une vue morte derrière."""
+        """Déconnexion sans détruire le plan de salle : on veut le même comportement que le logout standard."""
+        parent = self.parent()
         try:
             SessionManager.clear_session()
         except Exception:
@@ -293,24 +294,12 @@ class VenteView(QWidget):
         self.current_table_serveuses = {}
         self._clear_table_buttons()
 
-        parent = self.parent()
-        if parent is not None and hasattr(parent, 'tab_widget'):
+        if parent is not None and hasattr(parent, '_logout_from_parent_vente') and callable(parent._logout_from_parent_vente):
             try:
-                idx = parent.tab_widget.indexOf(self)
-                if idx >= 0:
-                    parent.tab_widget.removeTab(idx)
+                parent._logout_from_parent_vente()
+                return
             except Exception:
                 pass
-
-        try:
-            self.close()
-        except Exception:
-            pass
-
-        try:
-            self.hide()
-        except Exception:
-            pass
 
         if parent is not None and hasattr(parent, 'open_serveuse_login') and callable(parent.open_serveuse_login):
             try:
@@ -753,36 +742,37 @@ class VenteView(QWidget):
 
     # ------------------------------------------------------------------
     def select_table_button(self, table_button):
-        if hasattr(self, "active_table_btn") and self.active_table_btn:
-            panier = self.vente_ctrl.get_open_panier_for_table(self.active_table_btn.table_id)
-            total = None
-            if panier:
-                try:
-                    total, _ = self.vente_ctrl.get_panier_total(panier.id)
-                except Exception:
-                    total = None
-
-            # decide occupied flag: True if panier exists but no numeric total, numeric otherwise
-            if panier:
-                # panier exists -> occupied; display numeric badge only if total > 0
-                if total is None:
-                    occ_prev = True
-                else:
-                    try:
-                        num_total = float(total)
-                        occ_prev = num_total if num_total > 0 else True
-                    except Exception:
-                        occ_prev = total
-            else:
-                occ_prev = False
-
+        prev_btn = getattr(self, "active_table_btn", None)
+        if prev_btn is not None and prev_btn is not table_button:
             try:
-                self.active_table_btn.apply_style(
-                    occupied=occ_prev,
-                    selected=False
-                )
+                # Guard against stale/deleted PyQt widgets without importing the sip package.
+                prev_btn.isVisible()
+                panier = self.vente_ctrl.get_open_panier_for_table(prev_btn.table_id)
+                total = None
+                if panier:
+                    try:
+                        total, _ = self.vente_ctrl.get_panier_total(panier.id)
+                    except Exception:
+                        total = None
+
+                if panier:
+                    if total is None:
+                        occ_prev = True
+                    else:
+                        try:
+                            num_total = float(total)
+                            occ_prev = num_total if num_total > 0 else True
+                        except Exception:
+                            occ_prev = total
+                else:
+                    occ_prev = False
+
+                try:
+                    prev_btn.apply_style(occupied=occ_prev, selected=False)
+                except Exception:
+                    self.active_table_btn = None
             except Exception:
-                self.active_table_btn.apply_style(occupied=occ_prev, selected=False)
+                self.active_table_btn = None
 
         panier = self.vente_ctrl.get_open_panier_for_table(table_button.table_id)
         total = None

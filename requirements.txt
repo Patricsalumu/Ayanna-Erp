@@ -1,5 +1,6 @@
 # Requirements pour Ayanna ERP
 PyQt6>=6.5.0
+PyQt6-sip>=13.8.0
 SQLAlchemy>=2.0.0
 PyMySQL>=1.1.0
 bcrypt>=4.0.0

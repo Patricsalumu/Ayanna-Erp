@@ -155,8 +155,8 @@ class CatalogueWidget(QWidget):
         except Exception:
             pass
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        main.addWidget(splitter)
+        self.splitter = QSplitter(Qt.Orientation.Horizontal)
+        main.addWidget(self.splitter)
 
         # Left: products
         left = QWidget()
@@ -185,14 +185,13 @@ class CatalogueWidget(QWidget):
         self.products_layout.setSpacing(6)
         self.products_area.setWidget(self.products_container)
         left_l.addWidget(self.products_area)
-        splitter.addWidget(left)
-        splitter.setStretchFactor(0, 2)
-        splitter.setStretchFactor(1, 1)
-
-        # Right: cart
-        right = QWidget()
-        right_l = QVBoxLayout(right)
-        right_l.addWidget(QLabel('Panier'))
+        # Left: cart
+        left_cart = QWidget()
+        left_cart.setMinimumWidth(230)
+        left_cart.setMaximumWidth(310)
+        left_cart_l = QVBoxLayout(left_cart)
+        self.cart_title_label = QLabel('Panier')
+        left_cart_l.addWidget(self.cart_title_label)
         # Columns: hidden Ligne ID, Produit, Qté, Prix, Total
         self.cart_table = QTableWidget(0, 5)
         self.cart_table.setHorizontalHeaderLabels(['Ligne ID', 'Produit', 'Qté', 'Prix', 'Total'])
@@ -200,7 +199,7 @@ class CatalogueWidget(QWidget):
         self.cart_table.horizontalHeader().setStretchLastSection(True)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.cellClicked.connect(self.on_cart_row_clicked)
-        right_l.addWidget(self.cart_table)
+        left_cart_l.addWidget(self.cart_table)
 
         # Configure header resize modes so we can drive widths proportionally
         try:
@@ -222,15 +221,15 @@ class CatalogueWidget(QWidget):
         except Exception:
             pass
 
-        inc_btn = QPushButton('+'); dec_btn = QPushButton('-'); del_btn = QPushButton('Suppr')
-        inc_btn.setMinimumHeight(46); inc_btn.setMinimumWidth(72); inc_btn.setStyleSheet('font-size:16px; font-weight:700;')
-        dec_btn.setMinimumHeight(46); dec_btn.setMinimumWidth(72); dec_btn.setStyleSheet('font-size:16px; font-weight:700;')
-        del_btn.setMinimumHeight(46); del_btn.setMinimumWidth(92); del_btn.setStyleSheet('font-size:15px; font-weight:700; background:#d32f2f; color:white;')
-        inc_btn.clicked.connect(self.increment_selected_qty)
-        dec_btn.clicked.connect(self.decrement_selected_qty)
-        del_btn.clicked.connect(self.delete_selected_line)
-        pad.addWidget(inc_btn); pad.addWidget(dec_btn); pad.addWidget(del_btn)
-        right_l.addLayout(pad)
+        self.inc_btn = QPushButton('+'); self.dec_btn = QPushButton('-'); self.del_btn = QPushButton('Suppr')
+        self.inc_btn.setMinimumHeight(46); self.inc_btn.setMinimumWidth(72); self.inc_btn.setStyleSheet('font-size:16px; font-weight:700;')
+        self.dec_btn.setMinimumHeight(46); self.dec_btn.setMinimumWidth(72); self.dec_btn.setStyleSheet('font-size:16px; font-weight:700;')
+        self.del_btn.setMinimumHeight(46); self.del_btn.setMinimumWidth(92); self.del_btn.setStyleSheet('font-size:15px; font-weight:700; background:#d32f2f; color:white;')
+        self.inc_btn.clicked.connect(self.increment_selected_qty)
+        self.dec_btn.clicked.connect(self.decrement_selected_qty)
+        self.del_btn.clicked.connect(self.delete_selected_line)
+        pad.addWidget(self.inc_btn); pad.addWidget(self.dec_btn); pad.addWidget(self.del_btn)
+        left_cart_l.addLayout(pad)
 
         # Remise (montant) et label Total
         totals_h = QHBoxLayout()
@@ -249,15 +248,16 @@ class CatalogueWidget(QWidget):
         self.total_label.setMinimumHeight(38)
         self.total_label.setStyleSheet('font-size:15px; font-weight:700;')
         totals_h.addWidget(self.total_label)
-        right_l.addLayout(totals_h)
+        left_cart_l.addLayout(totals_h)
 
         # Action buttons: Annuler, Payer, Addition
         actions_h = QHBoxLayout()
         self.annuler_btn = QPushButton('Annuler')
         self.payer_btn = QPushButton('Payer')
-        self.imprimer_btn = QPushButton('Prefacture')
-        self.bon_btn = QPushButton('Envoyer Commande')
-        for btn in (self.annuler_btn, self.payer_btn, self.imprimer_btn, self.bon_btn):
+        self.imprimer_btn = QPushButton('Facturer')
+        self.bon_btn = QPushButton('Commander')
+        self.liberer_table_btn = QPushButton('Libérer la table')
+        for btn in (self.annuler_btn, self.payer_btn, self.imprimer_btn, self.bon_btn, self.liberer_table_btn):
             btn.setMinimumHeight(46)
             btn.setMinimumWidth(110)
             btn.setStyleSheet('font-size:14px; font-weight:700;')
@@ -265,11 +265,13 @@ class CatalogueWidget(QWidget):
         self.payer_btn.setStyleSheet('background-color:#28a745; color:white; font-size:14px; font-weight:700;')
         self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
         self.bon_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
+        self.liberer_table_btn.setStyleSheet('background-color:#d32f2f; color:white; font-size:14px; font-weight:700;')
         actions_h.addWidget(self.annuler_btn)
         actions_h.addWidget(self.payer_btn)
         actions_h.addWidget(self.imprimer_btn)
         actions_h.addWidget(self.bon_btn)
-        right_l.addLayout(actions_h)
+        actions_h.addWidget(self.liberer_table_btn)
+        left_cart_l.addLayout(actions_h)
 
         # Connect actions
         try:
@@ -289,11 +291,18 @@ class CatalogueWidget(QWidget):
             self.bon_btn.clicked.connect(self._on_bon_commande_clicked)
         except Exception:
             pass
+        try:
+            self.liberer_table_btn.clicked.connect(self._on_liberer_table_clicked)
+        except Exception:
+            pass
 
         # Finalize
-        splitter.addWidget(right)
-        # enlarge product area and reduce cart area
-        splitter.setSizes([1000, 200])
+        self.splitter.addWidget(left_cart)
+        self.splitter.addWidget(left)
+        self.splitter.setStretchFactor(0, 1)
+        self.splitter.setStretchFactor(1, 2)
+        # cart left 35%, catalog right 65%
+        self.splitter.setSizes([400, 600])
         # apply initial proportional widths for cart columns
         try:
             self._apply_cart_column_proportions()
@@ -399,7 +408,7 @@ class CatalogueWidget(QWidget):
                 if w:
                     w.setParent(None)
 
-        cols = 6
+        cols = 7
         for idx, prod in enumerate(products):
             card = self.create_product_card(prod)
             r = idx // cols; c = idx % cols
@@ -783,6 +792,92 @@ class CatalogueWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'ajouter le produit: {e}")
 
+    def _update_empty_cart_actions(self):
+        if not hasattr(self, 'liberer_table_btn'):
+            return
+        try:
+            if not self.panier:
+                self.liberer_table_btn.hide()
+                return
+            items = self.controller.list_cart_items(self.panier.id) or []
+            is_empty = len(items) == 0
+
+            self.cart_title_label.setVisible(not is_empty)
+            self.liberer_table_btn.setVisible(is_empty)
+            self.annuler_btn.setVisible(not is_empty)
+            self.payer_btn.setVisible(not is_empty)
+            self.imprimer_btn.setVisible(not is_empty)
+            self.bon_btn.setVisible(not is_empty)
+            self.cart_table.setVisible(not is_empty)
+            self.qty_spin.setVisible(not is_empty)
+            self.inc_btn.setVisible(not is_empty)
+            self.dec_btn.setVisible(not is_empty)
+            self.del_btn.setVisible(not is_empty)
+            self.remise_edit.setVisible(not is_empty)
+            self.total_label.setVisible(not is_empty)
+
+            if hasattr(self, 'splitter'):
+                self.splitter.setSizes([350, 650])
+            if hasattr(self, 'splitter'):
+                self.splitter.setCollapsible(1, False)
+        except Exception:
+            self.liberer_table_btn.hide()
+
+    def _on_liberer_table_clicked(self):
+        if not self.panier:
+            QMessageBox.information(self, 'Info', 'Aucune table active à libérer')
+            return
+
+        ok = QMessageBox.question(
+            self,
+            'Libérer la table',
+            'Le panier est vide. Voulez-vous libérer cette table ?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if ok != QMessageBox.StandardButton.Yes:
+            return
+
+        try:
+            session = self.vente_ctrl.db.get_session()
+            from ayanna_erp.modules.restaurant.models.restaurant import RestauPanier, RestauPrintedInvoice
+            p = session.query(RestauPanier).filter_by(id=self.panier.id).first()
+            if not p:
+                session.close()
+                QMessageBox.information(self, 'Succès', 'Table déjà libérée')
+                return
+
+            has_printed_invoice = (
+                session.query(RestauPrintedInvoice.id)
+                .filter_by(panier_id=self.panier.id)
+                .first() is not None
+            )
+            if has_printed_invoice:
+                p.status = 'annule'
+                session.commit()
+                session.close()
+                QMessageBox.information(self, 'Succès', 'Table libérée (facture imprimée conservée)')
+            else:
+                try:
+                    session.delete(p)
+                    session.commit()
+                except Exception:
+                    session.rollback()
+                    raise
+                finally:
+                    session.close()
+                QMessageBox.information(self, 'Succès', 'Table libérée')
+
+            parent = self.parent()
+            while parent is not None and not hasattr(parent, 'show_plan_view'):
+                parent = parent.parent()
+            try:
+                if parent and hasattr(parent, 'show_plan_view'):
+                    parent.show_plan_view()
+            except Exception:
+                pass
+        except Exception as e:
+            QMessageBox.critical(self, 'Erreur', f"Impossible de libérer la table: {e}")
+
     def refresh_cart(self):
         if not self.panier:
             return
@@ -841,6 +936,11 @@ class CatalogueWidget(QWidget):
         # update total label after refreshing rows
         try:
             self._update_total_label()
+        except Exception:
+            pass
+
+        try:
+            self._update_empty_cart_actions()
         except Exception:
             pass
 
@@ -2027,9 +2127,9 @@ class CatalogueWidget(QWidget):
             if total_w <= 0:
                 return
             # compute pixel widths
-            w_prod = int(total_w * 0.45)
-            w_qte = int(total_w * 0.10)
-            w_prix = int(total_w * 0.20)
+            w_prod = int(total_w * 0.43)
+            w_qte = int(total_w * 0.14)
+            w_prix = int(total_w * 0.18)
             w_total = max(0, total_w - (w_prod + w_qte + w_prix))
             # set widths (column 0 is hidden)
             self.cart_table.setColumnWidth(1, w_prod)
