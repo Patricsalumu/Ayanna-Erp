@@ -74,6 +74,13 @@ class CatalogueWidget(QWidget):
             return str(amount)
         return f"{value:,.2f}".replace(",", " ").replace(".", ",")
 
+    def _format_quantity_display(self, value):
+        """Affiche la quantité en entier sans suffixe .0 ou zéros inutiles."""
+        try:
+            return str(int(float(value)))
+        except (TypeError, ValueError):
+            return str(value)
+
     def _print_pdf_with_default_printer(self, file_path: str) -> tuple[bool, str | None]:
         """Send a PDF file directly to the system default printer."""
         printer = SumatraPrinter()
@@ -214,17 +221,16 @@ class CatalogueWidget(QWidget):
 
         # Numeric pad and actions
         pad = QHBoxLayout()
-        self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999); self.qty_spin.setVisible(False)
-        pad.addWidget(self.qty_spin)
+        self.qty_spin = QSpinBox(); self.qty_spin.setMinimum(1); self.qty_spin.setMaximum(9999); self.qty_spin.setVisible(False); self.qty_spin.setEnabled(False)
         try:
             self.qty_spin.editingFinished.connect(self._apply_qty_from_spin)
         except Exception:
             pass
 
         self.inc_btn = QPushButton('+'); self.dec_btn = QPushButton('-'); self.del_btn = QPushButton('Suppr')
-        self.inc_btn.setMinimumHeight(46); self.inc_btn.setMinimumWidth(72); self.inc_btn.setStyleSheet('font-size:16px; font-weight:700;')
-        self.dec_btn.setMinimumHeight(46); self.dec_btn.setMinimumWidth(72); self.dec_btn.setStyleSheet('font-size:16px; font-weight:700;')
-        self.del_btn.setMinimumHeight(46); self.del_btn.setMinimumWidth(92); self.del_btn.setStyleSheet('font-size:15px; font-weight:700; background:#d32f2f; color:white;')
+        self.inc_btn.setFixedHeight(34); self.inc_btn.setMinimumWidth(56); self.inc_btn.setStyleSheet('font-size:15px; font-weight:700;')
+        self.dec_btn.setFixedHeight(34); self.dec_btn.setMinimumWidth(56); self.dec_btn.setStyleSheet('font-size:15px; font-weight:700;')
+        self.del_btn.setFixedHeight(34); self.del_btn.setMinimumWidth(78); self.del_btn.setStyleSheet('font-size:14px; font-weight:700; background:#d32f2f; color:white;')
         self.inc_btn.clicked.connect(self.increment_selected_qty)
         self.dec_btn.clicked.connect(self.decrement_selected_qty)
         self.del_btn.clicked.connect(self.delete_selected_line)
@@ -250,28 +256,35 @@ class CatalogueWidget(QWidget):
         totals_h.addWidget(self.total_label)
         left_cart_l.addLayout(totals_h)
 
-        # Action buttons: Annuler, Payer, Addition
-        actions_h = QHBoxLayout()
         self.annuler_btn = QPushButton('Annuler')
         self.payer_btn = QPushButton('Payer')
         self.imprimer_btn = QPushButton('Facturer')
         self.bon_btn = QPushButton('Commander')
         self.liberer_table_btn = QPushButton('Libérer la table')
         for btn in (self.annuler_btn, self.payer_btn, self.imprimer_btn, self.bon_btn, self.liberer_table_btn):
-            btn.setMinimumHeight(46)
-            btn.setMinimumWidth(110)
-            btn.setStyleSheet('font-size:14px; font-weight:700;')
-        self.annuler_btn.setStyleSheet('background-color:#e53935; color:white; font-size:14px; font-weight:700;')
-        self.payer_btn.setStyleSheet('background-color:#28a745; color:white; font-size:14px; font-weight:700;')
-        self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
-        self.bon_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:14px; font-weight:700;')
-        self.liberer_table_btn.setStyleSheet('background-color:#d32f2f; color:white; font-size:14px; font-weight:700;')
-        actions_h.addWidget(self.annuler_btn)
-        actions_h.addWidget(self.payer_btn)
-        actions_h.addWidget(self.imprimer_btn)
-        actions_h.addWidget(self.bon_btn)
-        actions_h.addWidget(self.liberer_table_btn)
-        left_cart_l.addLayout(actions_h)
+            btn.setFixedHeight(34)
+            btn.setMinimumWidth(90)
+            btn.setStyleSheet('font-size:13px; font-weight:700;')
+        self.annuler_btn.setStyleSheet('background-color:#e53935; color:white; font-size:13px; font-weight:700;')
+        self.payer_btn.setStyleSheet('background-color:#28a745; color:white; font-size:13px; font-weight:700;')
+        self.imprimer_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:13px; font-weight:700;')
+        self.bon_btn.setStyleSheet('background-color:#1976D2; color:white; font-size:13px; font-weight:700;')
+        self.liberer_table_btn.setStyleSheet('background-color:#d32f2f; color:white; font-size:13px; font-weight:700;')
+
+        controls_row = QHBoxLayout()
+        controls_row.addWidget(self.annuler_btn)
+        controls_row.addWidget(self.inc_btn)
+        controls_row.addWidget(self.dec_btn)
+        controls_row.addWidget(self.del_btn)
+        left_cart_l.addLayout(controls_row)
+
+        actions_row = QHBoxLayout()
+        actions_row.addWidget(self.bon_btn)
+        actions_row.addWidget(self.payer_btn)
+        actions_row.addWidget(self.imprimer_btn)
+        left_cart_l.addLayout(actions_row)
+
+        left_cart_l.addWidget(self.liberer_table_btn)
 
         # Connect actions
         try:
@@ -809,7 +822,8 @@ class CatalogueWidget(QWidget):
             self.imprimer_btn.setVisible(not is_empty)
             self.bon_btn.setVisible(not is_empty)
             self.cart_table.setVisible(not is_empty)
-            self.qty_spin.setVisible(not is_empty)
+            self.qty_spin.setVisible(False)
+            self.qty_spin.setEnabled(False)
             self.inc_btn.setVisible(not is_empty)
             self.dec_btn.setVisible(not is_empty)
             self.del_btn.setVisible(not is_empty)
@@ -903,7 +917,7 @@ class CatalogueWidget(QWidget):
                 pname = str(getattr(it, 'product_id', ''))
             name_item = QTableWidgetItem(pname)
             self.cart_table.setItem(i, 1, name_item)
-            qty_item = QTableWidgetItem(str(getattr(it, 'quantity')))
+            qty_item = QTableWidgetItem(self._format_quantity_display(getattr(it, 'quantity', 0)))
             self.cart_table.setItem(i, 2, qty_item)
             # price per unit
             price_item = QTableWidgetItem(self._format_display_amount(getattr(it, 'price', 0.0)))
