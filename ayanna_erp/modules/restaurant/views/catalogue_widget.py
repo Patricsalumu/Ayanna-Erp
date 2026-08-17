@@ -866,6 +866,9 @@ class CatalogueWidget(QWidget):
         self.load_products()
 
     def add_product(self, product_id: int):
+        if self._current_user_is_caissier():
+            QMessageBox.information(self, 'Accès limité', 'Le caissier ne peut pas ajouter de produit sur une table. Il doit seulement encaisser le montant.')
+            return
         try:
             prod = self.controller.get_product(product_id)
             if not prod:
@@ -889,20 +892,21 @@ class CatalogueWidget(QWidget):
                 return
             items = self.controller.list_cart_items(self.panier.id) or []
             is_empty = len(items) == 0
+            is_caissier = self._current_user_is_caissier()
 
             self.cart_title_label.setVisible(not is_empty)
-            self.liberer_table_btn.setVisible(is_empty)
-            self.annuler_btn.setVisible(not is_empty)
+            self.liberer_table_btn.setVisible(is_empty and not is_caissier)
+            self.annuler_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
             self.payer_btn.setVisible(not is_empty and not self._current_user_is_serveuse())
-            self.imprimer_btn.setVisible(not is_empty)
-            self.bon_btn.setVisible(not is_empty)
+            self.imprimer_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
+            self.bon_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
             self.cart_table.setVisible(not is_empty)
             self.qty_spin.setVisible(False)
             self.qty_spin.setEnabled(False)
-            self.inc_btn.setVisible(not is_empty)
-            self.dec_btn.setVisible(not is_empty)
-            self.del_btn.setVisible(not is_empty)
-            self.remise_edit.setVisible(not is_empty)
+            self.inc_btn.setVisible(not is_empty and not is_caissier)
+            self.dec_btn.setVisible(not is_empty and not is_caissier)
+            self.del_btn.setVisible(not is_empty and not is_caissier)
+            self.remise_edit.setVisible(not is_empty and not is_caissier)
             self.total_label.setVisible(not is_empty)
 
             if hasattr(self, 'splitter'):
@@ -1153,6 +1157,20 @@ class CatalogueWidget(QWidget):
             else:
                 role = str(getattr(user, 'role', '') or '').lower()
             return role in {'serveuse', 'waitress'}
+        except Exception:
+            return False
+
+    def _current_user_is_caissier(self):
+        """Return True if current_user is a cashier and should be read-only on tables."""
+        try:
+            user = getattr(self, 'current_user', None)
+            if user is None:
+                return False
+            if isinstance(user, dict):
+                role = str(user.get('role', '') or '').lower()
+            else:
+                role = str(getattr(user, 'role', '') or '').lower()
+            return role == 'caissier'
         except Exception:
             return False
 
