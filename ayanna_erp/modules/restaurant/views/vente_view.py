@@ -379,8 +379,44 @@ class VenteView(QWidget):
 
         self.user_label = QLabel("Serveuse: --")
         self.user_label.setStyleSheet("font-weight: bold; color: #1f2937;")
+        self.return_to_plan_btn = QPushButton("Retour au plan")
+        self.return_to_plan_btn.setFixedHeight(30)
+        self.return_to_plan_btn.setFixedWidth(150)
+        self.return_to_plan_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f3f4f6;
+                color: #1f2937;
+                border: 1px solid #d1d5db;
+                border-radius: 8px;
+                font-weight: 600;
+                padding: 0 10px;
+            }
+            QPushButton:hover {
+                background-color: #e5e7eb;
+            }
+        """)
+        self.return_to_plan_btn.clicked.connect(self.show_plan_view)
+        self.logout_btn = QPushButton("Déconnexion")
+        self.logout_btn.setFixedHeight(30)
+        self.logout_btn.setFixedWidth(110)
+        self.logout_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #dc2626;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 700;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #b91c1c;
+            }
+        """)
+        self.logout_btn.clicked.connect(self._disconnect_current_serveuse)
         self.user_bar_layout.addWidget(self.user_label)
         self.user_bar_layout.addStretch()
+        self.user_bar_layout.addWidget(self.return_to_plan_btn)
+        self.user_bar_layout.addWidget(self.logout_btn)
         self.header_layout.addWidget(self.user_bar)
 
         # ----------------------------
@@ -843,12 +879,6 @@ class VenteView(QWidget):
             # Construire une NOUVELLE page catalogue (on ne réutilise pas l'ancien layout)
             new_cat_page = QWidget()
             new_cat_layout = QVBoxLayout(new_cat_page)
-
-            # bouton retour
-            back_btn = QPushButton("⬅ Retour au plan")
-            back_btn.setFixedHeight(36)
-            back_btn.clicked.connect(self.show_plan_view)
-            new_cat_layout.addWidget(back_btn)
 
             # ajouter le widget catalogue
             current_user = getattr(self, 'current_user', None)

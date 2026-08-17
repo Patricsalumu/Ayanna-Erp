@@ -85,31 +85,6 @@ class RestaurantWindow(QMainWindow):
         main_layout.addWidget(self.tab_widget)
 
         if self._get_current_user_role() == 'serveuse':
-            self.bottom_bar = QWidget()
-            self.bottom_bar_layout = QHBoxLayout(self.bottom_bar)
-            self.bottom_bar_layout.setContentsMargins(8, 4, 8, 8)
-            self.bottom_bar_layout.setSpacing(10)
-            self.serveuse_label = QLabel("Serveuse: --")
-            self.serveuse_label.setStyleSheet("font-weight: bold; color: #1f2937;")
-            self.bottom_bar_layout.addWidget(self.serveuse_label)
-            self.bottom_bar_layout.addStretch()
-            self.logout_btn = QPushButton("Déconnexion")
-            self.logout_btn.setFixedHeight(34)
-            self.logout_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #dc2626;
-                    color: white;
-                    border: none;
-                    border-radius: 8px;
-                    padding: 8px 14px;
-                    font-weight: bold;
-                }
-                QPushButton:hover { background-color: #b91c1c; }
-            """)
-            self.logout_btn.clicked.connect(self._logout_from_parent_vente)
-            self.bottom_bar_layout.addWidget(self.logout_btn)
-            self.bottom_bar.setFixedHeight(46)
-            main_layout.addWidget(self.bottom_bar)
             self._update_serveuse_label()
             self.setup_pos_tab()
             self.setup_bon_commande_tab()

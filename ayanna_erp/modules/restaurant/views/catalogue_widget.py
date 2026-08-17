@@ -182,9 +182,10 @@ class CatalogueWidget(QWidget):
         left_l.addLayout(search_h)
 
         self.products_area = QScrollArea(); self.products_area.setWidgetResizable(True)
-        self.products_area.setMinimumHeight(520)
-        self.products_area.setMaximumHeight(520)
-        self.products_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.products_area.setMinimumHeight(420)
+        self.products_area.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.products_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.products_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.products_area.setViewportMargins(0, 0, 0, 0)
         self.products_container = QWidget()
         self.products_layout = QGridLayout(self.products_container)
@@ -554,20 +555,23 @@ class CatalogueWidget(QWidget):
             except Exception as e:
                 print("Erreur image:", e)
 
+        name = getattr(product, 'name', 'Produit')
         if not image_loaded:
-            image_label.setText("🧾")
+            image_label.setText(name if len(name) <= 24 else name[:22] + '…')
+            image_label.setWordWrap(True)
             image_label.setStyleSheet("""
                 background-color: #F8F9FA;
                 border: 2px dashed #DEE2E6;
-                color: #9E9E9E;
+                color: #1F2937;
                 border-radius: 6px;
-                font-size: 18px;
+                font-size: 11px;
+                font-weight: 600;
+                qproperty-alignment: AlignCenter;
             """)
 
         layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
         # ---- Nom du produit ----
-        name = getattr(product, 'name', 'Produit')
         # keep the raw product name only (no counters appended)
         name_label = QLabel(name if len(name) < 20 else name[:18] + '…')
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
