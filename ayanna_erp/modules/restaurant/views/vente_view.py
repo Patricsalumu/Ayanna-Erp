@@ -354,6 +354,37 @@ class VenteView(QWidget):
             pass
         self._reload_vente_for_current_user()
 
+    def _refresh_current_restaurant_state(self):
+        """Recharge le plan et le catalogue pour resynchroniser les postes distants."""
+        try:
+            if hasattr(self, 'current_salle_id') and self.current_salle_id:
+                self.load_tables_for_salle(self.current_salle_id)
+        except Exception:
+            pass
+
+        try:
+            self._reload_vente_for_current_user()
+        except Exception:
+            pass
+
+        try:
+            current_widget = self.stack.currentWidget() if hasattr(self, 'stack') else None
+            if current_widget is not None:
+                for catalog in current_widget.findChildren(CatalogueWidget):
+                    try:
+                        catalog.load_products()
+                        catalog.refresh_cart()
+                    except Exception:
+                        pass
+                if isinstance(current_widget, CatalogueWidget):
+                    try:
+                        current_widget.load_products()
+                        current_widget.refresh_cart()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
     def _on_serveuse_authenticated(self, user):
         if user is None:
             return
@@ -371,11 +402,11 @@ class VenteView(QWidget):
         self.header_widget = QWidget()
         self.header_layout = QVBoxLayout(self.header_widget)
         self.header_layout.setContentsMargins(0, 0, 0, 0)
-        self.header_layout.setSpacing(6)
+        self.header_layout.setSpacing(2)
 
         self.user_bar = QWidget()
         self.user_bar_layout = QHBoxLayout(self.user_bar)
-        self.user_bar_layout.setContentsMargins(8, 8, 8, 8)
+        self.user_bar_layout.setContentsMargins(8, 6, 8, 4)
 
         self.user_label = QLabel("Serveuse: --")
         self.user_label.setStyleSheet("font-weight: bold; color: #1f2937;")
@@ -396,6 +427,23 @@ class VenteView(QWidget):
             }
         """)
         self.return_to_plan_btn.clicked.connect(self.show_plan_view)
+        self.refresh_btn = QPushButton("Rafraîchir")
+        self.refresh_btn.setFixedHeight(30)
+        self.refresh_btn.setFixedWidth(110)
+        self.refresh_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2563eb;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-weight: 700;
+                padding: 0 12px;
+            }
+            QPushButton:hover {
+                background-color: #1d4ed8;
+            }
+        """)
+        self.refresh_btn.clicked.connect(self._refresh_current_restaurant_state)
         self.logout_btn = QPushButton("Déconnexion")
         self.logout_btn.setFixedHeight(30)
         self.logout_btn.setFixedWidth(110)
@@ -415,6 +463,7 @@ class VenteView(QWidget):
         self.logout_btn.clicked.connect(self._disconnect_current_serveuse)
         self.user_bar_layout.addWidget(self.user_label)
         self.user_bar_layout.addStretch()
+        self.user_bar_layout.addWidget(self.refresh_btn)
         self.user_bar_layout.addWidget(self.return_to_plan_btn)
         self.user_bar_layout.addWidget(self.logout_btn)
         self.header_layout.addWidget(self.user_bar)

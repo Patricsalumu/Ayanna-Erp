@@ -102,7 +102,10 @@ class CatalogueWidget(QWidget):
 
     def init_ui(self):
         main = QVBoxLayout(self)
+        main.setContentsMargins(6, 2, 6, 4)
+        main.setSpacing(4)
         header_h = QHBoxLayout()
+        header_h.setSpacing(6)
         uid = getattr(self.current_user, 'id', None) if getattr(self, 'current_user', None) else None
         # essayer d'obtenir le numéro de la table (champ `number`) plutôt que l'id
         table_display = str(self.table_id)
@@ -155,6 +158,8 @@ class CatalogueWidget(QWidget):
 
         # Category filter buttons
         self.category_bar = QHBoxLayout()
+        self.category_bar.setContentsMargins(0, 0, 0, 0)
+        self.category_bar.setSpacing(4)
         main.addLayout(self.category_bar)
         self.selected_category = None
         try:
@@ -163,12 +168,17 @@ class CatalogueWidget(QWidget):
             pass
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
-        main.addWidget(self.splitter)
+        self.splitter.setContentsMargins(0, 0, 0, 0)
+        self.splitter.setChildrenCollapsible(False)
+        main.addWidget(self.splitter, 1)
 
         # Left: products
         left = QWidget()
         left_l = QVBoxLayout(left)
+        left_l.setContentsMargins(0, 0, 0, 0)
+        left_l.setSpacing(4)
         search_h = QHBoxLayout()
+        search_h.setSpacing(6)
         self.search_edit = QLineEdit(); self.search_edit.setPlaceholderText('Rechercher...')
         self.search_edit.textChanged.connect(self.load_products)
         search_h.addWidget(self.search_edit)
@@ -187,12 +197,73 @@ class CatalogueWidget(QWidget):
         self.products_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.products_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.products_area.setViewportMargins(0, 0, 0, 0)
+        self.products_area.verticalScrollBar().setStyleSheet("""
+            QScrollBar:vertical {
+                width: 14px;
+                background: #f3f4f6;
+                border: none;
+                border-radius: 7px;
+            }
+            QScrollBar::handle:vertical {
+                background: #9ca3af;
+                min-height: 40px;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #6b7280;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+        """)
         self.products_container = QWidget()
         self.products_layout = QGridLayout(self.products_container)
         self.products_layout.setContentsMargins(0, 0, 0, 0)
         self.products_layout.setSpacing(6)
         self.products_area.setWidget(self.products_container)
-        left_l.addWidget(self.products_area)
+
+        self.products_scroll_top_btn = QPushButton('↑')
+        self.products_scroll_top_btn.setFixedHeight(22)
+        self.products_scroll_top_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e5e7eb;
+                color: #111827;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #d1d5db;
+            }
+        """)
+        self.products_scroll_top_btn.clicked.connect(lambda: self.products_area.verticalScrollBar().setValue(0))
+
+        self.products_scroll_bottom_btn = QPushButton('↓')
+        self.products_scroll_bottom_btn.setFixedHeight(22)
+        self.products_scroll_bottom_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #e5e7eb;
+                color: #111827;
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                font-weight: 700;
+            }
+            QPushButton:hover {
+                background-color: #d1d5db;
+            }
+        """)
+        self.products_scroll_bottom_btn.clicked.connect(
+            lambda: self.products_area.verticalScrollBar().setValue(self.products_area.verticalScrollBar().maximum())
+        )
+
+        products_scroll_container = QWidget()
+        products_scroll_layout = QVBoxLayout(products_scroll_container)
+        products_scroll_layout.setContentsMargins(0, 0, 0, 0)
+        products_scroll_layout.setSpacing(4)
+        products_scroll_layout.addWidget(self.products_scroll_top_btn)
+        products_scroll_layout.addWidget(self.products_area, 1)
+        products_scroll_layout.addWidget(self.products_scroll_bottom_btn)
+        left_l.addWidget(products_scroll_container, 1)
         # Left: cart
         left_cart = QWidget()
         left_cart.setMinimumWidth(230)
@@ -207,7 +278,7 @@ class CatalogueWidget(QWidget):
         self.cart_table.horizontalHeader().setStretchLastSection(True)
         self.cart_table.verticalHeader().setVisible(False)
         self.cart_table.cellClicked.connect(self.on_cart_row_clicked)
-        left_cart_l.addWidget(self.cart_table)
+        left_cart_l.addWidget(self.cart_table, 1)
 
         # Configure header resize modes so we can drive widths proportionally
         try:
@@ -314,9 +385,9 @@ class CatalogueWidget(QWidget):
         self.splitter.addWidget(left_cart)
         self.splitter.addWidget(left)
         self.splitter.setStretchFactor(0, 1)
-        self.splitter.setStretchFactor(1, 2)
-        # cart left 35%, catalog right 65%
-        self.splitter.setSizes([400, 600])
+        self.splitter.setStretchFactor(1, 3)
+        # cart left 32%, catalog right 68%, with catalogue taking most of the vertical space
+        self.splitter.setSizes([360, 720])
         # apply initial proportional widths for cart columns
         try:
             self._apply_cart_column_proportions()

@@ -104,7 +104,7 @@ class ServeuseLoginView(QDialog):
         back_btn.clicked.connect(self._backspace)
         keypad.addWidget(back_btn, 3, 1)
 
-        submit_btn = QPushButton("OK")
+        submit_btn = QPushButton("Connexion")
         submit_btn.setObjectName("key_submit")
         submit_btn.setFixedHeight(68)
         submit_btn.clicked.connect(self._authenticate)
@@ -117,8 +117,6 @@ class ServeuseLoginView(QDialog):
             return
         self.password += str(digit)
         self._refresh_password_display()
-        if len(self.password) == 4:
-            self._authenticate()
 
     def _backspace(self):
         self.password = self.password[:-1]
