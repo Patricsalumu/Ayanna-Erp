@@ -109,11 +109,28 @@ class ServeuseLoginView(QDialog):
         submit_btn.setFixedHeight(68)
         submit_btn.clicked.connect(self._authenticate)
         self.submit_btn = submit_btn
+        self.submit_btn.setStyleSheet("""
+            QPushButton#key_submit {
+                background: #16a34a;
+                color: white;
+                border: none;
+                border-radius: 12px;
+                font-size: 22px;
+                font-weight: bold;
+            }
+            QPushButton#key_submit:disabled {
+                background: #86efac;
+                color: rgba(255,255,255,0.85);
+            }
+        """)
         keypad.addWidget(submit_btn, 3, 2)
 
-        self.loading_label = QLabel("Connexion...")
+        main.addLayout(keypad)
+
+        self.loading_label = QLabel("Connexion...", self)
         self.loading_label.setVisible(False)
         self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loading_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.loading_label.setStyleSheet("""
             QLabel {
                 background: rgba(22, 163, 74, 0.10);
@@ -125,14 +142,17 @@ class ServeuseLoginView(QDialog):
                 padding: 7px 14px;
             }
         """)
-        main.addWidget(self.loading_label)
+        self.loading_label.resize(self.loading_label.sizeHint())
+        self.loading_label.move((self.width() - self.loading_label.width()) // 2, 360)
 
     def _show_loading(self):
         """Affiche un petit indicateur visuel très léger pendant la validation du code."""
         self.submit_btn.setEnabled(False)
+        self.submit_btn.setText("Connexion...")
         self.loading_label.setVisible(True)
         self.loading_label.raise_()
         self.loading_label.setWindowOpacity(0.0)
+        self.loading_label.move((self.width() - self.loading_label.width()) // 2, 360)
 
         anim = QPropertyAnimation(self.loading_label, b'windowOpacity')
         anim.setDuration(180)
@@ -144,6 +164,7 @@ class ServeuseLoginView(QDialog):
     def _hide_loading(self):
         """Masque le petit indicateur visuel après validation."""
         self.submit_btn.setEnabled(True)
+        self.submit_btn.setText("Connexion")
         anim = QPropertyAnimation(self.loading_label, b'windowOpacity')
         anim.setDuration(150)
         anim.setStartValue(1.0)
@@ -207,40 +228,6 @@ class ServeuseLoginView(QDialog):
     def _refresh_password_display(self):
         visible = "•" * len(self.password)
         self.password_input.setText(visible)
-
-    def _authenticate(self):
-        if not self.password:
-            QMessageBox.warning(self, "Code requis", "Veuillez saisir le mot de passe de la serveuse.")
-            return
-
-        entered = str(self.password).strip()
-        session = self.db.get_session()
-        try:
-            users = session.query(User).filter(User.enterprise_id == self.entreprise_id).all()
-            matches = []
-            for user in users:
-                role = str(getattr(user, 'role', '') or '').lower()
-                if role != 'serveuse':
-                    continue
-                if user.check_password(entered):
-                    matches.append(user)
-
-            if not matches:
-                QMessageBox.warning(self, "Accès refusé", "Code inconnu pour cette serveuse.")
-                self.password = ""
-                self._refresh_password_display()
-                return
-
-            selected_user = matches[0]
-            self.user_authenticated.emit(selected_user)
-            self.close()
-        except Exception as exc:
-            QMessageBox.critical(self, "Erreur", f"Impossible de valider le code: {exc}")
-        finally:
-            try:
-                session.close()
-            except Exception:
-                pass
 
     def _return_to_main_login(self):
         """Retourne à la fenêtre de connexion principale après confirmation."""
