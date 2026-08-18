@@ -1,5 +1,5 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QPushButton, QLabel, QLineEdit, QMessageBox, QApplication
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 
 from ayanna_erp.database.database_manager import DatabaseManager, User
 from ayanna_erp.core.session_manager import SessionManager
@@ -108,9 +108,87 @@ class ServeuseLoginView(QDialog):
         submit_btn.setObjectName("key_submit")
         submit_btn.setFixedHeight(68)
         submit_btn.clicked.connect(self._authenticate)
+        self.submit_btn = submit_btn
         keypad.addWidget(submit_btn, 3, 2)
 
-        main.addLayout(keypad)
+        self.loading_label = QLabel("Connexion...")
+        self.loading_label.setVisible(False)
+        self.loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.loading_label.setStyleSheet("""
+            QLabel {
+                background: rgba(22, 163, 74, 0.10);
+                color: #166534;
+                border: 1px solid rgba(22, 163, 74, 0.25);
+                border-radius: 999px;
+                font-size: 12px;
+                font-weight: bold;
+                padding: 7px 14px;
+            }
+        """)
+        main.addWidget(self.loading_label)
+
+    def _show_loading(self):
+        """Affiche un petit indicateur visuel très léger pendant la validation du code."""
+        self.submit_btn.setEnabled(False)
+        self.loading_label.setVisible(True)
+        self.loading_label.raise_()
+        self.loading_label.setWindowOpacity(0.0)
+
+        anim = QPropertyAnimation(self.loading_label, b'windowOpacity')
+        anim.setDuration(180)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.start()
+
+    def _hide_loading(self):
+        """Masque le petit indicateur visuel après validation."""
+        self.submit_btn.setEnabled(True)
+        anim = QPropertyAnimation(self.loading_label, b'windowOpacity')
+        anim.setDuration(150)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.finished.connect(lambda: self.loading_label.setVisible(False))
+        anim.start()
+
+    def _authenticate(self):
+        if not self.password:
+            QMessageBox.warning(self, "Code requis", "Veuillez saisir le mot de passe de la serveuse.")
+            return
+
+        self._show_loading()
+        try:
+            entered = str(self.password).strip()
+            session = self.db.get_session()
+            try:
+                users = session.query(User).filter(User.enterprise_id == self.entreprise_id).all()
+                matches = []
+                for user in users:
+                    role = str(getattr(user, 'role', '') or '').lower()
+                    if role != 'serveuse':
+                        continue
+                    if user.check_password(entered):
+                        matches.append(user)
+
+                if not matches:
+                    QMessageBox.warning(self, "Accès refusé", "Code inconnu pour cette serveuse.")
+                    self.password = ""
+                    self._refresh_password_display()
+                    return
+
+                selected_user = matches[0]
+                self.user_authenticated.emit(selected_user)
+                self.close()
+            except Exception as exc:
+                QMessageBox.critical(self, "Erreur", f"Impossible de valider le code: {exc}")
+            finally:
+                try:
+                    session.close()
+                except Exception:
+                    pass
+        finally:
+            self._hide_loading()
 
     def _add_digit(self, digit: str):
         if len(self.password) >= 4:

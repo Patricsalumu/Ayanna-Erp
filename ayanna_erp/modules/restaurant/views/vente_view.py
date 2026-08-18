@@ -918,52 +918,103 @@ class VenteView(QWidget):
             table_button.apply_style(occupied=occ_new, selected=True)
         self.active_table_btn = table_button
 
-    def open_table_panel(self, table_id):
-        """Afficher le catalogue EMBARQUÉ dans l'onglet vente (page du QStackedWidget).
+    def _show_light_loading_overlay(self, text='Chargement...'):
+        """Affiche un petit indicateur visuel léger pendant la préparation du catalogue."""
+        if getattr(self, '_loading_overlay', None) is not None:
+            return
 
-        On remplace l'ancien comportement modal par l'affichage dans la page catalogue
-        avec une transition animée.
-        """
+        overlay = QWidget(self.stack)
+        overlay.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        overlay.setStyleSheet("background: rgba(255,255,255,0.20);")
+        overlay.resize(self.stack.size())
+        overlay.move(0, 0)
+
+        layout = QVBoxLayout(overlay)
+        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        badge = QLabel(text)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet("""
+            QLabel {
+                background: rgba(255,255,255,0.85);
+                border: 1px solid #d1d5db;
+                border-radius: 999px;
+                color: #1f2937;
+                font-size: 12px;
+                font-weight: 700;
+                padding: 8px 16px;
+            }
+        """)
+        layout.addWidget(badge)
+
+        overlay.show()
+        self._loading_overlay = overlay
+        self._loading_label = badge
+
+        anim = QPropertyAnimation(overlay, b'windowOpacity')
+        anim.setDuration(180)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.start()
+
+    def _hide_light_loading_overlay(self):
+        overlay = getattr(self, '_loading_overlay', None)
+        if overlay is None:
+            return
+
+        anim = QPropertyAnimation(overlay, b'windowOpacity')
+        anim.setDuration(160)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.finished.connect(lambda: (overlay.deleteLater(), setattr(self, '_loading_overlay', None), setattr(self, '_loading_label', None)))
+        anim.start()
+
+    def _build_catalog_for_table(self, table_id):
         try:
-            # Construire une NOUVELLE page catalogue (on ne réutilise pas l'ancien layout)
             new_cat_page = QWidget()
             new_cat_layout = QVBoxLayout(new_cat_page)
 
-            # ajouter le widget catalogue
             current_user = getattr(self, 'current_user', None)
             catalog = CatalogueWidget(table_id=table_id, entreprise_id=self.entreprise_id, pos_id=1, current_user=current_user, parent=new_cat_page)
             new_cat_layout.addWidget(catalog)
 
-            # Remplacer proprement la page catalogue (index 1) du stack
             try:
                 old_widget = self.stack.widget(1)
-                # retirer et supprimer l'ancien
                 self.stack.removeWidget(old_widget)
                 try:
                     old_widget.deleteLater()
                 except Exception:
                     pass
             except Exception:
-                # pas d'ancien widget, on ignore
                 pass
 
-            # insérer la nouvelle page en position 1
             self.stack.insertWidget(1, new_cat_page)
-            # garder des références
             self.catalogue_page = new_cat_page
             self.catalogue_container = new_cat_page
 
-            # masquer la barre des salles pour que le header du catalogue
-            # et le bouton retour puissent occuper cet espace vertical
             try:
                 if hasattr(self, 'tabs_widget') and self.tabs_widget:
                     self.tabs_widget.hide()
             except Exception:
                 pass
 
-            # animer la transition vers la page catalogue
+            self._hide_light_loading_overlay()
             self._animate_transition(to_index=1, direction='left')
+        except Exception as e:
+            self._hide_light_loading_overlay()
+            QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 
+    def open_table_panel(self, table_id):
+        """Afficher le catalogue EMBARQUÉ dans l'onglet vente (page du QStackedWidget).
+
+        On remplace l'ancien comportement modal par l'affichage dans la page catalogue
+        avec une transition animée et un petit indicateur visuel très léger.
+        """
+        try:
+            self._show_light_loading_overlay('Chargement...')
+            QTimer.singleShot(80, lambda: self._build_catalog_for_table(table_id))
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 

@@ -5,7 +5,7 @@ Fenêtre de connexion pour Ayanna ERP
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, 
                             QLineEdit, QPushButton, QLabel, QMessageBox, 
                             QFrame, QApplication, QSpacerItem, QSizePolicy)
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QPixmap, QPalette, QColor, QIcon
 from sqlalchemy import or_
 from ayanna_erp.database.database_manager import DatabaseManager, User, Entreprise
@@ -184,8 +184,24 @@ class LoginWindow(QWidget):
         
         button_layout.addWidget(self.login_button)
         button_layout.addWidget(self.quit_button)
-        
         layout.addLayout(button_layout)
+
+        self.login_loading_label = QLabel("Connexion...")
+        self.login_loading_label.setVisible(False)
+        self.login_loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.login_loading_label.setStyleSheet("""
+            QLabel {
+                background: rgba(255, 255, 255, 0.12);
+                color: #ECF0F1;
+                border: 1px solid rgba(255, 255, 255, 0.18);
+                border-radius: 999px;
+                font-size: 11px;
+                font-weight: bold;
+                padding: 7px 14px;
+                min-height: 22px;
+            }
+        """)
+        layout.addWidget(self.login_loading_label)
     
     def setup_footer(self, layout):
         """Configuration du pied de page"""
@@ -275,6 +291,37 @@ class LoginWindow(QWidget):
         else:
             self.close()
     
+    def _show_login_loading(self):
+        """Affiche un petit indicateur visuel léger pendant la connexion."""
+        if not hasattr(self, 'login_loading_label'):
+            return
+
+        self.login_button.setEnabled(False)
+        self.login_loading_label.setVisible(True)
+        self.login_loading_label.raise_()
+        self.login_loading_label.setWindowOpacity(0.0)
+
+        anim = QPropertyAnimation(self.login_loading_label, b'windowOpacity')
+        anim.setDuration(180)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.start()
+
+    def _hide_login_loading(self):
+        """Masque le petit indicateur visuel après la tentative de connexion."""
+        if not hasattr(self, 'login_loading_label'):
+            return
+
+        self.login_button.setEnabled(True)
+        anim = QPropertyAnimation(self.login_loading_label, b'windowOpacity')
+        anim.setDuration(150)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        anim.finished.connect(lambda: self.login_loading_label.setVisible(False))
+        anim.start()
+
     def handle_login(self):
         """Gérer la tentative de connexion"""
         identifier = self.email_input.text().strip()
@@ -283,14 +330,17 @@ class LoginWindow(QWidget):
         if not identifier or not password:
             self.show_error("Veuillez saisir votre email ou votre nom d'utilisateur, ainsi que votre mot de passe.")
             return
-        
-        # Vérifier les identifiants
-        if self.authenticate_user(identifier, password):
-            self.show_main_window()
-        else:
-            self.show_error("Email, nom d'utilisateur ou mot de passe incorrect.")
-            self.password_input.clear()
-            self.password_input.setFocus()
+
+        self._show_login_loading()
+        try:
+            if self.authenticate_user(identifier, password):
+                self.show_main_window()
+            else:
+                self.show_error("Email, nom d'utilisateur ou mot de passe incorrect.")
+                self.password_input.clear()
+                self.password_input.setFocus()
+        finally:
+            self._hide_login_loading()
     
     def authenticate_user(self, identifier, password):
         """Authentifier l'utilisateur et initialiser la session"""

@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                             QGridLayout, QPushButton, QLabel, QMenuBar, 
                             QStatusBar, QFrame, QMessageBox, QApplication,
                             QProgressDialog, QMenu)
-from PyQt6.QtCore import Qt, QSize, QTimer
+from PyQt6.QtCore import Qt, QSize, QTimer, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QIcon, QPixmap, QFont, QAction
 from ayanna_erp.database.database_manager import DatabaseManager, Module, POSPoint
 from ayanna_erp.core.config import Config
@@ -372,7 +372,7 @@ class MainWindow(QMainWindow):
                     config["description"],
                     config["color"]
                 )
-                button.clicked.connect(lambda checked, name=module.name: self.open_module(name))
+                button.clicked.connect(lambda checked, name=module.name, btn=button: self.open_module(name, btn))
                 
                 self.grid_layout.addWidget(button, row, col)
                 
@@ -574,80 +574,101 @@ class MainWindow(QMainWindow):
         finally:
             session.close()
 
-    def open_module(self, module_name):
-        """Ouvrir un module spécifique"""
-        try:
-            # Vérifier si le module est déjà ouvert
-            if module_name in self.module_windows:
-                window = self.module_windows[module_name]
-                if window.isVisible():
-                    window.raise_()
-                    window.activateWindow()
+    def _set_module_loading_state(self, button, loading):
+        """Active ou désactive le statut visuel de chargement sur la carte du module."""
+        if button is None:
+            return
+
+        if loading:
+            if getattr(button, '_module_loading_original_text', None) is None:
+                button._module_loading_original_text = button.text()
+            button.setEnabled(False)
+            button.setText("Chargement...")
+            return
+
+        original_text = getattr(button, '_module_loading_original_text', None)
+        button.setEnabled(True)
+        if original_text is not None:
+            button.setText(original_text)
+            button._module_loading_original_text = None
+
+    def open_module(self, module_name, button=None):
+        """Ouvrir un module spécifique avec un état visuel de chargement sur la carte cliquée."""
+        if button is not None:
+            self._set_module_loading_state(button, True)
+
+        def _do_open():
+            try:
+                # Vérifier si le module est déjà ouvert
+                if module_name in self.module_windows:
+                    window = self.module_windows[module_name]
+                    if window.isVisible():
+                        window.raise_()
+                        window.activateWindow()
+                        self._set_module_loading_state(button, False)
+                        return
+
+                if module_name == "SalleFete":
+                    self.ensure_salle_fete_module_registered()
+                    from ..modules.salle_fete.view.salle_fete_window import SalleFeteWindow
+                    pos_id = self.db_manager.get_pos_id_for_enterprise_module(
+                        self.current_user.enterprise_id,
+                        "SalleFete"
+                    )
+                    if pos_id is None:
+                        QMessageBox.warning(self, "Erreur", "Aucun point de vente configuré pour ce module.")
+                        return
+                    window = SalleFeteWindow(self.current_user, pos_id=pos_id)
+                elif module_name == "Vente":
+                    self.ensure_boutique_module_registered()
+                    from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
+                    window = BoutiqueWindow(self.current_user, pos_id=2)
+                elif module_name == "Pharmacie":
+                    self.ensure_boutique_module_registered()
+                    from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
+                    window = BoutiqueWindow(self.current_user, pos_id=3)
+                elif module_name == "Restaurant":
+                    from ayanna_erp.modules.restaurant.restaurant_window import RestaurantWindow
+                    window = RestaurantWindow(self.current_user)
+                elif module_name == "Hotel":
+                    from ayanna_erp.modules.hotel.hotel_window import HotelWindow
+                    window = HotelWindow(self.current_user)
+                elif module_name == "Achats":
+                    from ayanna_erp.modules.achats.achats_window import AchatsWindow
+                    window = AchatsWindow(self.current_user)
+                elif module_name == "Stock":
+                    from ayanna_erp.modules.stock.stock_window import StockWindow
+                    window = StockWindow(self.current_user)
+                elif module_name == "Comptabilite":
+                    from ayanna_erp.modules.comptabilite.comptabilite_window import ComptabiliteWindow
+                    window = ComptabiliteWindow(self.current_user, user_controller=self.user_controller)
+                elif module_name == "Fabrication":
+                    from ayanna_erp.modules.fabrication.view.fabrication_window import FabricationWindow
+                    pos_id = self.db_manager.get_pos_id_for_enterprise_module(
+                        self.current_user.enterprise_id,
+                        "Fabrication"
+                    )
+                    window = FabricationWindow(self.user_to_dict(), pos_id=pos_id)
+                else:
+                    QMessageBox.information(self, "Information", f"Module {module_name} en cours de développement.")
                     return
-            
-            # Importer et ouvrir le module approprié
-            if module_name == "SalleFete":
-                # Enregistrer le module s'il n'existe pas déjà
-                self.ensure_salle_fete_module_registered()
-                
-                from ..modules.salle_fete.view.salle_fete_window import SalleFeteWindow
-                # Récupérer le pos_id correct pour cette entreprise et ce module
-                pos_id = self.db_manager.get_pos_id_for_enterprise_module(
-                    self.current_user.enterprise_id, 
-                    "SalleFete"
-                )
-                if pos_id is None:
-                    QMessageBox.warning(self, "Erreur", "Aucun point de vente configuré pour ce module.")
-                    return
-                window = SalleFeteWindow(self.current_user, pos_id=pos_id)
-            elif module_name == "Vente":
-                # Enregistrer le module s'il n'existe pas déjà
-                self.ensure_boutique_module_registered()
-                
-                from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
-                window = BoutiqueWindow(self.current_user, pos_id=2)
-            elif module_name == "Pharmacie":
-                # Enregistrer le module s'il n'existe pas déjà
-                self.ensure_boutique_module_registered()
-                
-                from ayanna_erp.modules.boutique.view.boutique_window import BoutiqueWindow
-                window = BoutiqueWindow(self.current_user, pos_id=3)
-            elif module_name == "Restaurant":
-                from ayanna_erp.modules.restaurant.restaurant_window import RestaurantWindow
-                window = RestaurantWindow(self.current_user)
-            elif module_name == "Hotel":
-                from ayanna_erp.modules.hotel.hotel_window import HotelWindow
-                window = HotelWindow(self.current_user)
-            elif module_name == "Achats":
-                from ayanna_erp.modules.achats.achats_window import AchatsWindow
-                window = AchatsWindow(self.current_user)
-            elif module_name == "Stock":
-                from ayanna_erp.modules.stock.stock_window import StockWindow
-                window = StockWindow(self.current_user)
-            elif module_name == "Comptabilite":
-                from ayanna_erp.modules.comptabilite.comptabilite_window import ComptabiliteWindow
-                # On suppose que l'instance UserController est accessible via self.user_controller
-                window = ComptabiliteWindow(self.current_user, user_controller=self.user_controller)
-            elif module_name == "Fabrication":
-                # Enregistrer / vérifier config module fabrication
-                from ayanna_erp.modules.fabrication.view.fabrication_window import FabricationWindow
-                pos_id = self.db_manager.get_pos_id_for_enterprise_module(
-                    self.current_user.enterprise_id,
-                    "Fabrication"
-                )
-                # pos_id may be None; pass None and let window handle default
-                window = FabricationWindow(self.user_to_dict(), pos_id=pos_id)
-            else:
-                QMessageBox.information(self, "Information", f"Module {module_name} en cours de développement.")
-                return
-            
-            self.module_windows[module_name] = window
-            window.show()
-            
-        except ImportError as e:
-            QMessageBox.warning(self, "Erreur", f"Impossible de charger le module {module_name}:\n{str(e)}")
-        except Exception as e:
-            QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ouverture du module {module_name}:\n{str(e)}")
+
+                self.module_windows[module_name] = window
+                window.show()
+                QApplication.processEvents()
+                self._set_module_loading_state(button, False)
+
+            except ImportError as e:
+                QMessageBox.warning(self, "Erreur", f"Impossible de charger le module {module_name}:\n{str(e)}")
+                self._set_module_loading_state(button, False)
+            except Exception as e:
+                QMessageBox.critical(self, "Erreur", f"Erreur lors de l'ouverture du module {module_name}:\n{str(e)}")
+                self._set_module_loading_state(button, False)
+
+        if button is not None:
+            QTimer.singleShot(60, _do_open)
+        else:
+            _do_open()
     
     def logout(self):
         """Déconnexion"""
