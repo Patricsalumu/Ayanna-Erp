@@ -297,6 +297,7 @@ class LoginWindow(QWidget):
             return
 
         self.login_button.setEnabled(False)
+        self.login_button.setText("Connexion...")
         self.login_loading_label.setVisible(True)
         self.login_loading_label.raise_()
         self.login_loading_label.setWindowOpacity(0.0)
@@ -307,6 +308,7 @@ class LoginWindow(QWidget):
         anim.setEndValue(1.0)
         anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         anim.start()
+        QApplication.processEvents()
 
     def _hide_login_loading(self):
         """Masque le petit indicateur visuel après la tentative de connexion."""
@@ -314,6 +316,7 @@ class LoginWindow(QWidget):
             return
 
         self.login_button.setEnabled(True)
+        self.login_button.setText("Se connecter")
         anim = QPropertyAnimation(self.login_loading_label, b'windowOpacity')
         anim.setDuration(150)
         anim.setStartValue(1.0)
