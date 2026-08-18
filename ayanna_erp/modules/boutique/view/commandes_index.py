@@ -856,7 +856,8 @@ class CommandesIndexWidget(QWidget):
                         cond_shop.append("payment_method = :payment_method")
                         params['payment_method'] = payment_filter
                     if search_term:
-                        cond_shop.append("(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND ss.name LIKE :search))")
+                        service_search_expr = self.commande_controller._service_name_expression(session, 'ss')
+                        cond_shop.append(f"(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND {service_search_expr} LIKE :search))")
                         params['search'] = f"%{search_term}%"
                     q_ca1 = sq_text(f"SELECT COALESCE(SUM(subtotal),0) as ca FROM shop_paniers WHERE {' AND '.join(cond_shop)}")
                     ca1 = session.execute(q_ca1, params).fetchone()
@@ -868,7 +869,7 @@ class CommandesIndexWidget(QWidget):
                         cond_restau.append("payment_method = :payment_method")
                         params2['payment_method'] = payment_filter
                     if search_term:
-                        cond_restau.append("(CAST(id AS TEXT) LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
+                        cond_restau.append("(CAST(id AS CHAR) LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
                         params2['search'] = f"%{search_term}%"
                     q_ca2 = sq_text(f"SELECT COALESCE(SUM(subtotal),0) as ca FROM restau_paniers WHERE {' AND '.join(cond_restau)}")
                     ca2 = session.execute(q_ca2, params2).fetchone()
@@ -1934,21 +1935,27 @@ Notes: {notes_preview}
                 date_debut, date_fin, include_services=True,
                 module=getattr(self, 'module', None),
                 pos_id=getattr(self.boutique_controller, 'pos_id', None)
-            )
+            ) or []
+            if not products:
+                products = self.commande_controller._fallback_products_summary_from_raw_sales(
+                    date_debut, date_fin, include_services=True
+                ) or []
+
             if not products:
                 QMessageBox.warning(self, "Aucune donnée", "Aucun produit/service vendu pour la période sélectionnée.")
                 return
 
             # Enrichir avec la catégorie puis demander une sélection utilisateur
             products = self._enrich_products_with_categories(products)
+            for p in products:
+                p.setdefault('category_name', 'Sans catégorie')
             available_categories = sorted({
                 str(p.get('category_name') or 'Sans catégorie')
                 for p in products
             })
 
             if not available_categories:
-                QMessageBox.warning(self, "Catégories indisponibles", "Impossible de charger les catégories à exporter.")
-                return
+                available_categories = ['Sans catégorie']
 
             category_dialog = CategorySelectionDialog(
                 available_categories,
@@ -2083,15 +2090,20 @@ Notes: {notes_preview}
                 module=getattr(self, 'module', None),
                 pos_id=getattr(self.boutique_controller, 'pos_id', None)
             ) or []
+            if not products:
+                products = self.commande_controller._fallback_products_summary_from_raw_sales(
+                    date_debut, date_fin, include_services=True
+                ) or []
             products = self._enrich_products_with_categories(products)
+            for p in products:
+                p.setdefault('category_name', 'Sans catégorie')
             available_categories = sorted({
                 str(p.get('category_name') or 'Sans catégorie')
                 for p in products
             })
 
             if not available_categories:
-                QMessageBox.warning(self, "Catégories indisponibles", "Impossible de charger les catégories pour le rapport.")
-                return
+                available_categories = ['Sans catégorie']
 
             category_dialog = CategorySelectionDialog(
                 available_categories,

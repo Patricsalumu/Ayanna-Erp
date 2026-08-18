@@ -226,7 +226,25 @@ def _load_database_config_from_file() -> dict | None:
 
 
 def _get_database_configuration_from_env() -> tuple[str, str, str] | None:
-    """Retourne la config depuis le fichier de config local si elle existe, sinon depuis l'env."""
+    """Retourne la config de l'environnement si elle est explicitement définie, sinon le fichier local."""
+    env_url = os.getenv("DATABASE_URL", "").strip()
+    if env_url:
+        try:
+            rest = env_url.split("://", 1)[1]
+            if "@" in rest:
+                rest = rest.split("@", 1)[1]
+            host_part = rest.split("/", 1)[0]
+            host = host_part.rsplit(":", 1)[0] if ":" in host_part else host_part
+            db_name = env_url.rsplit("/", 1)[-1].strip() or "insomnia"
+            user_part = env_url.split("://", 1)[1].split("@", 1)[0]
+            user = user_part.split(":", 1)[0] if ":" in user_part else user_part
+            os.environ["DATABASE_URL"] = env_url
+            os.environ["DB_USER"] = user
+            os.environ["DB_PASSWORD"] = ""
+            return env_url, host, db_name
+        except Exception:
+            return None
+
     saved = _load_database_config_from_file()
     if saved:
         os.environ["DATABASE_URL"] = saved['url']
@@ -234,25 +252,7 @@ def _get_database_configuration_from_env() -> tuple[str, str, str] | None:
         os.environ["DB_PASSWORD"] = saved['password']
         return saved['url'], saved['server'], saved['database']
 
-    env_url = os.getenv("DATABASE_URL", "").strip()
-    if not env_url:
-        return None
-
-    try:
-        rest = env_url.split("://", 1)[1]
-        if "@" in rest:
-            rest = rest.split("@", 1)[1]
-        host_part = rest.split("/", 1)[0]
-        host = host_part.rsplit(":", 1)[0] if ":" in host_part else host_part
-        db_name = env_url.rsplit("/", 1)[-1].strip() or "insomnia"
-        user_part = env_url.split("://", 1)[1].split("@", 1)[0]
-        user = user_part.split(":", 1)[0] if ":" in user_part else user_part
-        os.environ["DATABASE_URL"] = env_url
-        os.environ["DB_USER"] = user
-        os.environ["DB_PASSWORD"] = ""
-        return env_url, host, db_name
-    except Exception:
-        return None
+    return None
 
 
 def _build_database_url(server: str, database: str, username: str, password: str) -> str:
@@ -422,16 +422,87 @@ def _prompt_database_configuration(existing: dict | None = None) -> tuple[str, s
     return url, host, db_name
 
 
-def _resolve_database_url_from_prompt() -> tuple[str, str, str]:
-    """Vérifie uniquement le fichier de configuration local. S'il manque ou est incomplet, demande/edite la config via dialogue."""
+def _resolve_database_url_from_prompt(force_edit: bool = False) -> tuple[str, str, str]:
+    """Vérifie la configuration locale. Si force_edit est vrai, on ouvre explicitement la boîte d'édition."""
     saved = _load_database_config_from_file()
-    if saved and saved.get('server') and saved.get('database') and saved.get('username'):
+    if saved and saved.get('server') and saved.get('database') and saved.get('username') and not force_edit:
         os.environ["DATABASE_URL"] = saved['url']
         os.environ["DB_USER"] = saved['username']
         os.environ["DB_PASSWORD"] = saved['password']
         return saved['url'], saved['server'], saved['database']
 
     return _prompt_database_configuration(saved)
+
+
+def _show_database_error_dialog(error_message: str, existing: dict | None = None) -> str:
+    """Affiche une alerte explicite si la base serveur est inaccessible et propose les actions utiles."""
+    from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QHBoxLayout
+    from PyQt6.QtGui import QDesktopServices
+    from PyQt6.QtCore import QUrl
+
+    dialog = QDialog()
+    dialog.setWindowTitle("Connexion au serveur impossible")
+    dialog.setModal(True)
+    dialog.resize(560, 360)
+
+    layout = QVBoxLayout(dialog)
+    layout.setSpacing(14)
+    layout.setContentsMargins(18, 18, 18, 18)
+
+    title = QLabel("Impossible de se connecter à la base de données du serveur")
+    title.setStyleSheet("font-size: 18px; font-weight: 700; color: #111827;")
+    layout.addWidget(title)
+
+    message = QLabel(
+        "Ayanna ERP n'arrive pas à joindre la base de données configurée sur la machine serveur.\n\n"
+        "Veuillez vérifier que :\n"
+        "• la machine serveur est allumée;\n"
+        "• XAMPP/MySQL est bien démarré;\n"
+        "• la machine est connectée au réseau configuré;\n"
+        "• les paramètres serveur, base, utilisateur et mot de passe sont corrects.\n\n"
+        "Si le problème persiste, contactez l'équipe technique au +243 997 554 905."
+    )
+    message.setWordWrap(True)
+    message.setStyleSheet("font-size: 12px; color: #1f2937; line-height: 1.4;")
+    layout.addWidget(message)
+
+    details = QLabel(f"Détail technique : {error_message[:500]}")
+    details.setWordWrap(True)
+    details.setStyleSheet("font-size: 10px; color: #4b5563; background: #f3f4f6; border-radius: 8px; padding: 8px;")
+    layout.addWidget(details)
+
+    buttons = QHBoxLayout()
+    buttons.addStretch()
+
+    modify_btn = QPushButton("Modifier la config")
+    retry_btn = QPushButton("Réessayer")
+    contact_btn = QPushButton("Contacter le support")
+    quit_btn = QPushButton("Quitter")
+
+    modify_btn.setStyleSheet("padding: 8px 12px; font-weight: 600;")
+    retry_btn.setStyleSheet("padding: 8px 12px; font-weight: 600;")
+    contact_btn.setStyleSheet("padding: 8px 12px; font-weight: 600;")
+    quit_btn.setStyleSheet("padding: 8px 12px; font-weight: 600;")
+
+    buttons.addWidget(modify_btn)
+    buttons.addWidget(retry_btn)
+    buttons.addWidget(contact_btn)
+    buttons.addWidget(quit_btn)
+    layout.addLayout(buttons)
+
+    action = {"value": "quit"}
+
+    def set_action(value: str):
+        action["value"] = value
+        dialog.accept()
+
+    modify_btn.clicked.connect(lambda: set_action("modify"))
+    retry_btn.clicked.connect(lambda: set_action("retry"))
+    contact_btn.clicked.connect(lambda: (QDesktopServices.openUrl(QUrl("tel:+243997554905")), set_action("retry")))
+    quit_btn.clicked.connect(lambda: set_action("quit"))
+
+    dialog.exec()
+    return action["value"]
 
 
 def main():
@@ -457,13 +528,44 @@ def main():
     app.setOrganizationName("Ayanna Tech")
     app.setStyle('Fusion')
 
-    try:
-        db_url, db_host, db_name = _resolve_database_url_from_prompt()
-    except ValueError as exc:
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.critical(None, "Configuration MySQL incomplète", str(exc))
-        sys.exit(1)
-    
+    while True:
+        try:
+            db_url, db_host, db_name = _resolve_database_url_from_prompt()
+            break
+        except ValueError as exc:
+            from PyQt6.QtWidgets import QMessageBox
+            QMessageBox.critical(None, "Configuration MySQL incomplète", str(exc))
+            sys.exit(1)
+
+    while True:
+        try:
+            db_manager = DatabaseManager(db_url)
+            break
+        except Exception as exc:
+            choice = _show_database_error_dialog(str(exc), {
+                'server': db_host,
+                'database': db_name,
+                'username': os.getenv('DB_USER', ''),
+                'password': os.getenv('DB_PASSWORD', ''),
+            })
+            if choice == 'modify':
+                try:
+                    db_url, db_host, db_name = _resolve_database_url_from_prompt(force_edit=True)
+                    continue
+                except ValueError as exc:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.critical(None, "Configuration MySQL incomplète", str(exc))
+                    sys.exit(1)
+            if choice in {'retry', 'contact'}:
+                try:
+                    db_url, db_host, db_name = _resolve_database_url_from_prompt()
+                    continue
+                except ValueError as exc:
+                    from PyQt6.QtWidgets import QMessageBox
+                    QMessageBox.critical(None, "Configuration MySQL incomplète", str(exc))
+                    sys.exit(1)
+            sys.exit(1)
+
     # Configurer le style de l'application
     # Définir l'icône de l'application et de la fenêtre (préfère .ico, fallback png)
     icon_path = os.path.join(str(project_root), 'data', 'images', 'icone_ayanna_erp.ico')
@@ -477,20 +579,6 @@ def main():
     
     # Initialiser la base de données
     _log('before_db_init')
-    try:
-        db_manager = DatabaseManager(db_url)
-    except Exception as exc:
-        from PyQt6.QtWidgets import QMessageBox
-        QMessageBox.critical(
-            None,
-            "Connexion MySQL impossible",
-            f"Aucune connexion au serveur MySQL.\n\n"
-            f"Serveur : {db_host}\n"
-            f"Base : {db_name}\n\n"
-            f"Vérifiez l'adresse du serveur et l'accès à la base insomnia."
-        )
-        print(f"Connexion MySQL impossible: {exc}")
-        sys.exit(1)
     from ayanna_erp.database.database_manager import set_database_manager
     set_database_manager(db_manager)   # partager l'instance dès maintenant
 

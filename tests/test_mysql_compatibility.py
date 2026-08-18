@@ -5,6 +5,7 @@ from pathlib import Path
 from sqlalchemy import text
 
 from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
 from main import _get_database_configuration_from_env, _database_config_path, _save_database_config
 
 
@@ -60,6 +61,19 @@ class MySQLCompatibilityTests(unittest.TestCase):
                     config_path.unlink()
             else:
                 config_path.write_text(original, encoding='utf-8')
+
+    def test_mysql_safe_cast_uses_char_instead_of_text(self):
+        cast_sql = CommandeController._mysql_safe_cast('rp.id')
+        self.assertEqual(cast_sql, 'CAST(rp.id AS CHAR)')
+        self.assertNotIn('AS TEXT', cast_sql)
+
+    def test_sales_summary_tables_are_detected_on_empty_database(self):
+        db = DatabaseManager("sqlite:///:memory:")
+        with db.session_scope() as session:
+            tables = CommandeController._sales_summary_tables(session)
+            self.assertFalse(tables['shop_paniers'])
+            self.assertFalse(tables['restau_paniers'])
+            self.assertFalse(tables['core_products'])
 
 
 if __name__ == "__main__":

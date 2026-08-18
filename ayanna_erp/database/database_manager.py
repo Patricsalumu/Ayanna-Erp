@@ -229,6 +229,11 @@ class DatabaseManager:
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.session = None
         self.current_enterprise_id = None
+        try:
+            with self.engine.connect() as conn:
+                conn.execute(text('SELECT 1'))
+        except Exception as exc:
+            raise ConnectionError(f"Impossible de se connecter à la base de données distante: {exc}") from exc
         # Migration automatique des nouvelles tables au premier accès à la DB
         # Exécuter une seule fois par processus pour éviter les logs/migrations répétées
         if not DatabaseManager._migrations_executed:

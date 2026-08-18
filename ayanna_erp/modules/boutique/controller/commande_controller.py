@@ -7,20 +7,71 @@ Gère la logique métier des commandes : récupération, statistiques, filtrage,
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Dict, Any, Optional, Union
-from sqlalchemy import text
-from ayanna_erp.database.database_manager import DatabaseManager
+from sqlalchemy import text, inspect
+from ayanna_erp.database.database_manager import DatabaseManager, get_database_manager
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ayanna_erp.core.session_manager import SessionManager
 
 
-db = DatabaseManager()
+db = get_database_manager()
 
 
 class CommandeController:
     """Contrôleur pour la gestion des commandes"""
 
+    @staticmethod
+    def _sales_summary_tables(session) -> Dict[str, bool]:
+        """Retourne l'état des tables utilisées pour les exports et rapports de vente."""
+        try:
+            table_names = set(inspect(session.bind).get_table_names())
+        except Exception:
+            table_names = set()
+
+        return {
+            'shop_paniers': 'shop_paniers' in table_names,
+            'shop_paniers_products': 'shop_paniers_products' in table_names,
+            'shop_paniers_services': 'shop_paniers_services' in table_names,
+            'restau_paniers': 'restau_paniers' in table_names,
+            'restau_produit_panier': 'restau_produit_panier' in table_names,
+            'shop_services': 'shop_services' in table_names,
+            'core_products': 'core_products' in table_names,
+        }
+
+    @staticmethod
+    def _mysql_safe_cast(column_expr: str, cast_type: str = 'CHAR') -> str:
+        """Retourne un cast compatible MariaDB/MySQL pour les ID numériques dans les recherches."""
+        return f"CAST({column_expr} AS {cast_type})"
+
+    def _service_name_expression(self, session, alias: str = 'ss') -> str:
+        """Retourne une expression SQL compatible avec les colonnes legacy name/nom de shop_services."""
+        try:
+            columns = {col.get('name') for col in inspect(session.bind).get_columns('shop_services')}
+        except Exception:
+            columns = {'name'}
+
+        if 'name' in columns:
+            return f"COALESCE({alias}.name, 'Service')"
+        if 'nom' in columns:
+            return f"COALESCE({alias}.nom, 'Service')"
+        return f"CONCAT('Service-', {alias}.id)"
+
+    def _service_price_expression(self, session, alias: str = 'ss') -> str:
+        """Retourne une expression SQL compatible avec les colonnes legacy price/prix de shop_services."""
+        try:
+            columns = {col.get('name') for col in inspect(session.bind).get_columns('shop_services')}
+        except Exception:
+            columns = {'price'}
+
+        candidates = []
+        for col in ('price', 'prix', 'price_unit', 'unit_price'):
+            if col in columns:
+                candidates.append(f"{alias}.{col}")
+        if not candidates:
+            return '0'
+        return f"COALESCE({', '.join(candidates)}, 0)"
+
     def __init__(self):
-        self.db_manager = DatabaseManager()
+        self.db_manager = get_database_manager()
         self.entreprise_controller = EntrepriseController()
     
     def get_currency_symbol(self):
@@ -80,9 +131,9 @@ class CommandeController:
                             WHERE spp.panier_id = sp.id
                         ) as produits,
                         (
-                            SELECT GROUP_CONCAT(CONCAT(COALESCE(ss.name, 'Service'), ' (x', sps.quantity, ')'))
+                            SELECT GROUP_CONCAT(CONCAT(COALESCE(ss.name, ss.nom, 'Service'), ' (x', sps.quantity, ')'))
                             FROM shop_paniers_services sps
-                            JOIN event_services ss ON sps.service_id = ss.id
+                            JOIN shop_services ss ON sps.service_id = ss.id
                             WHERE sps.panier_id = sp.id
                         ) as services,
                         (
@@ -131,7 +182,7 @@ class CommandeController:
                         # Recherche dans les produits
                         "EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = sp.id AND cp.name LIKE :search)",
                         # Recherche dans les services
-                        "EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = sp.id AND ss.name LIKE :search)"
+                        f"EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = sp.id AND {self._service_name_expression(session, 'ss')} LIKE :search)"
                         
                     ]
                     conditions.append("(" + " OR ".join(search_conditions) + ")")
@@ -241,7 +292,7 @@ class CommandeController:
                     if search_term:
                         # rechercher par id panier, nom client ou produit dans les lignes restau
                         restau_conditions.append(
-                            "(CAST(rp.id AS TEXT) LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search OR EXISTS (SELECT 1 FROM restau_produit_panier rpp LEFT JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = rp.id AND (cp.name LIKE :search OR CAST(rpp.product_id AS TEXT) LIKE :search)))"
+                            f"({self._mysql_safe_cast('rp.id')} LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search OR EXISTS (SELECT 1 FROM restau_produit_panier rpp LEFT JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = rp.id AND (cp.name LIKE :search OR {self._mysql_safe_cast('rpp.product_id')} LIKE :search)))"
                         )
 
                     if restau_conditions:
@@ -523,9 +574,10 @@ class CommandeController:
                 if search_term:
                     params['search'] = f"%{search_term}%"
                     # SHOP: numero_commande, client, produits, services
-                    shop_conditions.append("(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND ss.name LIKE :search))")
+                    service_search_expr = self._service_name_expression(session, 'ss')
+                    shop_conditions.append(f"(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND {service_search_expr} LIKE :search))")
                     # RESTAU: id, client, produits
-                    restau_conditions.append("(CAST(id AS TEXT) LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
+                    restau_conditions.append(f"({self._mysql_safe_cast('id')} LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
 
                 shop_where = " WHERE " + " AND ".join(shop_conditions)
                 restau_where = " WHERE " + " AND ".join(restau_conditions)
@@ -560,7 +612,7 @@ class CommandeController:
                     c = c.replace("status", f"{alias}.status")
                     # Pour payment_method, remplacer seulement la colonne, pas :payment_method
                     c = c.replace("payment_method", f"{alias}.payment_method").replace(f"{alias}.payment_method = :{alias}.payment_method", f"{alias}.payment_method = :payment_method")
-                    c = c.replace("CAST(id AS TEXT)", f"CAST({alias}.id AS TEXT)")
+                    c = c.replace(self._mysql_safe_cast('id'), self._mysql_safe_cast(f'{alias}.id'))
                     c = c.replace("restau_paniers.client_id", f"{alias}.client_id")
                     c = c.replace("restau_paniers.id", f"{alias}.id")
                     return c
@@ -771,16 +823,18 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 # Services (shop)
                 service_map = []
                 if include_services:
-                    q_services = text("""
-                        SELECT ss.id as service_id, ss.name as service_name,
+                    service_name_sql = self._service_name_expression(session, 'ss')
+                    service_price_sql = self._service_price_expression(session, 'ss')
+                    q_services = text(f"""
+                        SELECT ss.id as service_id, {service_name_sql} as service_name,
                                COALESCE(SUM(sps.quantity),0) as sold_qty,
-                               COALESCE(MAX(ss.price),0) as unit_price
+                               COALESCE(MAX({service_price_sql}),0) as unit_price
                         FROM shop_paniers_services sps
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
                         AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                        GROUP BY ss.id, ss.name
+                        GROUP BY ss.id, {service_name_sql}
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
 
@@ -1002,6 +1056,117 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
             print(f"❌ Erreur export_products_summary: {e}")
             return ''
 
+    def _build_basic_products_summary(self, items, d1, d2, include_services: bool = True):
+        """Fallback simple: calcule uniquement les quantités vendues sans dépendre des stocks/inventaires."""
+        rows_out = []
+        for idx, (key, it) in enumerate(items.items(), start=1):
+            sold = float(it.get('sold', 0.0))
+            if sold <= 0 and not include_services and it.get('is_service'):
+                continue
+
+            unit_price = float(it.get('unit_price', 0.0))
+            rows_out.append({
+                'no': idx,
+                'name': it['name'],
+                'initial_quantity': None,
+                'quantity_added': 0.0,
+                'adjustments': 0.0,
+                'product_id': it.get('product_id'),
+                'service_id': it.get('service_id'),
+                'sold': sold,
+                'final_quantity': sold,
+                'unit_price': unit_price,
+                'cost_price': None,
+                'margin': None,
+                'total': sold * unit_price,
+            })
+        return rows_out
+
+    def _fallback_products_summary_from_raw_sales(self, d1, d2, include_services: bool = True):
+        """Retourne un résumé minimal basé uniquement sur les paniers et lignes de vente."""
+        try:
+            with self.db_manager.get_session() as session:
+                tables = self._sales_summary_tables(session)
+                if not (tables.get('shop_paniers') or tables.get('restau_paniers')):
+                    return []
+
+                items = {}
+
+                if tables.get('shop_paniers') and tables.get('shop_paniers_products') and tables.get('core_products'):
+                    q_products = text("""
+                        SELECT cp.id as product_id, cp.name as product_name,
+                               COALESCE(SUM(spp.quantity),0) as sold_qty,
+                               COALESCE(MAX(cp.price_unit),0) as unit_price
+                        FROM shop_paniers_products spp
+                        LEFT JOIN shop_paniers p ON spp.panier_id = p.id
+                        LEFT JOIN core_products cp ON spp.product_id = cp.id
+                        WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                          AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
+                        GROUP BY cp.id, cp.name
+                    """)
+                    for r in session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall():
+                        items[f"P-{r.product_id}"] = {
+                            'name': r.product_name,
+                            'sold': float(r.sold_qty or 0),
+                            'unit_price': float(r.unit_price or 0),
+                            'product_id': r.product_id,
+                            'is_service': False,
+                        }
+
+                if tables.get('restau_paniers') and tables.get('restau_produit_panier') and tables.get('core_products'):
+                    q_restau = text("""
+                        SELECT cp.id as product_id, cp.name as product_name,
+                               COALESCE(SUM(rpp.quantity),0) as sold_qty,
+                               COALESCE(MAX(cp.price_unit),0) as unit_price
+                        FROM restau_produit_panier rpp
+                        LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
+                        LEFT JOIN core_products cp ON rpp.product_id = cp.id
+                        WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                          AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
+                        GROUP BY cp.id, cp.name
+                    """)
+                    for r in session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall():
+                        key = f"P-{r.product_id}"
+                        if key in items:
+                            items[key]['sold'] += float(r.sold_qty or 0)
+                        else:
+                            items[key] = {
+                                'name': r.product_name,
+                                'sold': float(r.sold_qty or 0),
+                                'unit_price': float(r.unit_price or 0),
+                                'product_id': r.product_id,
+                                'is_service': False,
+                            }
+
+                if include_services and tables.get('shop_paniers') and tables.get('shop_paniers_services'):
+                    service_name_sql = self._service_name_expression(session, 'ss')
+                    service_price_sql = self._service_price_expression(session, 'ss')
+                    q_services = text(f"""
+                        SELECT ss.id as service_id, {service_name_sql} as service_name,
+                               COALESCE(SUM(sps.quantity),0) as sold_qty,
+                               COALESCE(MAX({service_price_sql}),0) as unit_price
+                        FROM shop_paniers_services sps
+                        LEFT JOIN shop_paniers p ON sps.panier_id = p.id
+                        LEFT JOIN shop_services ss ON sps.service_id = ss.id
+                        WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                          AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
+                        GROUP BY ss.id, {service_name_sql}
+                    """)
+                    for s in session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall():
+                        items[f"S-{s.service_id}"] = {
+                            'name': s.service_name,
+                            'sold': float(s.sold_qty or 0),
+                            'unit_price': float(s.unit_price or 0),
+                            'service_id': s.service_id,
+                            'is_service': True,
+                        }
+
+                if items:
+                    return self._build_basic_products_summary(items, d1, d2, include_services=include_services)
+        except Exception as e:
+            print(f"⚠️ Fallback summary raw sales failed: {e}")
+        return []
+
     def get_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = None, pos_id: int = None):
         """
         Retourne la liste des produits/services vendus (rows_out) pour la période donnée.
@@ -1020,47 +1185,54 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
 
         try:
             with self.db_manager.get_session() as session:
-                # Rassembler ventes produits (boutique)
-                q_products = text("""
-                    SELECT cp.id as product_id, cp.name as product_name,
-                           COALESCE(SUM(spp.quantity),0) as sold_qty,
-                           COALESCE(MAX(cp.price_unit),0) as unit_price
-                    FROM shop_paniers_products spp
-                    LEFT JOIN shop_paniers p ON spp.panier_id = p.id
-                    LEFT JOIN core_products cp ON spp.product_id = cp.id
-                    WHERE p.created_at >= :d1 AND p.created_at <= :d2
-                    AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                    GROUP BY cp.id, cp.name
-                """)
-                prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
+                tables = self._sales_summary_tables(session)
+                if not (tables.get('shop_paniers') or tables.get('restau_paniers')):
+                    return []
 
-                # Ventes restaurant
-                q_restau = text("""
-                    SELECT cp.id as product_id, cp.name as product_name,
-                           COALESCE(SUM(rpp.quantity),0) as sold_qty,
-                           COALESCE(MAX(cp.price_unit),0) as unit_price
-                    FROM restau_produit_panier rpp
-                    LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
-                    LEFT JOIN core_products cp ON rpp.product_id = cp.id
-                    WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
-                    AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
-                    GROUP BY cp.id, cp.name
-                """)
-                restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
+                prod_rows = []
+                if tables.get('shop_paniers') and tables.get('shop_paniers_products') and tables.get('core_products'):
+                    q_products = text("""
+                        SELECT cp.id as product_id, cp.name as product_name,
+                               COALESCE(SUM(spp.quantity),0) as sold_qty,
+                               COALESCE(MAX(cp.price_unit),0) as unit_price
+                        FROM shop_paniers_products spp
+                        LEFT JOIN shop_paniers p ON spp.panier_id = p.id
+                        LEFT JOIN core_products cp ON spp.product_id = cp.id
+                        WHERE p.created_at >= :d1 AND p.created_at <= :d2
+                        AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
+                        GROUP BY cp.id, cp.name
+                    """)
+                    prod_rows = session.execute(q_products, {'d1': d1, 'd2': d2}).fetchall()
 
-                # Services (shop)
+                restau_rows = []
+                if tables.get('restau_paniers') and tables.get('restau_produit_panier') and tables.get('core_products'):
+                    q_restau = text("""
+                        SELECT cp.id as product_id, cp.name as product_name,
+                               COALESCE(SUM(rpp.quantity),0) as sold_qty,
+                               COALESCE(MAX(cp.price_unit),0) as unit_price
+                        FROM restau_produit_panier rpp
+                        LEFT JOIN restau_paniers rp ON rpp.panier_id = rp.id
+                        LEFT JOIN core_products cp ON rpp.product_id = cp.id
+                        WHERE rp.created_at >= :d1 AND rp.created_at <= :d2
+                        AND LOWER(COALESCE(rp.status,'')) NOT IN ('annule', 'cancelled', 'canceled')
+                        GROUP BY cp.id, cp.name
+                    """)
+                    restau_rows = session.execute(q_restau, {'d1': d1, 'd2': d2}).fetchall()
+
                 service_map = []
-                if include_services:
-                    q_services = text("""
-                        SELECT ss.id as service_id, ss.name as service_name,
+                if include_services and tables.get('shop_paniers') and tables.get('shop_paniers_services'):
+                    service_name_sql = self._service_name_expression(session, 'ss')
+                    service_price_sql = self._service_price_expression(session, 'ss')
+                    q_services = text(f"""
+                        SELECT ss.id as service_id, {service_name_sql} as service_name,
                                COALESCE(SUM(sps.quantity),0) as sold_qty,
-                               COALESCE(MAX(ss.price),0) as unit_price
+                               COALESCE(MAX({service_price_sql}),0) as unit_price
                         FROM shop_paniers_services sps
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
                         AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                        GROUP BY ss.id, ss.name
+                        GROUP BY ss.id, {service_name_sql}
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
 
@@ -1286,10 +1458,18 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                         'total': total_amount
                     })
 
+                if not rows_out:
+                    fallback = self._fallback_products_summary_from_raw_sales(d1, d2, include_services=include_services)
+                    if fallback:
+                        return fallback
+
                 return rows_out
 
         except Exception as e:
             print(f"❌ Erreur get_products_summary: {e}")
+            fallback = self._fallback_products_summary_from_raw_sales(d1, d2, include_services=include_services)
+            if fallback:
+                return fallback
             return []
 
     def get_commande_details(self, commande_id: Union[int, str], module: str = None) -> Optional[Dict[str, Any]]:
@@ -1529,13 +1709,13 @@ Panier moyen: {stats['panier_moyen']:.0f} {self.get_currency_symbol()}
                 products = products_result.fetchall()
 
                 # Récupérer les services de la commande
-                services_query = text("""
+                services_query = text(f"""
                     SELECT
                         sps.*,
-                        es.name as service_name,
+                        {self._service_name_expression(session, 'ss')} as service_name,
                         sps.price_unit as unit_price
                     FROM shop_paniers_services sps
-                    LEFT JOIN event_services es ON sps.service_id = es.id
+                    LEFT JOIN shop_services ss ON sps.service_id = ss.id
                     WHERE sps.panier_id = :commande_id
                 """)
 

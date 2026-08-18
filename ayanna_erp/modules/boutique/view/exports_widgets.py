@@ -1,6 +1,6 @@
 from ayanna_erp.core.session_manager import SessionManager
 from ayanna_erp.utils.formatting import get_currency
-from sqlalchemy import text
+from sqlalchemy import text, inspect
 
 
 def export_products_summary(self, date_debut, date_fin, include_services: bool = True, module: str = 'boutique') -> str:
@@ -81,16 +81,26 @@ def export_products_summary(self, date_debut, date_fin, include_services: bool =
                 # Services (shop)
                 service_map = []
                 if include_services:
-                    q_services = text("""
-                        SELECT ss.id as service_id, ss.name as service_name,
+                    service_name_sql = "COALESCE(ss.name, ss.nom, 'Service')"
+                    service_price_sql = "COALESCE(ss.price, ss.prix, ss.price_unit, ss.unit_price, 0)"
+                    try:
+                        columns = {col.get('name') for col in inspect(session.bind).get_columns('shop_services')}
+                        if 'name' not in columns and 'nom' not in columns:
+                            service_name_sql = "CONCAT('Service-', ss.id)"
+                        if 'price' not in columns and 'prix' not in columns and 'price_unit' not in columns and 'unit_price' not in columns:
+                            service_price_sql = "0"
+                    except Exception:
+                        pass
+                    q_services = text(f"""
+                        SELECT ss.id as service_id, {service_name_sql} as service_name,
                                COALESCE(SUM(sps.quantity),0) as sold_qty,
-                               COALESCE(MAX(ss.price),0) as unit_price
+                               COALESCE(MAX({service_price_sql}),0) as unit_price
                         FROM shop_paniers_services sps
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
                         AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                        GROUP BY ss.id, ss.name
+                        GROUP BY ss.id, {service_name_sql}
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
 
@@ -377,7 +387,7 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                 prod_params = {'d1': d1, 'd2': d2}
                 # Apply search term filter
                 if search_term:
-                    prod_base += " AND (cp.name LIKE :search OR CAST(cp.id AS TEXT) LIKE :search)"
+                    prod_base += " AND (cp.name LIKE :search OR CAST(cp.id AS CHAR) LIKE :search)"
                     prod_params['search'] = f"%{search_term}%"
                 # Apply selected product ids filter
                 if selected_product_ids:
@@ -416,7 +426,7 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                 """
                 rest_params = {'d1': d1, 'd2': d2}
                 if search_term:
-                    rest_base += " AND (cp.name LIKE :search OR CAST(cp.id AS TEXT) LIKE :search)"
+                    rest_base += " AND (cp.name LIKE :search OR CAST(cp.id AS CHAR) LIKE :search)"
                     rest_params['search'] = f"%{search_term}%"
                 if selected_product_ids:
                     ids = tuple(int(x) for x in selected_product_ids)
@@ -442,16 +452,26 @@ def get_products_summary(self, date_debut, date_fin, include_services: bool = Tr
                 # Services (shop)
                 service_map = []
                 if include_services:
-                    q_services = text("""
-                        SELECT ss.id as service_id, ss.name as service_name,
+                    service_name_sql = "COALESCE(ss.name, ss.nom, 'Service')"
+                    service_price_sql = "COALESCE(ss.price, ss.prix, ss.price_unit, ss.unit_price, 0)"
+                    try:
+                        columns = {col.get('name') for col in inspect(session.bind).get_columns('shop_services')}
+                        if 'name' not in columns and 'nom' not in columns:
+                            service_name_sql = "CONCAT('Service-', ss.id)"
+                        if 'price' not in columns and 'prix' not in columns and 'price_unit' not in columns and 'unit_price' not in columns:
+                            service_price_sql = "0"
+                    except Exception:
+                        pass
+                    q_services = text(f"""
+                        SELECT ss.id as service_id, {service_name_sql} as service_name,
                                COALESCE(SUM(sps.quantity),0) as sold_qty,
-                               COALESCE(MAX(ss.price),0) as unit_price
+                               COALESCE(MAX({service_price_sql}),0) as unit_price
                         FROM shop_paniers_services sps
                         LEFT JOIN shop_paniers p ON sps.panier_id = p.id
                         LEFT JOIN shop_services ss ON sps.service_id = ss.id
                         WHERE p.created_at >= :d1 AND p.created_at <= :d2
                         AND LOWER(COALESCE(p.status,'')) NOT IN ('cancelled', 'annule', 'canceled')
-                        GROUP BY ss.id, ss.name
+                        GROUP BY ss.id, {service_name_sql}
                     """)
                     service_map = session.execute(q_services, {'d1': d1, 'd2': d2}).fetchall()
 
