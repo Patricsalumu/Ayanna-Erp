@@ -857,7 +857,7 @@ class CommandesIndexWidget(QWidget):
                         params['payment_method'] = payment_filter
                     if search_term:
                         service_search_expr = self.commande_controller._service_name_expression(session, 'ss')
-                        cond_shop.append(f"(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND {service_search_expr} LIKE :search))")
+                        cond_shop.append(f"(numero_commande LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = shop_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = shop_paniers.user_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = shop_paniers.serveuse_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = shop_paniers.id AND cp.name LIKE :search) OR EXISTS (SELECT 1 FROM shop_paniers_services sps JOIN shop_services ss ON sps.service_id = ss.id WHERE sps.panier_id = shop_paniers.id AND {service_search_expr} LIKE :search))")
                         params['search'] = f"%{search_term}%"
                     q_ca1 = sq_text(f"SELECT COALESCE(SUM(subtotal),0) as ca FROM shop_paniers WHERE {' AND '.join(cond_shop)}")
                     ca1 = session.execute(q_ca1, params).fetchone()
@@ -869,7 +869,7 @@ class CommandesIndexWidget(QWidget):
                         cond_restau.append("payment_method = :payment_method")
                         params2['payment_method'] = payment_filter
                     if search_term:
-                        cond_restau.append("(CAST(id AS CHAR) LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
+                        cond_restau.append("(CAST(id AS CHAR) LIKE :search OR EXISTS (SELECT 1 FROM shop_clients sc WHERE sc.id = restau_paniers.client_id AND (sc.nom LIKE :search OR sc.prenom LIKE :search)) OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = restau_paniers.serveuse_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = restau_paniers.user_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = restau_paniers.id AND cp.name LIKE :search))")
                         params2['search'] = f"%{search_term}%"
                     q_ca2 = sq_text(f"SELECT COALESCE(SUM(subtotal),0) as ca FROM restau_paniers WHERE {' AND '.join(cond_restau)}")
                     ca2 = session.execute(q_ca2, params2).fetchone()
@@ -2447,7 +2447,7 @@ Notes: {notes_preview}
             
             # Tableau des commandes (sans colonne Produits/Services)
             table_data = [
-                ['N° Commande', 'Date/Heure', 'Client', 'Sous-total', 'Remise', 'Total', 'Payé', 'Prêt', 'Livré']
+                ['N° Commande', 'Date/Heure', 'Serveuse', 'Sous-total', 'Remise', 'Total', 'Payé', 'Prêt', 'Livré']
             ]
             canceled_row_indexes = []
             
@@ -2483,10 +2483,18 @@ Notes: {notes_preview}
                             is_livre = bool(commande.get(k))
                             break
 
+                    serveuse_name = (
+                        commande.get('serveuse_name')
+                        or commande.get('user_name')
+                        or commande.get('comptoiriste_name')
+                        or commande.get('waiter_name')
+                        or commande.get('serveuse')
+                        or commande.get('client_name', '')
+                    )
                     row = [
                         num_text,
                         date_str,
-                        str(commande.get('client_name', '')),
+                        str(serveuse_name),
                         _fmt_local(commande.get('subtotal', 0)),
                         _fmt_local(commande.get('remise_amount', 0)),
                         _fmt_local(commande.get('total_final', 0)),

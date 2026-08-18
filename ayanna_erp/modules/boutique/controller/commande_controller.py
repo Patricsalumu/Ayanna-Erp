@@ -179,6 +179,8 @@ class CommandeController:
                         "sc.nom LIKE :search",
                         "sc.prenom LIKE :search",
                         "sp.payment_method LIKE :search",
+                        "EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = sp.user_id AND cu.name LIKE :search)",
+                        "EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = sp.serveuse_id AND cu.name LIKE :search)",
                         # Recherche dans les produits
                         "EXISTS (SELECT 1 FROM shop_paniers_products spp JOIN core_products cp ON spp.product_id = cp.id WHERE spp.panier_id = sp.id AND cp.name LIKE :search)",
                         # Recherche dans les services
@@ -290,9 +292,9 @@ class CommandeController:
                     if payment_filter and payment_filter != "Tous":
                         restau_conditions.append("rp.payment_method = :payment_method")
                     if search_term:
-                        # rechercher par id panier, nom client ou produit dans les lignes restau
+                        # rechercher par id panier, nom client, serveuse, utilisateur ou produit dans les lignes restau
                         restau_conditions.append(
-                            f"({self._mysql_safe_cast('rp.id')} LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search OR EXISTS (SELECT 1 FROM restau_produit_panier rpp LEFT JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = rp.id AND (cp.name LIKE :search OR {self._mysql_safe_cast('rpp.product_id')} LIKE :search)))"
+                            f"({self._mysql_safe_cast('rp.id')} LIKE :search OR sc.nom LIKE :search OR sc.prenom LIKE :search OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = rp.serveuse_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM core_users cu WHERE cu.id = rp.user_id AND cu.name LIKE :search) OR EXISTS (SELECT 1 FROM restau_produit_panier rpp LEFT JOIN core_products cp ON rpp.product_id = cp.id WHERE rpp.panier_id = rp.id AND (cp.name LIKE :search OR {self._mysql_safe_cast('rpp.product_id')} LIKE :search)))"
                         )
 
                     if restau_conditions:
