@@ -179,6 +179,8 @@ class ServeuseLoginView(QDialog):
             return
 
         self._show_loading()
+        QApplication.processEvents()
+
         try:
             entered = str(self.password).strip()
             session = self.db.get_session()
