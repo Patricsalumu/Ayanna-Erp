@@ -22,6 +22,20 @@ import platform
 import subprocess
 
 
+def can_user_perform_restaurant_action(role_name, action_name):
+    """Permissions métier pour le restaurant selon le rôle utilisateur."""
+    role = (role_name or '').strip().lower()
+    action = (action_name or '').strip().lower()
+
+    if role == 'super_admin':
+        return True
+    if role == 'serveuse':
+        return action in {'commande', 'facturer'}
+    if role == 'caissier':
+        return action == 'payer'
+    return False
+
+
 class CatalogueWidget(QWidget):
     """Widget catalogue + panier minimal pour ouverture depuis une table.
 
@@ -893,13 +907,30 @@ class CatalogueWidget(QWidget):
             items = self.controller.list_cart_items(self.panier.id) or []
             is_empty = len(items) == 0
             is_caissier = self._current_user_is_caissier()
+            is_serveuse = self._current_user_is_serveuse()
+            is_super_admin = self._current_user_is_super_admin()
 
             self.cart_title_label.setVisible(not is_empty)
-            self.liberer_table_btn.setVisible(is_empty and not is_caissier)
-            self.annuler_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
-            self.payer_btn.setVisible(not is_empty and not self._current_user_is_serveuse())
-            self.imprimer_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
-            self.bon_btn.setVisible(not is_empty and not is_caissier and not self._current_user_is_serveuse())
+            self.liberer_table_btn.setVisible(is_empty and (is_super_admin or not is_caissier))
+
+            self.annuler_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
+            self.payer_btn.setVisible(not is_empty and (is_super_admin or not is_serveuse))
+            self.imprimer_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
+            self.bon_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
+
+            # La logique métier demandée: serveuse = commander + facturer ; caissier = payer uniquement ; super_admin = tout.
+            if is_serveuse and not is_super_admin:
+                self.annuler_btn.setVisible(False)
+                self.payer_btn.setVisible(False)
+                self.imprimer_btn.setVisible(True)
+                self.bon_btn.setVisible(True)
+
+            if is_caissier and not is_super_admin:
+                self.annuler_btn.setVisible(False)
+                self.payer_btn.setVisible(True)
+                self.imprimer_btn.setVisible(False)
+                self.bon_btn.setVisible(False)
+
             self.cart_table.setVisible(not is_empty)
             self.qty_spin.setVisible(False)
             self.qty_spin.setEnabled(False)
@@ -1371,10 +1402,9 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
-        # If current user is not super_admin, require super_admin authorization
         if not self._current_user_is_super_admin():
-            if not self._require_super_admin_password():
-                return
+            QMessageBox.warning(self, 'Accès refusé', 'Seul le super administrateur peut annuler une commande.')
+            return
         ok = QMessageBox.question(self, 'Annuler la commande', 'Confirmez-vous l\'annulation de cette commande ?', QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if ok != QMessageBox.StandardButton.Yes:
             return
@@ -1455,9 +1485,11 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
-        if self._current_user_is_serveuse():
+        if self._current_user_is_serveuse() and not self._current_user_is_super_admin():
             QMessageBox.warning(self, 'Paiement interdit', 'Une serveuse ne peut pas payer une commande.')
             return
+        if self._current_user_is_caissier() and not self._current_user_is_super_admin():
+            pass
         try:
             # refresh panier from DB to get latest subtotal/remise/total_final
             p = self.vente_ctrl.get_panier(self.panier.id)
@@ -1784,6 +1816,11 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
+        if self._current_user_is_caissier() and not self._current_user_is_super_admin():
+            QMessageBox.warning(self, 'Accès refusé', 'Le caissier ne peut pas facturer une commande.')
+            return
+        if self._current_user_is_serveuse() and not self._current_user_is_super_admin():
+            pass
         try:
             # Build invoice_data expected by InvoicePrintManager.print_receipt_53mm
             items = self.controller.list_cart_items(self.panier.id) or []
@@ -1982,6 +2019,9 @@ class CatalogueWidget(QWidget):
     def _on_bon_commande_clicked(self):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        if self._current_user_is_caissier() and not self._current_user_is_super_admin():
+            QMessageBox.warning(self, 'Accès refusé', 'Le caissier ne peut pas commander ni générer un bon de commande.')
             return
 
         serveuse_id = getattr(self.panier, 'serveuse_id', None)

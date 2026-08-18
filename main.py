@@ -135,13 +135,26 @@ def _run_migrations_silently():
         pass  # Silence toute erreur pour un démarrage fluide
 
 
-def _database_config_path() -> Path:
+def _database_config_directory() -> Path:
+    """Chemin persistant pour la config MySQL, hors du dossier de l'exécutable."""
+    base_dir = Path(os.environ.get('APPDATA', str(Path.home())))
+    config_dir = base_dir / 'Ayanna ERP'
+    config_dir.mkdir(parents=True, exist_ok=True)
+    return config_dir
+
+
+def _legacy_database_config_path() -> Path:
     return project_root / 'database_config.txt'
 
 
+def _database_config_path() -> Path:
+    return _database_config_directory() / 'database_config.txt'
+
+
 def _save_database_config(server: str, database: str, username: str, password: str) -> None:
-    """Enregistre la configuration MySQL dans un fichier texte de projet."""
+    """Enregistre la configuration MySQL dans un fichier persistant, hors du binaire."""
     config_path = _database_config_path()
+    config_path.parent.mkdir(parents=True, exist_ok=True)
     content = (
         f"server={server}\n"
         f"database={database}\n"
@@ -149,6 +162,13 @@ def _save_database_config(server: str, database: str, username: str, password: s
         f"password={password}\n"
     )
     config_path.write_text(content, encoding='utf-8')
+
+    legacy_path = _legacy_database_config_path()
+    if legacy_path.exists() and legacy_path.resolve() != config_path.resolve():
+        try:
+            legacy_path.unlink()
+        except OSError:
+            pass
 
     url = (
         f"mysql+pymysql://{quote_plus(username)}:{quote_plus(password)}@{server}:3306/{database}"
@@ -182,8 +202,17 @@ def _save_database_url_to_env(url: str) -> None:
 
 
 def _load_database_config_from_file() -> dict | None:
-    """Lit le fichier database_config.txt et retourne les valeurs si elles sont complètes."""
+    """Lit la configuration MySQL depuis le répertoire utilisateur, avec migration du legacy."""
     config_path = _database_config_path()
+    legacy_path = _legacy_database_config_path()
+
+    if not config_path.exists() and legacy_path.exists():
+        try:
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            config_path.write_text(legacy_path.read_text(encoding='utf-8'), encoding='utf-8')
+        except Exception:
+            pass
+
     if not config_path.exists():
         return None
 

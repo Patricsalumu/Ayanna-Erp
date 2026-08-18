@@ -6,6 +6,7 @@ from sqlalchemy import text
 
 from ayanna_erp.database.database_manager import DatabaseManager
 from ayanna_erp.modules.boutique.controller.commande_controller import CommandeController
+from ayanna_erp.modules.restaurant.views.catalogue_widget import can_user_perform_restaurant_action
 from main import _get_database_configuration_from_env, _database_config_path, _save_database_config
 
 
@@ -61,6 +62,29 @@ class MySQLCompatibilityTests(unittest.TestCase):
                     config_path.unlink()
             else:
                 config_path.write_text(original, encoding='utf-8')
+
+    def test_database_config_is_stored_outside_the_project_directory(self):
+        config_path = _database_config_path()
+        project_root = Path(__file__).resolve().parents[1]
+        self.assertNotEqual(config_path, project_root / 'database_config.txt')
+        self.assertTrue(config_path.name == 'database_config.txt')
+        self.assertIn('Ayanna ERP', str(config_path))
+
+    def test_restaurant_permissions_follow_role_rules(self):
+        self.assertTrue(can_user_perform_restaurant_action('super_admin', 'commande'))
+        self.assertTrue(can_user_perform_restaurant_action('super_admin', 'facturer'))
+        self.assertTrue(can_user_perform_restaurant_action('super_admin', 'payer'))
+        self.assertTrue(can_user_perform_restaurant_action('super_admin', 'annuler'))
+
+        self.assertTrue(can_user_perform_restaurant_action('serveuse', 'commande'))
+        self.assertTrue(can_user_perform_restaurant_action('serveuse', 'facturer'))
+        self.assertFalse(can_user_perform_restaurant_action('serveuse', 'payer'))
+        self.assertFalse(can_user_perform_restaurant_action('serveuse', 'annuler'))
+
+        self.assertFalse(can_user_perform_restaurant_action('caissier', 'commande'))
+        self.assertFalse(can_user_perform_restaurant_action('caissier', 'facturer'))
+        self.assertFalse(can_user_perform_restaurant_action('caissier', 'annuler'))
+        self.assertTrue(can_user_perform_restaurant_action('caissier', 'payer'))
 
     def test_mysql_safe_cast_uses_char_instead_of_text(self):
         cast_sql = CommandeController._mysql_safe_cast('rp.id')
