@@ -32,9 +32,9 @@ if venv_site_packages.exists():
         sys.path.insert(0, str(site_pkg))
 
 try:
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication, QSplashScreen
     from PyQt6.QtCore import Qt
-    from PyQt6.QtGui import QIcon
+    from PyQt6.QtGui import QIcon, QPainter, QFont, QPixmap, QColor, QPen
     from ayanna_erp.database.database_manager import DatabaseManager
     from ayanna_erp.ui.login_window import LoginWindow
     from ayanna_erp.core.config import Config
@@ -534,6 +534,89 @@ def _show_database_error_dialog(error_message: str, existing: dict | None = None
     return action["value"]
 
 
+def _create_startup_splash(app: QApplication) -> QSplashScreen:
+    """Affiche un splash discret et professionnel avant la fenêtre de connexion."""
+    pixmap = QPixmap(760, 440)
+    pixmap.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+    bg = QColor('#0b1220')
+    panel = QColor('#111827')
+    panel_alt = QColor('#172033')
+    accent = QColor('#22c55e')
+    accent_soft = QColor('#86efac')
+    text = QColor('#f8fafc')
+    soft = QColor('#cbd5e1')
+    line = QColor('#1f2937')
+
+    painter.fillRect(0, 0, pixmap.width(), pixmap.height(), bg)
+    painter.fillRect(26, 26, pixmap.width() - 52, pixmap.height() - 52, panel)
+
+    painter.setPen(QPen(QColor('#1d2a3a'), 1))
+    painter.drawRect(46, 46, pixmap.width() - 92, pixmap.height() - 92)
+
+    painter.setPen(QPen(accent, 3))
+    painter.drawLine(52, 76, 210, 76)
+
+    painter.setPen(QPen(text, 1))
+    title_font = QFont('Segoe UI', 18, QFont.Weight.Bold)
+    painter.setFont(title_font)
+    painter.drawText(56, 110, "AYANNA ERP")
+
+    painter.setPen(QPen(soft, 1))
+    subtitle_font = QFont('Segoe UI', 12)
+    painter.setFont(subtitle_font)
+    painter.drawText(56, 150, "Démarrage en cours...")
+
+    body_font = QFont('Segoe UI', 11)
+    painter.setFont(body_font)
+    painter.setPen(QPen(text, 1))
+    lines = [
+        "Votre entreprise vous échappe ?",
+        "",
+        "Reprenez le contrôle et maîtrisez",
+        "votre business dès aujourd’hui.",
+        "",
+        "Ayanna ERP combine informatique, comptabilité et contrôle de gestion",
+        "pour vous donner une vision claire de votre entreprise.",
+        "Fini les pertes invisibles et les erreurs de caisse.",
+        "Une solution simple, avec ou sans Internet, pensée pour les PME congolaises.",
+    ]
+
+    y = 180
+    for line in lines:
+        painter.setPen(QPen(text if line else soft, 1))
+        painter.drawText(56, y, line)
+        y += 22
+
+    loader_center_x = int(pixmap.width() - 150)
+    loader_center_y = int(pixmap.height() / 2 + 20)
+    loader_radius = 28
+
+    painter.setPen(QPen(QColor('#334155'), 4, Qt.PenStyle.SolidLine))
+    painter.drawEllipse(loader_center_x - loader_radius, loader_center_y - loader_radius,
+                       loader_radius * 2, loader_radius * 2)
+
+    painter.setPen(QPen(accent_soft, 4, Qt.PenStyle.SolidLine))
+    painter.drawArc(loader_center_x - loader_radius + 5, loader_center_y - loader_radius + 5,
+                   (loader_radius * 2) - 10, (loader_radius * 2) - 10, 90 * 16, -300 * 16)
+
+    painter.setPen(QPen(accent, 1))
+    painter.setFont(QFont('Segoe UI', 10, QFont.Weight.Bold))
+    painter.drawText(loader_center_x - 68, loader_center_y + 62, "Chargement")
+
+    painter.end()
+
+    splash = QSplashScreen(pixmap)
+    splash.setWindowFlags(Qt.WindowType.SplashScreen | Qt.WindowType.FramelessWindowHint)
+    splash.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    splash.show()
+    app.processEvents()
+    return splash
+
+
 def main():
     """Point d'entrée principal de l'application Ayanna ERP"""
     if getattr(sys, 'frozen', False):
@@ -556,6 +639,8 @@ def main():
     app.setApplicationVersion("1.0.0")
     app.setOrganizationName("Ayanna Tech")
     app.setStyle('Fusion')
+
+    splash = _create_startup_splash(app)
 
     while True:
         try:
@@ -645,6 +730,9 @@ def main():
             login_window.setWindowIcon(QIcon(icon_path))
     except Exception:
         pass
+
+    if splash is not None:
+        splash.finish(login_window)
     login_window.show()
     
     # Démarrer la boucle d'événements
