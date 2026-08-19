@@ -71,6 +71,7 @@ class CatalogueWidget(QWidget):
         self.selected_cart_row = None
         self._pending_product_additions = {}
         self._persisted_cart_items = None
+        self._category_initialized = False
         # keypad buffer (string)
         self._keypad_buffer = ""
         # finish initialization
@@ -841,6 +842,12 @@ class CatalogueWidget(QWidget):
         except Exception:
             cats = []
 
+        if not self._category_initialized:
+            if cats:
+                self.selected_category = getattr(cats[0], 'id', None)
+                all_btn.setChecked(False)
+            self._category_initialized = True
+
     # Ensure each visible category gets a unique color from the palette.
         palette = [
             '#F44336', '#9C27B0', '#4CAF50', '#3F51B5', '#FF9800',
@@ -859,6 +866,7 @@ class CatalogueWidget(QWidget):
             cid = getattr(c, 'id', None)
             btn = QPushButton(cname)
             btn.setCheckable(True)
+            btn.setChecked(cid == self.selected_category)
             # preferred color from deterministic helper
             preferred = self._category_color(cname, cid)
             col = preferred

@@ -12544,3 +12544,14 @@ after_login_window_created: 4.251s
 before_app_exec: 5.404s
 after_app_exec: 83.714s
 exit: 83.715s
+script_start: 0.000s
+after_imports: 1.137s
+before_qapplication: 1.138s
+after_qapplication: 1.179s
+before_db_init: 3.697s
+database_seed_is_externalized: 3.698s
+before_licence_check: 3.698s
+after_login_window_created: 3.717s
+before_app_exec: 4.851s
+after_app_exec: 44.609s
+exit: 44.610s
