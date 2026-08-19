@@ -38,7 +38,6 @@ class TableButton(QPushButton):
             int(getattr(table_obj, "pos_y", 0) or 0)
         )
 
-        self.apply_style()
 
     def set_loading(self, loading):
         if loading:
@@ -332,7 +331,6 @@ class VenteView(QWidget):
 
             if hasattr(self, 'ensure_first_salle_loaded'):
                 QTimer.singleShot(0, self.ensure_first_salle_loaded)
-                QTimer.singleShot(50, self.ensure_first_salle_loaded)
         except Exception:
             pass
 
@@ -415,12 +413,8 @@ class VenteView(QWidget):
     def _refresh_current_restaurant_state(self):
         """Recharge le plan et le catalogue pour resynchroniser les postes distants."""
         try:
-            if hasattr(self, 'current_salle_id') and self.current_salle_id:
-                self.load_tables_for_salle(self.current_salle_id)
-        except Exception:
-            pass
-
-        try:
+            SalleController.clear_tables_cache()
+            SalleController.clear_salles_cache()
             self._reload_vente_for_current_user()
         except Exception:
             pass
@@ -738,19 +732,27 @@ class VenteView(QWidget):
 
         serveuses_set = set()
         table_serveuses = {}
+        serveuse_names_cache = {}
+        panier_by_table = self.vente_ctrl.get_open_paniers_for_tables([t.id for t in tables])
+        self.plan_frame.setUpdatesEnabled(False)
 
         for t in tables:
             btn = TableButton(t, self)
+            panier = panier_by_table.get(t.id)
 
             serveuse_name = None
             table_serveuse_id = getattr(t, 'serveuse_id', None)
             if table_serveuse_id not in (None, '', 0):
-                serveuse_name = self._resolve_serveuse_name(table_serveuse_id)
+                if table_serveuse_id not in serveuse_names_cache:
+                    serveuse_names_cache[table_serveuse_id] = self._resolve_serveuse_name(table_serveuse_id)
+                serveuse_name = serveuse_names_cache[table_serveuse_id]
 
             if not serveuse_name:
-                panier = self.vente_ctrl.get_open_panier_for_table(t.id)
                 if panier and getattr(panier, 'serveuse_id', None) not in (None, '', 0):
-                    serveuse_name = self._resolve_serveuse_name(getattr(panier, 'serveuse_id', None))
+                    panier_serveuse_id = getattr(panier, 'serveuse_id', None)
+                    if panier_serveuse_id not in serveuse_names_cache:
+                        serveuse_names_cache[panier_serveuse_id] = self._resolve_serveuse_name(panier_serveuse_id)
+                    serveuse_name = serveuse_names_cache[panier_serveuse_id]
 
             if serveuse_name:
                 btn.serveuse_name = serveuse_name
@@ -759,12 +761,8 @@ class VenteView(QWidget):
             else:
                 btn.serveuse_name = None
 
-            panier = self.vente_ctrl.get_open_panier_for_table(t.id)
             if panier:
-                try:
-                    total, _ = self.vente_ctrl.get_panier_total(panier.id)
-                except Exception:
-                    total = None
+                total = getattr(panier, 'subtotal', None)
 
                 if total is None:
                     occ = True
@@ -775,12 +773,19 @@ class VenteView(QWidget):
                     except Exception:
                         occ = total
 
+                btn._cached_panier = panier
+                btn._cached_occupied = occ
                 btn.apply_style(occupied=occ)
             else:
+                btn._cached_panier = None
+                btn._cached_occupied = False
                 btn.apply_style(occupied=False)
 
             btn.show()
             self.table_buttons[t.id] = btn
+
+        self.plan_frame.setUpdatesEnabled(True)
+        self.plan_frame.update()
 
         if not serveuses_set and user_role in {'serveuse', 'waitress'}:
             current_name = self._resolve_serveuse_name(current_user_id)
@@ -908,25 +913,7 @@ class VenteView(QWidget):
             try:
                 # Guard against stale/deleted PyQt widgets without importing the sip package.
                 prev_btn.isVisible()
-                panier = self.vente_ctrl.get_open_panier_for_table(prev_btn.table_id)
-                total = None
-                if panier:
-                    try:
-                        total, _ = self.vente_ctrl.get_panier_total(panier.id)
-                    except Exception:
-                        total = None
-
-                if panier:
-                    if total is None:
-                        occ_prev = True
-                    else:
-                        try:
-                            num_total = float(total)
-                            occ_prev = num_total if num_total > 0 else True
-                        except Exception:
-                            occ_prev = total
-                else:
-                    occ_prev = False
+                occ_prev = getattr(prev_btn, '_cached_occupied', False)
 
                 try:
                     prev_btn.apply_style(occupied=occ_prev, selected=False)
@@ -935,40 +922,7 @@ class VenteView(QWidget):
             except Exception:
                 self.active_table_btn = None
 
-        panier = self.vente_ctrl.get_open_panier_for_table(table_button.table_id)
-        total = None
-        if panier:
-            try:
-                total, _ = self.vente_ctrl.get_panier_total(panier.id)
-                # ✅ Récupérer le nom de la serveuse pour la table sélectionnée
-                try:
-                    if getattr(panier, 'serveuse_id', None):
-                        from ayanna_erp.database.database_manager import User as DBUser
-                        db = get_database_manager()
-                        session = db.get_session()
-                        u = session.query(DBUser).filter_by(id=panier.serveuse_id).first()
-                        if u:
-                            table_button.serveuse_name = getattr(u, 'name', None) or getattr(u, 'email', None) or str(u.id)
-                        session.close()
-                    else:
-                        table_button.serveuse_name = None
-                except Exception:
-                    table_button.serveuse_name = None
-            except Exception:
-                total = None
-
-        if panier:
-            # panier exists -> occupied; display numeric badge only if total > 0
-            if total is None:
-                occ_new = True
-            else:
-                try:
-                    num_total = float(total)
-                    occ_new = num_total if num_total > 0 else True
-                except Exception:
-                    occ_new = total
-        else:
-            occ_new = False
+        occ_new = getattr(table_button, '_cached_occupied', False)
 
         try:
             table_button.apply_style(occupied=occ_new, selected=True)

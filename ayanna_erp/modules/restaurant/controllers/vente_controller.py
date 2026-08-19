@@ -5,7 +5,7 @@ from decimal import Decimal
 from datetime import datetime
 from types import SimpleNamespace
 from ayanna_erp.database.database_manager import get_database_manager
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.orm.exc import DetachedInstanceError
 import logging
 from ayanna_erp.modules.restaurant.models.restaurant import (
@@ -356,6 +356,64 @@ class VenteController:
                 reste_a_payer=reste,
                 total_paid=total_paid
             )
+
+    def get_open_paniers_for_tables(self, table_ids):
+        """Charge les paniers ouverts de plusieurs tables en une seule requête."""
+        table_ids = [table_id for table_id in table_ids if table_id is not None]
+        if not table_ids:
+            return {}
+
+        with self.db.session_scope() as session:
+            payment_totals = (
+                session.query(
+                    RestauPayment.panier_id.label('panier_id'),
+                    func.coalesce(func.sum(RestauPayment.amount), 0.0).label('total_paid')
+                )
+                .group_by(RestauPayment.panier_id)
+                .subquery()
+            )
+            rows = (
+                session.query(RestauPanier, ShopClient, payment_totals.c.total_paid)
+                .outerjoin(ShopClient, ShopClient.id == RestauPanier.client_id)
+                .outerjoin(payment_totals, payment_totals.c.panier_id == RestauPanier.id)
+                .filter(
+                    RestauPanier.table_id.in_(table_ids),
+                    RestauPanier.status == 'en_cours',
+                    RestauPanier.entreprise_id == self.entreprise_id,
+                )
+                .all()
+            )
+
+            result = {}
+            for panier, client, total_paid in rows:
+                client_name = None
+                if client:
+                    nom = getattr(client, 'nom', None) or ''
+                    prenom = getattr(client, 'prenom', None) or ''
+                    client_name = f"{prenom} {nom}".strip() if prenom else nom
+
+                paid = float(total_paid or 0.0)
+                total_final = float(panier.total_final or 0.0)
+                payment_status, change, reste = self._calculate_payment_status(paid, total_final)
+                result[panier.table_id] = SimpleNamespace(
+                    id=panier.id,
+                    table_id=panier.table_id,
+                    client_id=panier.client_id,
+                    client_name=client_name,
+                    serveuse_id=panier.serveuse_id,
+                    user_id=panier.user_id,
+                    status=panier.status,
+                    subtotal=panier.subtotal,
+                    remise_amount=panier.remise_amount,
+                    total_final=panier.total_final,
+                    created_at=panier.created_at,
+                    updated_at=panier.updated_at,
+                    payment_status=payment_status,
+                    change=change,
+                    reste_a_payer=reste,
+                    total_paid=paid,
+                )
+            return result
 
     def get_panier_total(self, panier_id):
         """Calcule le total payé et le total final du panier"""

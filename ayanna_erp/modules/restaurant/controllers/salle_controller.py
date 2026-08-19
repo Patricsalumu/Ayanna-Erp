@@ -11,6 +11,7 @@ from threading import RLock
 
 
 class SalleController:
+    _salles_cache = {}
     _tables_cache = {}
     _cache_lock = RLock()
 
@@ -28,6 +29,7 @@ class SalleController:
             session.add(salle)
             session.commit()
             session.refresh(salle)
+            self.clear_salles_cache()
             data = {k: v for k, v in salle.__dict__.items() if not k.startswith('_')}
             ns = SimpleNamespace(**data)
             session.expunge(salle)
@@ -66,6 +68,11 @@ class SalleController:
             self.db.close_session()
 
     def list_salles(self):
+        with self._cache_lock:
+            cached = self._salles_cache.get(self.entreprise_id)
+        if cached is not None:
+            return cached
+
         session = self.db.get_session()
         try:
             rows = session.query(RestauSalle).filter_by(entreprise_id=self.entreprise_id).all()
@@ -73,6 +80,8 @@ class SalleController:
             for r in rows:
                 data = {k: v for k, v in r.__dict__.items() if not k.startswith('_')}
                 result.append(SimpleNamespace(**data))
+            with self._cache_lock:
+                self._salles_cache[self.entreprise_id] = result
             return result
         finally:
             self.db.close_session()
@@ -166,3 +175,8 @@ class SalleController:
     def clear_tables_cache(cls):
         with cls._cache_lock:
             cls._tables_cache.clear()
+
+    @classmethod
+    def clear_salles_cache(cls):
+        with cls._cache_lock:
+            cls._salles_cache.clear()
