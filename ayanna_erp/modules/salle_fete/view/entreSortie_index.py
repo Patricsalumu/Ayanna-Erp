@@ -161,11 +161,11 @@ class DepenseDialog(QDialog):
     def load_comptes_charges(self):
         """Charger les comptes de charges (classe 6) depuis la base de données filtrés par entreprise"""
         try:
-            from ayanna_erp.database.database_manager import DatabaseManager
+            from ayanna_erp.database.database_manager import get_database_manager
             from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaComptes, ComptaClasses
             
-            db_manager = DatabaseManager()
-            session = db_manager.get_session()
+            db_manager = get_database_manager()
+            session = db_manager.SessionLocal()
             
             # Importer et utiliser le SessionManager
             from ayanna_erp.core.session_manager import SessionManager
@@ -679,11 +679,15 @@ class EntreeSortieIndex(QWidget):
             except Exception as _:
                 pass
 
-            session.close()
             print(f"✅ {len(comptes)} comptes financiers chargés pour l'entreprise {enterprise_id}")
 
         except Exception as e:
             print(f"Erreur chargement comptes financiers: {e}")
+        finally:
+            try:
+                session.close()
+            except Exception:
+                pass
 
     def on_journal_row_double_clicked(self, row, column):
         """
@@ -1318,12 +1322,12 @@ class EntreeSortieIndex(QWidget):
     def get_account_global_balance(self, account_id):
         """Retourne le solde global (débit - crédit) pour un compte comptable donné."""
         try:
-            from ayanna_erp.database.database_manager import DatabaseManager
+            from ayanna_erp.database.database_manager import get_database_manager
             from ayanna_erp.modules.comptabilite.model.comptabilite import ComptaEcritures
             from sqlalchemy import func
 
-            db_manager = DatabaseManager()
-            session = db_manager.get_session()
+            db_manager = get_database_manager()
+            session = db_manager.SessionLocal()
 
             balance_expr = (func.coalesce(func.sum(ComptaEcritures.debit), 0) - func.coalesce(func.sum(ComptaEcritures.credit), 0))
             bal = session.query(balance_expr).filter(ComptaEcritures.compte_comptable_id == account_id).scalar()

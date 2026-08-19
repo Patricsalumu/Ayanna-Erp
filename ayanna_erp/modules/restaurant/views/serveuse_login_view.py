@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QGridLayout, QPushButton, QLabel, QLineEdit, QMessageBox, QApplication
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 
-from ayanna_erp.database.database_manager import DatabaseManager, User
+from ayanna_erp.database.database_manager import get_database_manager, User
 from ayanna_erp.core.session_manager import SessionManager
 
 
@@ -13,7 +13,7 @@ class ServeuseLoginView(QDialog):
     def __init__(self, entreprise_id=1, parent=None):
         super().__init__(parent)
         self.entreprise_id = entreprise_id
-        self.db = DatabaseManager()
+        self.db = get_database_manager()
         self.password = ""
         self.setWindowModality(Qt.WindowModality.ApplicationModal)
         self._setup_ui()

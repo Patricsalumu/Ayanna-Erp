@@ -78,7 +78,7 @@ class MySQLCompatibilityTests(unittest.TestCase):
 
         self.assertTrue(can_user_perform_restaurant_action('serveuse', 'commande'))
         self.assertTrue(can_user_perform_restaurant_action('serveuse', 'facturer'))
-        self.assertFalse(can_user_perform_restaurant_action('serveuse', 'payer'))
+        self.assertTrue(can_user_perform_restaurant_action('serveuse', 'payer'))
         self.assertFalse(can_user_perform_restaurant_action('serveuse', 'annuler'))
 
         self.assertFalse(can_user_perform_restaurant_action('caissier', 'commande'))

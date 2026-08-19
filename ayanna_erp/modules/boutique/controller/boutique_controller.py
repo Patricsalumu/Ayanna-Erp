@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from PyQt6.QtCore import QObject, pyqtSignal
 
-from ayanna_erp.database.database_manager import DatabaseManager
+from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.core.models import CoreProduct, CoreProductCategory
 from ..model.models import (
     ShopClient, ShopService,
@@ -27,9 +27,9 @@ class BoutiqueController(QObject):
     payment_completed = pyqtSignal(int)  # ID du paiement
     stock_updated = pyqtSignal(int)  # ID du produit
     
-    def __init__(self, pos_id: int = None, entreprise_id: int = None):
+    def __init__(self, pos_id: int = None, entreprise_id: int = None, db_manager=None):
         super().__init__()
-        self.db_manager = DatabaseManager()
+        self.db_manager = db_manager or get_database_manager()
         
         # Crée une session persistante pour widgets/controllers
         self.session = self.db_manager.get_session()  # instance de sqlalchemy.orm.Session

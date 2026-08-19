@@ -8,6 +8,7 @@ from PyQt6.QtGui import QColor, QFont, QPainter
 
 from ayanna_erp.modules.restaurant.controllers.salle_controller import SalleController
 from ayanna_erp.modules.restaurant.controllers.vente_controller import VenteController
+from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
 from ayanna_erp.modules.restaurant.views.catalogue_widget import CatalogueWidget
 from ayanna_erp.database.database_manager import get_database_manager, Entreprise
 from ayanna_erp.utils.formatting import get_currency
@@ -25,6 +26,8 @@ class TableButton(QPushButton):
         self.table_id = table_obj.id
         self.parent_view = parent_view
         self.serveuse_name = None  # ✅ Stocker le nom de la serveuse
+        self._loading_timer = None
+        self._loading_label = None
 
         w = int(getattr(table_obj, "width", 80) or 80)
         h = int(getattr(table_obj, "height", 80) or 80)
@@ -36,6 +39,56 @@ class TableButton(QPushButton):
         )
 
         self.apply_style()
+
+    def set_loading(self, loading):
+        if loading:
+            if self._loading_label is not None:
+                return
+            self._loading_label = QLabel("Chargement...", self)
+            self._loading_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._loading_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            self._loading_label.setStyleSheet("""
+                QLabel {
+                    background: rgba(31, 41, 55, 0.88);
+                    color: white;
+                    border-radius: 8px;
+                    padding: 4px 6px;
+                    font-size: 11px;
+                    font-weight: bold;
+                }
+            """)
+            self._loading_label.adjustSize()
+            self._loading_label.move(
+                (self.width() - self._loading_label.width()) // 2,
+                (self.height() - self._loading_label.height()) // 2,
+            )
+            self._loading_label.show()
+            self._loading_label.raise_()
+
+            self._loading_step = 0
+            self._loading_timer = QTimer(self)
+            self._loading_timer.timeout.connect(self._animate_loading)
+            self._loading_timer.start(350)
+            return
+
+        if self._loading_timer is not None:
+            self._loading_timer.stop()
+            self._loading_timer.deleteLater()
+            self._loading_timer = None
+        if self._loading_label is not None:
+            self._loading_label.deleteLater()
+            self._loading_label = None
+
+    def _animate_loading(self):
+        if self._loading_label is None:
+            return
+        self._loading_step = (self._loading_step + 1) % 4
+        self._loading_label.setText(f"Chargement{'.' * self._loading_step}")
+        self._loading_label.adjustSize()
+        self._loading_label.move(
+            (self.width() - self._loading_label.width()) // 2,
+            (self.height() - self._loading_label.height()) // 2,
+        )
 
     def apply_style(self, occupied=False, selected=False):
         # Couleurs cohérentes avec ton image Ayanna Cloud
@@ -153,8 +206,9 @@ class TableButton(QPushButton):
 
     def mousePressEvent(self, event):
         super().mousePressEvent(event)
+        self.set_loading(True)
         self.parent_view.select_table_button(self)
-        self.parent_view.open_table_panel(self.table_id)
+        self.parent_view.open_table_panel(self.table_id, self)
 
 
 # ----------------------------------------------------------------------
@@ -168,6 +222,10 @@ class VenteView(QWidget):
 
         self.salle_ctrl = SalleController(entreprise_id=entreprise_id)
         self.vente_ctrl = VenteController(entreprise_id=entreprise_id)
+        try:
+            CatalogueController.preload_cache(entreprise_id=entreprise_id, pos_id=1)
+        except Exception as exc:
+            print(f"Préchargement du catalogue restaurant impossible: {exc}")
 
         self.table_buttons = {}
         self.current_salle_id = None
@@ -971,7 +1029,7 @@ class VenteView(QWidget):
         anim.finished.connect(lambda: (overlay.deleteLater(), setattr(self, '_loading_overlay', None), setattr(self, '_loading_label', None)))
         anim.start()
 
-    def _build_catalog_for_table(self, table_id):
+    def _build_catalog_for_table(self, table_id, table_button=None):
         try:
             new_cat_page = QWidget()
             new_cat_layout = QVBoxLayout(new_cat_page)
@@ -1005,8 +1063,11 @@ class VenteView(QWidget):
         except Exception as e:
             self._hide_light_loading_overlay()
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
+        finally:
+            if table_button is not None:
+                table_button.set_loading(False)
 
-    def open_table_panel(self, table_id):
+    def open_table_panel(self, table_id, table_button=None):
         """Afficher le catalogue EMBARQUÉ dans l'onglet vente (page du QStackedWidget).
 
         On remplace l'ancien comportement modal par l'affichage dans la page catalogue
@@ -1014,8 +1075,10 @@ class VenteView(QWidget):
         """
         try:
             self._show_light_loading_overlay('Chargement...')
-            QTimer.singleShot(80, lambda: self._build_catalog_for_table(table_id))
+            QTimer.singleShot(80, lambda: self._build_catalog_for_table(table_id, table_button))
         except Exception as e:
+            if table_button is not None:
+                table_button.set_loading(False)
             QMessageBox.critical(self, 'Erreur', f"Erreur table panel: {e}")
 
     def show_plan_view(self):

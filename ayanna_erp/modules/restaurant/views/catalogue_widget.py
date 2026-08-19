@@ -2,10 +2,11 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QScrollArea,
     QFrame, QLabel, QPushButton, QLineEdit, QSpinBox, QTableWidget,
     QTableWidgetItem, QHeaderView, QMessageBox, QComboBox, QDialog,
-    QSplitter, QTextEdit, QDoubleSpinBox, QSizePolicy
+    QSplitter, QTextEdit, QDoubleSpinBox, QSizePolicy, QGraphicsOpacityEffect
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer, QAbstractAnimation
 from PyQt6.QtGui import QFont, QPixmap
+from types import SimpleNamespace
 
 
 from ayanna_erp.modules.restaurant.controllers.catalogue_controller import CatalogueController
@@ -68,6 +69,8 @@ class CatalogueWidget(QWidget):
         self.panier = None
         self.selected_line_id = None
         self.selected_cart_row = None
+        self._pending_product_additions = {}
+        self._persisted_cart_items = None
         # keypad buffer (string)
         self._keypad_buffer = ""
         # finish initialization
@@ -103,6 +106,11 @@ class CatalogueWidget(QWidget):
 
     def _return_to_vente_view(self):
         """Retourne automatiquement à la vue vente lorsque le widget est contenu dans le QStackedWidget du plan."""
+        try:
+            self._sync_pending_products()
+        except Exception as exc:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer les produits avant le retour : {exc}")
+            return False
         parent = self.parent()
         while parent is not None:
             if hasattr(parent, 'show_plan_view') and callable(parent.show_plan_view):
@@ -199,7 +207,7 @@ class CatalogueWidget(QWidget):
         # Refresh button to reload products / cart quickly
         try:
             refresh_btn = QPushButton('🔄 Rafraîchir')
-            refresh_btn.clicked.connect(lambda: (self.load_products(), self.refresh_cart()))
+            refresh_btn.clicked.connect(self._refresh_catalog)
             search_h.addWidget(refresh_btn)
         except Exception:
             pass
@@ -379,15 +387,15 @@ class CatalogueWidget(QWidget):
             pass
         try:
             # open payment dialog
-            self.payer_btn.clicked.connect(self._on_payer_dialog)
+            self.payer_btn.clicked.connect(lambda: self._run_guarded_action(self.payer_btn, self._on_payer_dialog, '_payment_in_progress'))
         except Exception:
             pass
         try:
-            self.imprimer_btn.clicked.connect(self._on_imprimer_clicked)
+            self.imprimer_btn.clicked.connect(lambda: self._run_guarded_action(self.imprimer_btn, self._on_imprimer_clicked, '_invoice_in_progress'))
         except Exception:
             pass
         try:
-            self.bon_btn.clicked.connect(self._on_bon_commande_clicked)
+            self.bon_btn.clicked.connect(lambda: self._run_guarded_action(self.bon_btn, self._on_bon_commande_clicked, '_order_in_progress'))
         except Exception:
             pass
         try:
@@ -516,6 +524,39 @@ class CatalogueWidget(QWidget):
         # ensure some stretch so cards align top
         self.products_layout.setRowStretch((len(products) // cols) + 1, 1)
 
+    def _refresh_catalog(self):
+        CatalogueController.clear_catalog_cache()
+        self._populate_category_buttons()
+        self.load_products()
+        self.refresh_cart()
+
+    def _flash_widget(self, widget):
+        effect = QGraphicsOpacityEffect(widget)
+        widget.setGraphicsEffect(effect)
+        animation = QPropertyAnimation(effect, b'opacity', widget)
+        animation.setDuration(180)
+        animation.setStartValue(1.0)
+        animation.setKeyValueAt(0.45, 0.62)
+        animation.setEndValue(1.0)
+        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        animation.finished.connect(lambda: widget.setGraphicsEffect(None))
+        animation.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+
+    def _run_guarded_action(self, button, handler, state_name):
+        if getattr(self, state_name, False):
+            return
+        was_enabled = button.isEnabled()
+        if not was_enabled:
+            return
+        setattr(self, state_name, True)
+        button.setEnabled(False)
+        self._flash_widget(button)
+        try:
+            handler()
+        finally:
+            setattr(self, state_name, False)
+            button.setEnabled(was_enabled)
+
     def create_product_card(self, product):
         """
         Crée une carte produit visuellement proche du style Ayanna Cloud :
@@ -539,19 +580,7 @@ class CatalogueWidget(QWidget):
                 category = getattr(product, 'category_name')
             elif cat_id:
                 # lookup in core_product_categories using the core model
-                db = get_database_manager()
-                session = db.get_session()
-                try:
-                    from ayanna_erp.modules.core.models.core_products import CoreProductCategory
-                    # Ensure we only pick categories for the current enterprise
-                    cat_obj = session.query(CoreProductCategory).filter_by(id=cat_id, entreprise_id=self.entreprise_id).first()
-                    if cat_obj:
-                        category = getattr(cat_obj, 'name', None)
-                finally:
-                    try:
-                        session.close()
-                    except Exception:
-                        pass
+                category = self.controller.get_category_name(cat_id)
         except Exception:
             category = None
 
@@ -722,11 +751,17 @@ class CatalogueWidget(QWidget):
 
         # ---- Clic sur la carte ----
         def _on_click(prod_id=getattr(product, 'id', None)):
+            if card.property('product_click_locked'):
+                return
+            card.setProperty('product_click_locked', True)
+            self._flash_widget(card)
             try:
                 self.add_product(prod_id)
                 self._update_badges()
             except Exception as e:
                 QMessageBox.critical(self, 'Erreur', str(e))
+            finally:
+                QTimer.singleShot(280, lambda: card.setProperty('product_click_locked', False))
 
         card.mousePressEvent = lambda event: _on_click()
         # store product id on card so badges can be updated in-place
@@ -746,6 +781,7 @@ class CatalogueWidget(QWidget):
             for it in items:
                 if getattr(it, 'product_id', None) == product_id:
                     total += float(getattr(it, 'quantity', 0))
+            total += float(self._pending_product_additions.get(product_id, {}).get('quantity', 0) or 0)
             return total
         except Exception:
             return 0
@@ -892,8 +928,9 @@ class CatalogueWidget(QWidget):
             self.ensure_panier()
             # add with default qty 1 and product price
             price = float(getattr(prod, 'price_unit', getattr(prod, 'price', 0)))
-            self.controller.add_product_to_panier(self.panier.id, product_id, 1, price)
-            self.refresh_cart()
+            pending = self._pending_product_additions.setdefault(product_id, {'quantity': 0, 'price': price})
+            pending['quantity'] += 1
+            self.refresh_cart(read_database=False)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'ajouter le produit: {e}")
 
@@ -904,8 +941,11 @@ class CatalogueWidget(QWidget):
             if not self.panier:
                 self.liberer_table_btn.hide()
                 return
-            items = self.controller.list_cart_items(self.panier.id) or []
-            is_empty = len(items) == 0
+            items = self._persisted_cart_items
+            if items is None:
+                items = list(self.controller.list_cart_items(self.panier.id) or [])
+                self._persisted_cart_items = items
+            is_empty = len(items) == 0 and not self._pending_product_additions
             is_caissier = self._current_user_is_caissier()
             is_serveuse = self._current_user_is_serveuse()
             is_super_admin = self._current_user_is_super_admin()
@@ -999,10 +1039,33 @@ class CatalogueWidget(QWidget):
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible de libérer la table: {e}")
 
-    def refresh_cart(self):
+    def refresh_cart(self, read_database=True):
         if not self.panier:
             return
-        items = self.controller.list_cart_items(self.panier.id)
+        if read_database or self._persisted_cart_items is None:
+            self._persisted_cart_items = list(self.controller.list_cart_items(self.panier.id) or [])
+        items = [SimpleNamespace(**{
+            key: value for key, value in item.__dict__.items()
+            if not key.startswith('_')
+        }) for item in self._persisted_cart_items]
+        merged_product_ids = set()
+        for item in items:
+            product_id = getattr(item, 'product_id', None)
+            pending = self._pending_product_additions.get(product_id)
+            if pending:
+                item.quantity = float(getattr(item, 'quantity', 0) or 0) + pending['quantity']
+                item.total = item.quantity * float(getattr(item, 'price', pending['price']) or pending['price'])
+                merged_product_ids.add(product_id)
+        for product_id, pending in self._pending_product_additions.items():
+            if product_id in merged_product_ids or pending['quantity'] <= 0:
+                continue
+            items.append(SimpleNamespace(
+                id=-int(product_id),
+                product_id=product_id,
+                quantity=pending['quantity'],
+                price=pending['price'],
+                total=pending['quantity'] * pending['price'],
+            ))
         # remember selected line id
         sel_id = getattr(self, 'selected_line_id', None)
         self.cart_table.setRowCount(0)
@@ -1082,19 +1145,37 @@ class CatalogueWidget(QWidget):
     def _get_current_line_quantity(self, lp_id):
         """Retourne la quantité réelle enregistrée dans le panier, sans dépendre du dernier état affiché dans la table."""
         try:
+            row = self.selected_cart_row
+            if row is not None and row < self.cart_table.rowCount():
+                return int(float(self.cart_table.item(row, 2).text() or 0))
+        except Exception:
+            pass
+        try:
             items = self.controller.list_cart_items(self.panier.id)
             for it in items:
                 if int(getattr(it, 'id', 0)) == int(lp_id):
                     return int(float(getattr(it, 'quantity', 0) or 0))
         except Exception:
             pass
-        try:
-            row = self.selected_cart_row
-            if row is not None and row < self.cart_table.rowCount():
-                return int(float(self.cart_table.item(row, 2).text() or 0))
-        except Exception:
-            pass
         return 1
+
+    def _pending_product_for_line(self, lp_id):
+        if lp_id >= 0:
+            return None
+        product_id = abs(lp_id)
+        return product_id if product_id in self._pending_product_additions else None
+
+    def _sync_pending_products(self):
+        if not self._pending_product_additions:
+            return True
+        if not self.panier:
+            return False
+        self.controller.add_products_to_panier(self.panier.id, self._pending_product_additions)
+        self._pending_product_additions.clear()
+        self._persisted_cart_items = None
+        self.panier = self.vente_ctrl.get_panier(self.panier.id)
+        self.refresh_cart()
+        return True
 
     def increment_selected_qty(self):
         if self.selected_cart_row is None:
@@ -1104,9 +1185,15 @@ class CatalogueWidget(QWidget):
         current = self._get_current_line_quantity(lp_id)
         newq = current + 1
         try:
-            self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            product_id = self._pending_product_for_line(lp_id)
+            if product_id is not None:
+                self._pending_product_additions[product_id]['quantity'] = newq
+                read_database = False
+            else:
+                self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+                read_database = True
             self.selected_line_id = lp_id
-            self.refresh_cart()
+            self.refresh_cart(read_database=read_database)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
 
@@ -1121,9 +1208,15 @@ class CatalogueWidget(QWidget):
         current = self._get_current_line_quantity(lp_id)
         newq = max(1, current - 1)
         try:
-            self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+            product_id = self._pending_product_for_line(lp_id)
+            if product_id is not None:
+                self._pending_product_additions[product_id]['quantity'] = newq
+                read_database = False
+            else:
+                self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+                read_database = True
             self.selected_line_id = lp_id
-            self.refresh_cart()
+            self.refresh_cart(read_database=read_database)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
 
@@ -1137,9 +1230,15 @@ class CatalogueWidget(QWidget):
         row = self.selected_cart_row
         lp_id = int(self.cart_table.item(row, 0).text())
         try:
-            self.controller.remove_product_from_panier(self.panier.id, lp_id)
+            product_id = self._pending_product_for_line(lp_id)
+            if product_id is not None:
+                self._pending_product_additions.pop(product_id, None)
+                read_database = False
+            else:
+                self.controller.remove_product_from_panier(self.panier.id, lp_id)
+                read_database = True
             self.selected_cart_row = None
-            self.refresh_cart()
+            self.refresh_cart(read_database=read_database)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', str(e))
 
@@ -1162,8 +1261,14 @@ class CatalogueWidget(QWidget):
                     return
             # remember selected_line_id so refresh preserves focus
             self.selected_line_id = lp_id
-            self.controller.update_product_quantity(self.panier.id, lp_id, newq)
-            self.refresh_cart()
+            product_id = self._pending_product_for_line(lp_id)
+            if product_id is not None:
+                self._pending_product_additions[product_id]['quantity'] = newq
+                read_database = False
+            else:
+                self.controller.update_product_quantity(self.panier.id, lp_id, newq)
+                read_database = True
+            self.refresh_cart(read_database=read_database)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'appliquer la quantité: {e}")
 
@@ -1484,6 +1589,11 @@ class CatalogueWidget(QWidget):
         """
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
+            return
+        try:
+            self._sync_pending_products()
+        except Exception as exc:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer les produits avant le paiement : {exc}")
             return
         if self._current_user_is_caissier() and not self._current_user_is_super_admin():
             pass
@@ -1813,6 +1923,11 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
+        try:
+            self._sync_pending_products()
+        except Exception as exc:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer les produits avant la facture : {exc}")
+            return
         if self._current_user_is_caissier() and not self._current_user_is_super_admin():
             QMessageBox.warning(self, 'Accès refusé', 'Le caissier ne peut pas facturer une commande.')
             return
@@ -2017,6 +2132,11 @@ class CatalogueWidget(QWidget):
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
             return
+        try:
+            self._sync_pending_products()
+        except Exception as exc:
+            QMessageBox.critical(self, 'Erreur', f"Impossible d'enregistrer les produits avant le bon de commande : {exc}")
+            return
         if self._current_user_is_caissier() and not self._current_user_is_super_admin():
             QMessageBox.warning(self, 'Accès refusé', 'Le caissier ne peut pas commander ni générer un bon de commande.')
             return
@@ -2177,14 +2297,14 @@ class CatalogueWidget(QWidget):
             if not self.panier:
                 self.total_label.setText(f"Total: 0 {get_currency(self.entreprise_id)}")
                 return
-            p = None
-            try:
-                p = self.vente_ctrl.get_panier(self.panier.id)
-            except Exception:
-                p = self.panier
-            subtotal = float(getattr(p, 'subtotal', 0.0) or 0.0)
+            p = self.panier
+            persisted_subtotal = sum(float(getattr(item, 'total', 0) or 0) for item in (self._persisted_cart_items or []))
+            pending_subtotal = sum(float(data.get('quantity', 0) or 0) * float(data.get('price', 0) or 0) for data in self._pending_product_additions.values())
+            subtotal = persisted_subtotal + pending_subtotal
             remise = float(getattr(p, 'remise_amount', 0.0) or 0.0)
             total_final = float(getattr(p, 'total_final', subtotal - remise))
+            if self._pending_product_additions:
+                total_final = subtotal - remise
             self.total_label.setText(f"Total: {self._format_display_amount(total_final)} {get_currency(self.entreprise_id)}")
         except Exception:
             pass

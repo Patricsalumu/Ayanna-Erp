@@ -74,7 +74,7 @@ class EntreSortieController(QObject):
             )
             
             db_manager = get_database_manager()
-            session = db_manager.get_session()
+            session = db_manager.SessionLocal()
                 
             # Créer la dépense
             expense = EventExpense(

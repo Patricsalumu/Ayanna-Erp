@@ -43,7 +43,7 @@ class RestaurantWindow(QMainWindow):
         # modifiez l'appelant pour transmettre le pos_id correct.
         self.pos_id = 4
         self.db_manager = get_database_manager()
-        self.boutique_controller = BoutiqueController(self.pos_id)
+        self.boutique_controller = BoutiqueController(self.pos_id, db_manager=self.db_manager)
         
         self.setWindowTitle("Ayanna ERP - Restaurant/Bar")
         self.setMinimumSize(1200, 650)

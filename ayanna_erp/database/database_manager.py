@@ -211,6 +211,8 @@ class DatabaseManager:
     """Gestionnaire principal de la base de données"""
     # Prevent running automatic migrations multiple times per process
     _migrations_executed = False
+    _engine_registry = {}
+    _engine_registry_lock = threading.Lock()
     
     def __init__(self, database_url=None):
         if database_url is None:
@@ -223,9 +225,17 @@ class DatabaseManager:
             engine_kwargs["connect_args"] = {"check_same_thread": False}
         else:
             engine_kwargs["pool_pre_ping"] = True
+            engine_kwargs["pool_recycle"] = 900
+            engine_kwargs["pool_size"] = 5
+            engine_kwargs["max_overflow"] = 2
+            engine_kwargs["pool_timeout"] = 30
             engine_kwargs["future"] = True
 
-        self.engine = create_engine(database_url, **engine_kwargs)
+        with DatabaseManager._engine_registry_lock:
+            self.engine = DatabaseManager._engine_registry.get(database_url)
+            if self.engine is None:
+                self.engine = create_engine(database_url, **engine_kwargs)
+                DatabaseManager._engine_registry[database_url] = self.engine
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.session = None
         self.current_enterprise_id = None

@@ -7,9 +7,13 @@ from ayanna_erp.database.database_manager import get_database_manager
 from ayanna_erp.modules.restaurant.models.restaurant import RestauSalle, RestauTable
 from datetime import datetime
 from types import SimpleNamespace
+from threading import RLock
 
 
 class SalleController:
+    _tables_cache = {}
+    _cache_lock = RLock()
+
     def __init__(self, entreprise_id=1):
         self.db = get_database_manager()
         self.entreprise_id = entreprise_id
@@ -50,6 +54,7 @@ class SalleController:
             session.add(table)
             session.commit()
             session.refresh(table)
+            self.clear_tables_cache()
             data = {k: v for k, v in table.__dict__.items() if not k.startswith('_')}
             ns = SimpleNamespace(**data)
             session.expunge(table)
@@ -73,6 +78,12 @@ class SalleController:
             self.db.close_session()
 
     def list_tables_for_salle(self, salle_id, serveuse_id=None):
+        cache_key = (self.entreprise_id, salle_id, serveuse_id or None)
+        with self._cache_lock:
+            cached = self._tables_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         session = self.db.get_session()
         try:
             query = session.query(RestauTable).filter_by(salle_id=salle_id)
@@ -83,6 +94,8 @@ class SalleController:
             for r in rows:
                 data = {k: v for k, v in r.__dict__.items() if not k.startswith('_')}
                 result.append(SimpleNamespace(**data))
+            with self._cache_lock:
+                self._tables_cache[cache_key] = result
             return result
         finally:
             self.db.close_session()
@@ -121,6 +134,7 @@ class SalleController:
                 table.serveuse_id = int(serveuse_id) if int(serveuse_id) else None
             session.commit()
             session.refresh(table)
+            self.clear_tables_cache()
             data = {k: v for k, v in table.__dict__.items() if not k.startswith('_')}
             ns = SimpleNamespace(**data)
             session.expunge(table)
@@ -140,9 +154,15 @@ class SalleController:
                 return False
             session.delete(table)
             session.commit()
+            self.clear_tables_cache()
             return True
         except Exception:
             session.rollback()
             raise
         finally:
             self.db.close_session()
+
+    @classmethod
+    def clear_tables_cache(cls):
+        with cls._cache_lock:
+            cls._tables_cache.clear()
