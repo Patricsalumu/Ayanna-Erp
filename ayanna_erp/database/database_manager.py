@@ -930,6 +930,25 @@ class DatabaseManager:
         except Exception:
             pass
 
+    def _migrate_restaurant_indexes(self):
+        """Ajoute les index utilisés par le chargement des paniers restaurant."""
+        indexes = (
+            ('restau_paniers', 'ix_restau_paniers_table_status', ('table_id', 'status')),
+            ('restau_paniers', 'ix_restau_paniers_entreprise_created', ('entreprise_id', 'created_at')),
+            ('restau_produit_panier', 'ix_restau_produit_panier_panier_product', ('panier_id', 'product_id')),
+            ('restau_produit_panier', 'ix_restau_produit_panier_product', ('product_id',)),
+        )
+        inspector = inspect(self.engine)
+        with self.engine.begin() as conn:
+            for table_name, index_name, columns in indexes:
+                if not self.table_exists(table_name):
+                    continue
+                existing = {item.get('name') for item in inspector.get_indexes(table_name)}
+                if index_name in existing:
+                    continue
+                quoted_columns = ', '.join(columns)
+                conn.execute(text(f'CREATE INDEX {index_name} ON {table_name} ({quoted_columns})'))
+
     def _migrate_restaurant_compat_columns(self):
         """Ajoute les colonnes PHP/MySQL attendues par les modèles Python.
 

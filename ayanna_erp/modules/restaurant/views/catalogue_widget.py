@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QTextEdit, QDoubleSpinBox, QSizePolicy, QGraphicsOpacityEffect
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve, QTimer, QAbstractAnimation
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtGui import QFont
 from types import SimpleNamespace
 
 
@@ -508,22 +508,39 @@ class CatalogueWidget(QWidget):
         search = self.search_edit.text() if hasattr(self, 'search_edit') else None
         cat_id = self.selected_category
         products = self.controller.list_products(search=search, category_id=cat_id)
+        self._cart_quantities_by_product = {}
+        for item in self._persisted_cart_items or []:
+            product_id = getattr(item, 'product_id', None)
+            if product_id is not None:
+                self._cart_quantities_by_product[product_id] = self._cart_quantities_by_product.get(product_id, 0) + float(getattr(item, 'quantity', 0) or 0)
+        for product_id, pending in self._pending_product_additions.items():
+            self._cart_quantities_by_product[product_id] = self._cart_quantities_by_product.get(product_id, 0) + float(pending.get('quantity', 0) or 0)
+
+        self._category_names_by_id = {
+            getattr(category, 'id', None): getattr(category, 'name', 'Autres')
+            for category in (self.controller.list_categories() or [])
+        }
+
+        self.products_container.setUpdatesEnabled(False)
         # clear
-        for i in reversed(range(self.products_layout.count())):
-            it = self.products_layout.itemAt(i)
-            if it:
-                w = it.widget()
-                if w:
-                    w.setParent(None)
+        try:
+            for i in reversed(range(self.products_layout.count())):
+                it = self.products_layout.itemAt(i)
+                if it:
+                    w = it.widget()
+                    if w:
+                        w.setParent(None)
 
-        cols = 7
-        for idx, prod in enumerate(products):
-            card = self.create_product_card(prod)
-            r = idx // cols; c = idx % cols
-            self.products_layout.addWidget(card, r, c)
+            cols = 7
+            for idx, prod in enumerate(products):
+                card = self.create_product_card(prod)
+                r = idx // cols; c = idx % cols
+                self.products_layout.addWidget(card, r, c)
 
-        # ensure some stretch so cards align top
-        self.products_layout.setRowStretch((len(products) // cols) + 1, 1)
+            self.products_layout.setRowStretch((len(products) // cols) + 1, 1)
+        finally:
+            self.products_container.setUpdatesEnabled(True)
+            self.products_container.update()
 
     def _refresh_catalog(self):
         CatalogueController.clear_catalog_cache()
@@ -568,8 +585,6 @@ class CatalogueWidget(QWidget):
         """
         from PyQt6.QtCore import Qt
         from PyQt6.QtWidgets import QFrame, QVBoxLayout, QLabel, QHBoxLayout, QWidget, QMessageBox
-        from PyQt6.QtGui import QPixmap
-        import os
 
         # ---- Déterminer la couleur de bordure selon la catégorie ----
         # Use the central category color helper so buttons and cards match.
@@ -581,7 +596,7 @@ class CatalogueWidget(QWidget):
                 category = getattr(product, 'category_name')
             elif cat_id:
                 # lookup in core_product_categories using the core model
-                category = self.controller.get_category_name(cat_id)
+                category = self._category_names_by_id.get(cat_id)
         except Exception:
             category = None
 
@@ -629,7 +644,7 @@ class CatalogueWidget(QWidget):
         # show/hide badge according to current cart quantity for this product
         try:
             pid = getattr(product, 'id', None)
-            qty = int(self._get_cart_quantity_for_product(pid) or 0)
+            qty = int(self._cart_quantities_by_product.get(pid, 0) or 0)
             if qty and qty > 0:
                 badge.setText(str(int(qty)))
                 badge.show()
@@ -641,92 +656,23 @@ class CatalogueWidget(QWidget):
         top_layout.addWidget(badge)
         layout.addWidget(top_row)
 
-        # ---- Image produit ----
-        image_label = QLabel()
-        image_label.setFixedSize(80, 70)
-        image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        image_label.setStyleSheet("""
-            background-color: #F9FAFB;
-            border: none;
-            border-radius: 6px;
-        """)
-
-        image_loaded = False
-        if hasattr(product, 'image') and product.image:
-            try:
-                image_filename = product.image.strip()
-                if os.path.isabs(image_filename):
-                    full_path = image_filename
-                else:
-                    base_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-                    full_path = os.path.join(base_path, image_filename.replace("/", os.sep))
-                if os.path.exists(full_path):
-                    pixmap = QPixmap(full_path)
-                    if not pixmap.isNull():
-                        scaled = pixmap.scaled(image_label.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                                            Qt.TransformationMode.SmoothTransformation)
-                        image_label.setPixmap(scaled)
-                        image_loaded = True
-            except Exception as e:
-                print("Erreur image:", e)
-
         name = getattr(product, 'name', 'Produit')
-        if not image_loaded:
-            image_label.setText(name if len(name) <= 24 else name[:22] + '…')
-            image_label.setWordWrap(True)
-            image_label.setStyleSheet("""
-                background-color: #F8F9FA;
-                border: 2px dashed #DEE2E6;
-                color: #1F2937;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 600;
-                qproperty-alignment: AlignCenter;
-            """)
-
-        layout.addWidget(image_label, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        # ---- Nom du produit ----
-        # keep the raw product name only (no counters appended)
-        name_label = QLabel(name if len(name) < 20 else name[:18] + '…')
+        name_label = QLabel(name if len(name) < 24 else name[:22] + '…')
         name_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         name_label.setWordWrap(True)
         name_label.setStyleSheet("""
+            background-color: #F8F9FA;
+            border: 1px solid #E5E7EB;
+            border-radius: 6px;
             color: #212529;
-            font-weight: 400;
-            font-size: 12px;
+            font-weight: 600;
+            font-size: 11px;
         """)
         layout.addWidget(name_label)
 
         # ---- Info bulle ----
         price = float(getattr(product, 'price_unit', getattr(product, 'price', 0)))
-        # Attempt to resolve available stock in POS_4 for restaurant (best-effort)
-        avail_text = ''
-        try:
-            pid = getattr(product, 'id', None)
-            if pid is not None:
-                db = get_database_manager()
-                session = db.get_session()
-                try:
-                    row = session.execute(text("""
-                        SELECT spe.quantity FROM stock_produits_entrepot spe
-                        JOIN stock_warehouses w ON w.id = spe.warehouse_id
-                        WHERE spe.product_id = :pid AND w.code = 'POS_4' AND w.is_active = 1
-                        LIMIT 1
-                    """), {'pid': pid}).fetchone()
-                    available = int(row[0]) if row and row[0] is not None else 0
-                    avail_text = f"\nDisponible (POS): {available}"
-                except Exception:
-                    avail_text = ''
-                finally:
-                    try:
-                        session.close()
-                    except Exception:
-                        pass
-        except Exception:
-            avail_text = ''
-
-        card.setToolTip(f"{name}\nPrix: {self._format_display_amount(price)} {get_currency(self.entreprise_id)}{avail_text}")
+        card.setToolTip(f"{name}\nPrix: {self._format_display_amount(price)} {get_currency(self.entreprise_id)}")
 
         # ---- bande de couleur de la catégorie (en bas de la carte) ----
         try:
@@ -774,18 +720,7 @@ class CatalogueWidget(QWidget):
         return card
 
     def _get_cart_quantity_for_product(self, product_id):
-        if not self.panier:
-            return 0
-        try:
-            items = self.controller.list_cart_items(self.panier.id)
-            total = 0
-            for it in items:
-                if getattr(it, 'product_id', None) == product_id:
-                    total += float(getattr(it, 'quantity', 0))
-            total += float(self._pending_product_additions.get(product_id, {}).get('quantity', 0) or 0)
-            return total
-        except Exception:
-            return 0
+        return float(getattr(self, '_cart_quantities_by_product', {}).get(product_id, 0) or 0)
 
     def _update_badges(self):
         # iterate product cards and update badge labels in-place (avoid full reload)

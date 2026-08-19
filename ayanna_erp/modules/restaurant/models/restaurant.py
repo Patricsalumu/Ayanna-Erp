@@ -6,7 +6,7 @@ et le garder stable. Cela évite les UUID inutiles quand il n'y a pas de
 synchronisation multicentres.
 """
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum, func
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Text, Enum, Index, func
 from sqlalchemy.orm import relationship
 from ayanna_erp.database.base import Base
 
@@ -46,6 +46,10 @@ class RestauTable(Base):
 
 class RestauPanier(Base):
     __tablename__ = 'restau_paniers'
+    __table_args__ = (
+        Index('ix_restau_paniers_table_status', 'table_id', 'status'),
+        Index('ix_restau_paniers_entreprise_created', 'entreprise_id', 'created_at'),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     entreprise_id = Column(Integer, nullable=False)
@@ -76,6 +80,10 @@ class RestauPanier(Base):
 
 class RestauProduitPanier(Base):
     __tablename__ = 'restau_produit_panier'
+    __table_args__ = (
+        Index('ix_restau_produit_panier_panier_product', 'panier_id', 'product_id'),
+        Index('ix_restau_produit_panier_product', 'product_id'),
+    )
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     panier_id = Column(Integer, ForeignKey('restau_paniers.id'), nullable=False)
