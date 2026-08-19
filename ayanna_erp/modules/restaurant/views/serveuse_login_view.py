@@ -85,7 +85,7 @@ class ServeuseLoginView(QDialog):
         keypad.setHorizontalSpacing(12)
         keypad.setVerticalSpacing(12)
 
-        digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"]
+        digits = ["1", "2", "3", "4", "5", "6", "7", "8", "9"]
         for idx, digit in enumerate(digits):
             btn = QPushButton(digit)
             btn.setFixedHeight(68)
@@ -93,11 +93,10 @@ class ServeuseLoginView(QDialog):
             row, col = divmod(idx, 3)
             keypad.addWidget(btn, row, col)
 
-        clear_btn = QPushButton("C")
-        clear_btn.setObjectName("key_clear")
-        clear_btn.setFixedHeight(68)
-        clear_btn.clicked.connect(self._clear_password)
-        keypad.addWidget(clear_btn, 3, 0)
+        zero_btn = QPushButton("0")
+        zero_btn.setFixedHeight(68)
+        zero_btn.clicked.connect(lambda checked=False: self._add_digit("0"))
+        keypad.addWidget(zero_btn, 3, 0)
 
         back_btn = QPushButton("⌫")
         back_btn.setFixedHeight(68)

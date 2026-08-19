@@ -30,7 +30,7 @@ def can_user_perform_restaurant_action(role_name, action_name):
     if role == 'super_admin':
         return True
     if role == 'serveuse':
-        return action in {'commande', 'facturer'}
+        return action in {'commande', 'facturer', 'payer'}
     if role == 'caissier':
         return action == 'payer'
     return False
@@ -914,14 +914,14 @@ class CatalogueWidget(QWidget):
             self.liberer_table_btn.setVisible(is_empty and (is_super_admin or not is_caissier))
 
             self.annuler_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
-            self.payer_btn.setVisible(not is_empty and (is_super_admin or not is_serveuse))
+            self.payer_btn.setVisible(not is_empty and (is_super_admin or is_serveuse or is_caissier))
             self.imprimer_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
             self.bon_btn.setVisible(not is_empty and (is_super_admin or not is_caissier and not is_serveuse))
 
-            # La logique métier demandée: serveuse = commander + facturer ; caissier = payer uniquement ; super_admin = tout.
+            # La logique métier demandée: serveuse = commander + facturer + payer ; caissier = payer uniquement ; super_admin = tout.
             if is_serveuse and not is_super_admin:
                 self.annuler_btn.setVisible(False)
-                self.payer_btn.setVisible(False)
+                self.payer_btn.setVisible(True)
                 self.imprimer_btn.setVisible(True)
                 self.bon_btn.setVisible(True)
 
@@ -1484,9 +1484,6 @@ class CatalogueWidget(QWidget):
         """
         if not self.panier:
             QMessageBox.information(self, 'Info', 'Aucun panier actif')
-            return
-        if self._current_user_is_serveuse() and not self._current_user_is_super_admin():
-            QMessageBox.warning(self, 'Paiement interdit', 'Une serveuse ne peut pas payer une commande.')
             return
         if self._current_user_is_caissier() and not self._current_user_is_super_admin():
             pass
