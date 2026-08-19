@@ -607,7 +607,7 @@ class CatalogueWidget(QWidget):
 
         # ---- Créer le cadre principal ----
         card = QFrame()
-        card.setFixedSize(110, 125)
+        card.setFixedSize(110, 75)
         card.setStyleSheet(f"""
             QFrame {{
                 background-color: white;
@@ -873,6 +873,7 @@ class CatalogueWidget(QWidget):
             price = float(getattr(prod, 'price_unit', getattr(prod, 'price', 0)))
             pending = self._pending_product_additions.setdefault(product_id, {'quantity': 0, 'price': price})
             pending['quantity'] += 1
+            self._cart_quantities_by_product[product_id] = self._cart_quantities_by_product.get(product_id, 0) + 1
             self.refresh_cart(read_database=False)
         except Exception as e:
             QMessageBox.critical(self, 'Erreur', f"Impossible d'ajouter le produit: {e}")
@@ -2102,7 +2103,7 @@ class CatalogueWidget(QWidget):
                 QMessageBox.information(self, 'Info', 'Veuillez sélectionner une serveuse avant d\'imprimer le bon de commande.')
                 return
             if result == 'NO_NEW_ITEMS':
-                QMessageBox.information(self, 'Info', 'Aucun nouveau produit à envoyer en cuisine.')
+                QMessageBox.information(self, 'Info', 'Veuillez ajouter les produits avant de commander.')
                 return
             QMessageBox.critical(self, 'Erreur', f"Impossible de créer le bon de commande: {result}")
             return
