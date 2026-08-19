@@ -170,10 +170,11 @@ class RestaurantWindow(QMainWindow):
             self.tab_widget.setCurrentIndex(pos_index)
             QApplication.instance().processEvents()
 
-            pos_widget.current_user = self.current_user
+            active_user = self._get_active_session_user()
+            pos_widget.current_user = active_user
             try:
                 from ayanna_erp.core.session_manager import SessionManager
-                SessionManager.set_current_user(self.current_user)
+                SessionManager.set_current_user(active_user)
             except Exception:
                 pass
 
@@ -212,6 +213,7 @@ class RestaurantWindow(QMainWindow):
             pass
 
         self.current_user = None
+        self._clear_tabs()
         self._update_serveuse_label()
         self.open_serveuse_login()
 
@@ -249,17 +251,13 @@ class RestaurantWindow(QMainWindow):
 
     def setup_pos_tab(self):
         """Configuration de l'onglet POS en réutilisant la vue du module (VenteView)"""
-        pos_view = VenteView(entreprise_id=1, current_user=self.current_user, parent=self)
+        current_user = self._get_active_session_user()
+        pos_view = VenteView(entreprise_id=1, current_user=current_user, parent=self)
         self.tab_widget.addTab(pos_view, "🍽️ Point de Vente")
         self.tab_widget.setCurrentWidget(pos_view)
 
         try:
-            pos_view.current_user = self.current_user
-            try:
-                from ayanna_erp.core.session_manager import SessionManager
-                SessionManager.set_current_user(self.current_user)
-            except Exception:
-                pass
+            pos_view.current_user = current_user
             pos_view._initial_load_for_current_user()
             pos_view.show_plan_view()
         except Exception:
@@ -270,7 +268,8 @@ class RestaurantWindow(QMainWindow):
                 widget = self.tab_widget.widget(index)
                 if isinstance(widget, VenteView):
                     try:
-                        widget.current_user = self.current_user
+                        active_user = self._get_active_session_user()
+                        widget.current_user = active_user
                         widget._reload_vente_for_current_user()
                     except Exception:
                         pass
@@ -302,7 +301,8 @@ class RestaurantWindow(QMainWindow):
     
     def setup_orders_tab(self):
         """Onglet Commandes — utiliser la vue de commandes du module"""
-        commandes_view = CommandesIndexWidget(self.boutique_controller, self.current_user, module='restaurant')
+        current_user = self._get_active_session_user()
+        commandes_view = CommandesIndexWidget(self.boutique_controller, current_user, module='restaurant')
         self.tab_widget.addTab(commandes_view, "📝 Commandes")
     
     def setup_clients_tab(self):
@@ -317,8 +317,20 @@ class RestaurantWindow(QMainWindow):
 
     def setup_bon_commande_tab(self):
         """Configuration de l'onglet Bons de Commande."""
-        bon_commande_view = BonCommandeWidget(entreprise_id=1, current_user=self.current_user, parent=self)
+        current_user = self._get_active_session_user()
+        bon_commande_view = BonCommandeWidget(entreprise_id=1, current_user=current_user, parent=self)
         self.tab_widget.addTab(bon_commande_view, "🍳 Bons de Commande")
+
+    def _get_active_session_user(self):
+        """Retourne l'utilisateur global actuel avant de créer un onglet dépendant du rôle."""
+        try:
+            from ayanna_erp.core.session_manager import SessionManager
+            session_user = SessionManager.get_current_user()
+            if session_user is not None or self.current_user is None:
+                self.current_user = session_user
+        except Exception:
+            pass
+        return self.current_user
 
     def _get_current_user_role(self):
         user = self.current_user

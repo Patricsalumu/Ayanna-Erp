@@ -20,6 +20,7 @@ from ayanna_erp.modules.boutique.controller.vente_controller import VenteControl
 from ayanna_erp.modules.boutique.view.modern_supermarket_widget import PaymentDialog
 from ayanna_erp.core.controllers.entreprise_controller import EntrepriseController
 from ayanna_erp.core.controllers.client_controller import ClientController
+from ayanna_erp.core.session_manager import SessionManager
 
 class CommandesIndexWidget(QWidget):
     """Widget principal pour l'affichage et gestion des commandes"""
@@ -67,7 +68,8 @@ class CommandesIndexWidget(QWidget):
         return role in ('super_admin', 'admin')
 
     def _get_current_user_context(self):
-        user = getattr(self, 'current_user', None)
+        user = SessionManager.get_current_user() or getattr(self, 'current_user', None)
+        self.current_user = user
         if user is None:
             return {'id': None, 'role': '', 'name': ''}
         if isinstance(user, dict):
@@ -607,18 +609,28 @@ class CommandesIndexWidget(QWidget):
     def load_commandes(self):
         """Charger les commandes depuis le contrôleur"""
         try:
+            current_user = SessionManager.get_current_user()
+            if current_user is None:
+                self.current_user = None
+                self.populate_table([])
+                self.update_statistics([])
+                return
+            self.current_user = current_user
             # Récupérer les filtres actuels
             date_debut = self.date_debut.date().toPyDate() if hasattr(self, 'date_debut') else None
             date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
             search_term = self.search_input.text().strip() if hasattr(self, 'search_input') and self.search_input.text().strip() else None
             payment_filter = self.payment_filter.currentText() if hasattr(self, 'payment_filter') else None
+            user_context = self._get_current_user_context()
+            serveuse_id = user_context.get('id') if self._is_serveuse_view() else None
             
             # Utiliser le contrôleur pour récupérer les commandes
             commandes = self.commande_controller.get_commandes(
                 date_debut=date_debut,
                 date_fin=date_fin,
                 search_term=search_term,
-                payment_filter=payment_filter
+                payment_filter=payment_filter,
+                serveuse_id=serveuse_id,
             )
             commandes = self._filter_commandes_for_current_user(commandes)
 
@@ -916,13 +928,16 @@ Montant Espèces: {stats.get('total_paid', 0):,.0f} {self.get_currency_symbol()}
             date_fin = self.date_fin.date().toPyDate() if hasattr(self, 'date_fin') else None
             search_term = self.search_input.text().strip() if hasattr(self, 'search_input') and self.search_input.text().strip() else None
             payment_filter = self.payment_filter.currentText() if hasattr(self, 'payment_filter') else None
+            user_context = self._get_current_user_context()
+            serveuse_id = user_context.get('id') if self._is_serveuse_view() else None
 
             # Utiliser le contrôleur pour récupérer les commandes filtrées
             commandes = self.commande_controller.get_commandes(
                 date_debut=date_debut,
                 date_fin=date_fin,
                 search_term=search_term,
-                payment_filter=payment_filter
+                payment_filter=payment_filter,
+                serveuse_id=serveuse_id,
             )
             commandes = self._filter_commandes_for_current_user(commandes)
 

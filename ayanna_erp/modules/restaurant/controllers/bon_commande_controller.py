@@ -260,7 +260,7 @@ class BonCommandeController:
         finally:
             self.db.close_session()
 
-    def list_bons_for_date(self, target_date=None, status_filter='all', panier_search=None):
+    def list_bons_for_date(self, target_date=None, status_filter='all', panier_search=None, serveuse_id=None):
         if isinstance(target_date, datetime):
             selected_date = target_date.date()
         else:
@@ -278,6 +278,8 @@ class BonCommandeController:
             )
             if status_filter and status_filter != 'all':
                 q = q.filter(RestauBonCommande.statut == status_filter)
+            if serveuse_id is not None:
+                q = q.filter(RestauBonCommande.serveuse_id == int(serveuse_id))
             q = q.order_by(RestauBonCommande.created_at.desc())
             rows = q.all()
 

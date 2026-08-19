@@ -82,7 +82,7 @@ class CommandeController:
             return "FC"  # Fallback
 
     def get_commandes(self, date_debut=None, date_fin=None, search_term=None,
-                     payment_filter=None, limit=100) -> List[Dict[str, Any]]:
+                     payment_filter=None, limit=100, serveuse_id=None) -> List[Dict[str, Any]]:
         """
         Récupérer les commandes avec leurs détails
 
@@ -171,6 +171,10 @@ class CommandeController:
                 if payment_filter and payment_filter != "Tous":
                     conditions.append("sp.payment_method = :payment_method")
                     params['payment_method'] = payment_filter
+
+                if serveuse_id is not None:
+                    conditions.append("sp.serveuse_id = :serveuse_id")
+                    params['serveuse_id'] = int(serveuse_id)
 
                 # Recherche textuelle
                 if search_term:
@@ -291,6 +295,8 @@ class CommandeController:
                         restau_conditions.append("rp.created_at <= :date_fin")
                     if payment_filter and payment_filter != "Tous":
                         restau_conditions.append("rp.payment_method = :payment_method")
+                    if serveuse_id is not None:
+                        restau_conditions.append("rp.serveuse_id = :serveuse_id")
                     if search_term:
                         # rechercher par id panier, nom client, serveuse, utilisateur ou produit dans les lignes restau
                         restau_conditions.append(

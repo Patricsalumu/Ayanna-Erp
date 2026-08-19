@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 from ayanna_erp.modules.restaurant.controllers.bon_commande_controller import BonCommandeController
 from ayanna_erp.modules.restaurant.utils.bon_commande_printer import BonCommandePrinter
 from ayanna_erp.utils.formatting import get_currency
+from ayanna_erp.core.session_manager import SessionManager
 
 
 class BonCommandeWidget(QWidget):
@@ -83,7 +84,8 @@ class BonCommandeWidget(QWidget):
         main.addWidget(self.totals_label)
 
     def _get_current_user_context(self):
-        user = getattr(self, 'current_user', None)
+        user = SessionManager.get_current_user() or getattr(self, 'current_user', None)
+        self.current_user = user
         if user is None:
             return {'id': None, 'role': '', 'name': ''}
         if isinstance(user, dict):
@@ -158,11 +160,19 @@ class BonCommandeWidget(QWidget):
 
     def load_data(self):
         try:
+            current_user = SessionManager.get_current_user()
+            if current_user is None:
+                self.current_user = None
+                self.table.setRowCount(0)
+                self.totals_label.setText('')
+                return
+            self.current_user = current_user
             selected = self.day_edit.date().toPyDate()
             rows = self.controller.list_bons_for_date(
                 target_date=selected,
                 status_filter=self.status_filter.currentData(),
                 panier_search=self.panier_search.text().strip() or None,
+                serveuse_id=(self._get_current_user_context().get('id') if self._is_serveuse_view() else None),
             )
             rows = self._filter_rows_for_current_user(rows)
             self.table.setRowCount(0)
